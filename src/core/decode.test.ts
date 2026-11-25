@@ -5,6 +5,7 @@ import { autoValue, manualValue, type Layer } from './layers/types';
 import { buildPacket } from './packet';
 import {
   createDefaultARP,
+  createDefaultBGP,
   createDefaultEthernet,
   createDefaultIPv4,
   createDefaultTCP,
@@ -276,6 +277,226 @@ describe('decodePacket', () => {
     if (rebuilt.ok) {
       // Encoder resets Reserved to 0 (0x50), so re-encoded byte 46 differs from 0x51
       expect(rebuilt.bytes[46]).toBe(0x50);
+    }
+  });
+
+  it('round-trips all 4 BGP-4 message types (OPEN, UPDATE, NOTIFICATION, KEEPALIVE) over TCP port 179', () => {
+    const tcpToBgp = {
+      ...createDefaultTCP(),
+      dstPort: 179,
+      flags: {
+        cwr: false,
+        ece: false,
+        urg: false,
+        ack: true,
+        psh: true,
+        rst: false,
+        syn: false,
+        fin: false,
+      },
+    };
+    const tcpFromBgp = { ...tcpToBgp, srcPort: 179, dstPort: 54321 };
+
+    const cases: {
+      readonly name: string;
+      readonly startLayer: 'ethernet' | 'ipv4';
+      readonly layers: Layer[];
+      readonly payload: Uint8Array;
+    }[] = [
+      {
+        name: 'OPEN with optional parameters (Ethernet + dstPort 179)',
+        startLayer: 'ethernet',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), tcpToBgp, createDefaultBGP()],
+        // Example Capability Optional Parameter (Type=2, Len=4, CapCode=1, CapLen=2, ...)
+        payload: new Uint8Array([0x02, 0x04, 0x01, 0x02, 0x00, 0x01]),
+      },
+      {
+        name: 'UPDATE End-of-RIB (Raw IPv4 + srcPort 179)',
+        startLayer: 'ipv4',
+        layers: [
+          createDefaultIPv4(),
+          tcpFromBgp,
+          { ...createDefaultBGP(), bgpType: 2 },
+        ],
+        payload: new Uint8Array(0),
+      },
+      {
+        name: 'UPDATE with path attributes and NLRI',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          tcpToBgp,
+          {
+            ...createDefaultBGP(),
+            bgpType: 2,
+            totalPathAttrLength: manualValue(4),
+          },
+        ],
+        payload: new Uint8Array([0x40, 0x01, 0x01, 0x00, 0x18, 0xcb, 0x00, 0x71]),
+      },
+      {
+        name: 'NOTIFICATION with error data',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          tcpFromBgp,
+          { ...createDefaultBGP(), bgpType: 3, errorCode: 2, errorSubcode: 2 },
+        ],
+        payload: new Uint8Array([0xfe, 0x09]),
+      },
+      {
+        name: 'KEEPALIVE (19B header only)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          tcpToBgp,
+          { ...createDefaultBGP(), bgpType: 4 },
+        ],
+        payload: new Uint8Array(0),
+      },
+    ];
+
+    for (const tc of cases) {
+      const built = buildPacket(tc.layers, tc.payload);
+      expect(built.ok, tc.name).toBe(true);
+      if (!built.ok) continue;
+
+      const decoded = decodePacket(built.bytes, tc.startLayer);
+      expect(decoded.ok, tc.name).toBe(true);
+      if (!decoded.ok) continue;
+      expect(decoded.value.notes, tc.name).toEqual([]);
+      expect(decoded.value.layers.map((l) => l.type), tc.name).toEqual(
+        tc.layers.map((l) => l.type),
+      );
+      expect(decoded.value.payload, tc.name).toEqual(tc.payload);
+
+      const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+      expect(rebuilt.ok, tc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, tc.name).toEqual(built.bytes);
+      }
+    }
+  });
+
+  it('preserves manual BGP Length/Version/OptParmLen and keeps non-179 or truncated BGP as Payload', () => {
+    const tcp179 = { ...createDefaultTCP(), dstPort: 179 };
+
+    // Manual BGP Version=3, manual Length=35 (larger than actual 29B), manual OptParmLen=2
+    const manualBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        tcp179,
+        {
+          ...createDefaultBGP(),
+          version: manualValue(3),
+          length: manualValue(35),
+          optParamLength: manualValue(2),
+        },
+      ],
+      new Uint8Array(0),
+    );
+    expect(manualBuilt.ok).toBe(true);
+    if (manualBuilt.ok) {
+      const dec = decodePacket(manualBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        const bgp = dec.value.layers[3];
+        expect(bgp.type === 'bgp' && bgp.version).toEqual(manualValue(3));
+        expect(bgp.type === 'bgp' && bgp.length).toEqual(manualValue(35));
+        expect(bgp.type === 'bgp' && bgp.optParamLength).toEqual(manualValue(2));
+        expect(dec.value.notes.some((n) => n.includes('exceeds available TCP payload'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(manualBuilt.bytes);
+      }
+    }
+
+    // Non-179 TCP port carrying BGP bytes stays as Payload (not decoded as BGP layer)
+    const non179Built = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP(), createDefaultBGP()],
+      new Uint8Array(0),
+    );
+    expect(non179Built.ok).toBe(true);
+    if (non179Built.ok) {
+      const dec = decodePacket(non179Built.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
+        expect(dec.value.payload).toHaveLength(29);
+      }
+    }
+
+    // Truncated BGP OPEN (24 bytes < 29 bytes) on TCP port 179 stays as Payload with a note
+    const truncatedOpen = new Uint8Array(24).fill(0xff);
+    truncatedOpen[16] = 0x00;
+    truncatedOpen[17] = 0x1d;
+    truncatedOpen[18] = 0x01; // Type = OPEN
+    const truncBuilt = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), tcp179],
+      truncatedOpen,
+    );
+    expect(truncBuilt.ok).toBe(true);
+    if (truncBuilt.ok) {
+      const dec = decodePacket(truncBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
+        expect(dec.value.notes.some((n) => n.includes('truncated'))).toBe(true);
+      }
+    }
+
+    // Unknown BGP Type 5 (ROUTE-REFRESH) stays as Payload with a note
+    const routeRefresh = new Uint8Array(23).fill(0xff);
+    routeRefresh[16] = 0x00;
+    routeRefresh[17] = 0x17;
+    routeRefresh[18] = 0x05;
+    const rrBuilt = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), tcp179],
+      routeRefresh,
+    );
+    expect(rrBuilt.ok).toBe(true);
+    if (rrBuilt.ok) {
+      const dec = decodePacket(rrBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
+        expect(dec.value.notes.some((n) => n.includes('Type 5'))).toBe(true);
+      }
+    }
+
+    // TCP port 179 segment with TCP options (e.g. Data Offset = 8 / 12-byte RFC 7323 Timestamps) skips BGP decode with a note
+    const tcpOptions12B = new Uint8Array([
+      0x01, 0x01, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02,
+    ]);
+    const keepaliveBytes = new Uint8Array(19).fill(0xff);
+    keepaliveBytes[16] = 0x00;
+    keepaliveBytes[17] = 0x13;
+    keepaliveBytes[18] = 0x04;
+    const optPlusBgp = new Uint8Array(tcpOptions12B.length + keepaliveBytes.length);
+    optPlusBgp.set(tcpOptions12B, 0);
+    optPlusBgp.set(keepaliveBytes, tcpOptions12B.length);
+
+    const tcpOptBgpBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...tcp179, dataOffset: manualValue(8) },
+      ],
+      optPlusBgp,
+    );
+    expect(tcpOptBgpBuilt.ok).toBe(true);
+    if (tcpOptBgpBuilt.ok) {
+      const dec = decodePacket(tcpOptBgpBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
+        expect(dec.value.notes.some((n) => n.includes('BGP-4 decoding skipped'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(tcpOptBgpBuilt.bytes);
+      }
     }
   });
 });

@@ -336,3 +336,107 @@ export function AutoManualField({
     </div>
   );
 }
+
+export interface AutoManualTextFieldProps extends BaseFieldProps {
+  readonly value: AutoOrManual<string>;
+  readonly autoPreviewText: string;
+  readonly manualSeedValue: string;
+  readonly placeholder?: string;
+  readonly fullWidth?: boolean;
+  readonly onChange: (next: AutoOrManual<string>) => void;
+}
+
+export function AutoManualTextField({
+  id,
+  label,
+  hint,
+  error,
+  warning,
+  isHighlighted = false,
+  onHoverStart,
+  onHoverEnd,
+  value,
+  autoPreviewText,
+  manualSeedValue,
+  placeholder,
+  fullWidth = false,
+  onChange,
+}: AutoManualTextFieldProps) {
+  const isAuto = value.mode === 'auto';
+  const feedbackId = getFeedbackId(id, error, warning);
+  const autoLabelId = `${id}-label`;
+
+  const handleSwitchMode = (mode: 'auto' | 'manual') => {
+    if (mode === 'auto') {
+      onChange(autoValue<string>());
+    } else {
+      onChange(manualValue(manualSeedValue));
+    }
+  };
+
+  return (
+    <div
+      className={`field${fullWidth ? ' field-span-full' : ''}${isHighlighted ? ' is-highlighted' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
+      <div className="field-label-row">
+        {isAuto ? (
+          <span id={autoLabelId} className="field-label">
+            {label}
+          </span>
+        ) : (
+          <label className="field-label" htmlFor={id}>
+            {label}
+          </label>
+        )}
+        <div className="mode-toggle" role="group" aria-label={`${label} mode`}>
+          <button
+            type="button"
+            className={`mode-btn${isAuto ? ' is-active' : ''}`}
+            aria-pressed={isAuto}
+            onClick={() => handleSwitchMode('auto')}
+          >
+            Auto
+          </button>
+          <button
+            type="button"
+            className={`mode-btn${!isAuto ? ' is-active' : ''}`}
+            aria-pressed={!isAuto}
+            onClick={() => handleSwitchMode('manual')}
+          >
+            Manual
+          </button>
+        </div>
+      </div>
+
+      {isAuto ? (
+        <div
+          className={`field-auto-preview mono${error ? ' is-error' : warning ? ' is-warning' : ''}`}
+          role="group"
+          aria-labelledby={autoLabelId}
+          aria-describedby={feedbackId}
+        >
+          <span className="auto-tag">AUTO</span>
+          <span className="auto-val">{autoPreviewText}</span>
+          {hint && <span className="auto-hint">{hint}</span>}
+        </div>
+      ) : (
+        <input
+          id={id}
+          type="text"
+          className={`field-input mono${error ? ' is-error' : warning ? ' is-warning' : ''}`}
+          value={value.value}
+          placeholder={placeholder ?? hint}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={feedbackId}
+          onFocus={onHoverStart}
+          onBlur={onHoverEnd}
+          onChange={(e) => onChange(manualValue(e.target.value))}
+        />
+      )}
+
+      <FieldFeedback id={id} error={error} warning={warning} />
+    </div>
+  );
+}

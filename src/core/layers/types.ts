@@ -16,7 +16,7 @@ export function manualValue<T>(value: T): AutoOrManual<T> {
   return { mode: 'manual', value };
 }
 
-export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'icmp' | 'udp' | 'tcp';
+export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'icmp' | 'udp' | 'tcp' | 'bgp';
 
 export interface EthernetLayer {
   readonly type: 'ethernet';
@@ -150,7 +150,48 @@ export interface TCPLayer {
   readonly urgentPointer: number;
 }
 
-export type Layer = EthernetLayer | ARPLayer | IPv4Layer | ICMPLayer | UDPLayer | TCPLayer;
+/** BGP-4 message types defined in RFC 4271 Section 4.1 */
+export type BGPMessageType = 1 | 2 | 3 | 4;
+
+export interface BGPLayer {
+  readonly type: 'bgp';
+  /** Message Type: 1=OPEN, 2=UPDATE, 3=NOTIFICATION, 4=KEEPALIVE (RFC 4271 §4.1) */
+  readonly bgpType: BGPMessageType;
+  /** 16-byte Marker (auto = 16 bytes of 0xff per RFC 4271 §4.1; manual = 32 hex digits) */
+  readonly marker: AutoOrManual<string>;
+  /** Total BGP message length including 19-byte header (16-bit, RFC 4271 §4.1) */
+  readonly length: AutoOrManual<number>;
+  // OPEN (Type 1, RFC 4271 §4.2)
+  /** BGP protocol version (8-bit, auto = 4) */
+  readonly version: AutoOrManual<number>;
+  /** My Autonomous System (16-bit ASN) */
+  readonly myAs: number;
+  /** Hold Time in seconds (16-bit; must be 0 or >= 3 per RFC 4271 §4.2) */
+  readonly holdTime: number;
+  /** BGP Identifier (IPv4 dotted-quad format) */
+  readonly bgpIdentifier: string;
+  /** Optional Parameters Length (8-bit, auto = payload byte length) */
+  readonly optParamLength: AutoOrManual<number>;
+  // UPDATE (Type 2, RFC 4271 §4.3)
+  /** Withdrawn Routes Length (16-bit, auto = 0) */
+  readonly withdrawnRoutesLength: AutoOrManual<number>;
+  /** Total Path Attribute Length (16-bit, auto = 0) */
+  readonly totalPathAttrLength: AutoOrManual<number>;
+  // NOTIFICATION (Type 3, RFC 4271 §4.5)
+  /** Error Code (8-bit, 1..6 per RFC 4271 §4.5, 7 per RFC 7313) */
+  readonly errorCode: number;
+  /** Error Subcode (8-bit) */
+  readonly errorSubcode: number;
+}
+
+export type Layer =
+  | EthernetLayer
+  | ARPLayer
+  | IPv4Layer
+  | ICMPLayer
+  | UDPLayer
+  | TCPLayer
+  | BGPLayer;
 
 /** レイヤー内の相対フィールド定義（エンコーダ内部で使用） */
 export interface RelativeFieldSpan {

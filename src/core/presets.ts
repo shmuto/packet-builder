@@ -1,6 +1,7 @@
 import { encodeUtf8 } from './bytes';
 import type {
   ARPLayer,
+  BGPLayer,
   EthernetLayer,
   ICMPLayer,
   IPv4Layer,
@@ -10,7 +11,7 @@ import type {
 } from './layers/types';
 import { autoValue } from './layers/types';
 
-export type PresetId = 'udp' | 'tcp-syn' | 'icmp-echo' | 'arp-request';
+export type PresetId = 'udp' | 'tcp-syn' | 'icmp-echo' | 'arp-request' | 'bgp-open';
 
 export interface PacketPreset {
   readonly id: PresetId;
@@ -106,6 +107,24 @@ export function createDefaultICMP(): ICMPLayer {
   };
 }
 
+export function createDefaultBGP(): BGPLayer {
+  return {
+    type: 'bgp',
+    bgpType: 1,
+    marker: autoValue(),
+    length: autoValue(),
+    version: autoValue(),
+    myAs: 65001,
+    holdTime: 180,
+    bgpIdentifier: '192.168.0.1',
+    optParamLength: autoValue(),
+    withdrawnRoutesLength: autoValue(),
+    totalPathAttrLength: autoValue(),
+    errorCode: 6,
+    errorSubcode: 4,
+  };
+}
+
 /** Creates the built-in packet presets for quick exploration */
 export function createPresets(): readonly PacketPreset[] {
   const udpText = 'Hello, tsumiki!!!!';
@@ -143,6 +162,33 @@ export function createPresets(): readonly PacketPreset[] {
       layers: [
         { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
         createDefaultARP(),
+      ],
+      payloadText: '',
+      payloadBytes: new Uint8Array(0),
+    },
+    {
+      id: 'bgp-open',
+      name: 'BGP OPEN',
+      description: 'Ethernet II + IPv4 + TCP (port 179) + BGP-4 OPEN message (RFC 4271)',
+      layers: [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        {
+          ...createDefaultTCP(),
+          dstPort: 179,
+          ackNumber: 1,
+          flags: {
+            cwr: false,
+            ece: false,
+            urg: false,
+            ack: true,
+            psh: true,
+            rst: false,
+            syn: false,
+            fin: false,
+          },
+        },
+        createDefaultBGP(),
       ],
       payloadText: '',
       payloadBytes: new Uint8Array(0),

@@ -1,13 +1,21 @@
 import { useState } from 'react';
 import { isFieldHighlighted, type HighlightTarget } from '../core/inspector';
+import { BGP_DEFAULT_MARKER_HEX } from '../core/layers/bgp';
 import type {
+  BGPMessageType,
   FieldSpan,
   Layer,
   PacketError,
   PacketWarning,
   TCPFlags,
 } from '../core/layers/types';
-import { AutoManualField, FixedFieldChip, NumberField, TextField } from './FieldControls';
+import {
+  AutoManualField,
+  AutoManualTextField,
+  FixedFieldChip,
+  NumberField,
+  TextField,
+} from './FieldControls';
 import { LAYER_META } from './layerMeta';
 
 export interface LayerCardProps {
@@ -36,6 +44,13 @@ const TCP_FLAG_ITEMS: readonly { readonly key: keyof TCPFlags; readonly label: s
   { key: 'rst', label: 'RST' },
   { key: 'syn', label: 'SYN' },
   { key: 'fin', label: 'FIN' },
+];
+
+const BGP_TYPE_OPTIONS: readonly { readonly type: BGPMessageType; readonly label: string }[] = [
+  { type: 1, label: '1: OPEN' },
+  { type: 2, label: '2: UPDATE' },
+  { type: 3, label: '3: NOTIFICATION' },
+  { type: 4, label: '4: KEEPALIVE' },
 ];
 
 export function LayerCard({
@@ -809,6 +824,203 @@ export function LayerCard({
                   onHoverEnd={hoverEnd}
                 />
               </div>
+            </div>
+          )}
+
+          {layer.type === 'bgp' && (
+            <div className="field-grid">
+              <div
+                className={`field field-span-full${isHighlighted('bgpType') ? ' is-highlighted' : ''}`}
+                onMouseEnter={hoverStart('bgpType')}
+                onMouseLeave={hoverEnd}
+              >
+                <div className="field-label-row">
+                  <span className="field-label">Message Type</span>
+                  <span className="field-hint">8 bit (RFC 4271 §4.1)</span>
+                </div>
+                <div className="flag-chip-row" role="group" aria-label="BGP Message Type">
+                  {BGP_TYPE_OPTIONS.map(({ type, label }) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className={`preset-btn${layer.bgpType === type ? ' is-active' : ''}`}
+                      aria-pressed={layer.bgpType === type}
+                      onFocus={hoverStart('bgpType')}
+                      onBlur={hoverEnd}
+                      onClick={() => onChange({ ...layer, bgpType: type })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <AutoManualTextField
+                id={`${id}-marker`}
+                label="Marker"
+                hint="16 bytes (0xff × 16)"
+                fullWidth
+                autoPreviewText="ff ff … ff (16 bytes)"
+                manualSeedValue={BGP_DEFAULT_MARKER_HEX}
+                placeholder={BGP_DEFAULT_MARKER_HEX}
+                value={layer.marker}
+                error={fieldError('marker')}
+                warning={fieldWarning('marker')}
+                isHighlighted={isHighlighted('marker')}
+                onHoverStart={hoverStart('marker')}
+                onHoverEnd={hoverEnd}
+                onChange={(marker) => onChange({ ...layer, marker })}
+              />
+
+              <AutoManualField
+                id={`${id}-length`}
+                label="Length"
+                hint="19-4096 bytes"
+                value={layer.length}
+                resolvedAutoValue={resolvedAutoValues?.length}
+                error={fieldError('length')}
+                warning={fieldWarning('length')}
+                isHighlighted={isHighlighted('length')}
+                onHoverStart={hoverStart('length')}
+                onHoverEnd={hoverEnd}
+                onChange={(length) => onChange({ ...layer, length })}
+              />
+
+              {layer.bgpType === 1 && (
+                <>
+                  <AutoManualField
+                    id={`${id}-version`}
+                    label="Version"
+                    hint="4 = BGP-4"
+                    value={layer.version}
+                    resolvedAutoValue={resolvedAutoValues?.version}
+                    error={fieldError('version')}
+                    warning={fieldWarning('version')}
+                    isHighlighted={isHighlighted('version')}
+                    onHoverStart={hoverStart('version')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(version) => onChange({ ...layer, version })}
+                  />
+                  <NumberField
+                    id={`${id}-myAs`}
+                    label="My AS"
+                    hint="16 bit (0-65535)"
+                    value={layer.myAs}
+                    error={fieldError('myAs')}
+                    warning={fieldWarning('myAs')}
+                    isHighlighted={isHighlighted('myAs')}
+                    onHoverStart={hoverStart('myAs')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(myAs) => onChange({ ...layer, myAs })}
+                  />
+                  <NumberField
+                    id={`${id}-holdTime`}
+                    label="Hold Time"
+                    hint="0 or 3-65535 sec"
+                    value={layer.holdTime}
+                    error={fieldError('holdTime')}
+                    warning={fieldWarning('holdTime')}
+                    isHighlighted={isHighlighted('holdTime')}
+                    onHoverStart={hoverStart('holdTime')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(holdTime) => onChange({ ...layer, holdTime })}
+                  />
+                  <TextField
+                    id={`${id}-bgpIdentifier`}
+                    label="BGP Identifier"
+                    hint="32-bit IPv4"
+                    placeholder="192.0.2.1"
+                    value={layer.bgpIdentifier}
+                    error={fieldError('bgpIdentifier')}
+                    warning={fieldWarning('bgpIdentifier')}
+                    isHighlighted={isHighlighted('bgpIdentifier')}
+                    onHoverStart={hoverStart('bgpIdentifier')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(bgpIdentifier) => onChange({ ...layer, bgpIdentifier })}
+                  />
+                  <AutoManualField
+                    id={`${id}-optParamLength`}
+                    label="Optional Parameters Length"
+                    hint="0-255 bytes"
+                    value={layer.optParamLength}
+                    resolvedAutoValue={resolvedAutoValues?.optParamLength}
+                    error={fieldError('optParamLength')}
+                    warning={fieldWarning('optParamLength')}
+                    isHighlighted={isHighlighted('optParamLength')}
+                    onHoverStart={hoverStart('optParamLength')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(optParamLength) => onChange({ ...layer, optParamLength })}
+                  />
+                </>
+              )}
+
+              {layer.bgpType === 2 && (
+                <>
+                  <AutoManualField
+                    id={`${id}-withdrawnRoutesLength`}
+                    label="Withdrawn Routes Length"
+                    hint="16 bit (0 = none)"
+                    value={layer.withdrawnRoutesLength}
+                    resolvedAutoValue={resolvedAutoValues?.withdrawnRoutesLength}
+                    error={fieldError('withdrawnRoutesLength')}
+                    warning={fieldWarning('withdrawnRoutesLength')}
+                    isHighlighted={isHighlighted('withdrawnRoutesLength')}
+                    onHoverStart={hoverStart('withdrawnRoutesLength')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(withdrawnRoutesLength) =>
+                      onChange({ ...layer, withdrawnRoutesLength })
+                    }
+                  />
+                  <AutoManualField
+                    id={`${id}-totalPathAttrLength`}
+                    label="Total Path Attribute Length"
+                    hint="16 bit (bytes)"
+                    value={layer.totalPathAttrLength}
+                    resolvedAutoValue={resolvedAutoValues?.totalPathAttrLength}
+                    error={fieldError('totalPathAttrLength')}
+                    warning={fieldWarning('totalPathAttrLength')}
+                    isHighlighted={isHighlighted('totalPathAttrLength')}
+                    onHoverStart={hoverStart('totalPathAttrLength')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(totalPathAttrLength) => onChange({ ...layer, totalPathAttrLength })}
+                  />
+                </>
+              )}
+
+              {layer.bgpType === 3 && (
+                <>
+                  <NumberField
+                    id={`${id}-errorCode`}
+                    label="Error Code"
+                    hint="0-255 (1-6: RFC 4271, 7: RFC 7313)"
+                    value={layer.errorCode}
+                    error={fieldError('errorCode')}
+                    warning={fieldWarning('errorCode')}
+                    isHighlighted={isHighlighted('errorCode')}
+                    onHoverStart={hoverStart('errorCode')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(errorCode) => onChange({ ...layer, errorCode })}
+                  />
+                  <NumberField
+                    id={`${id}-errorSubcode`}
+                    label="Error Subcode"
+                    hint="0-255"
+                    value={layer.errorSubcode}
+                    error={fieldError('errorSubcode')}
+                    warning={fieldWarning('errorSubcode')}
+                    isHighlighted={isHighlighted('errorSubcode')}
+                    onHoverStart={hoverStart('errorSubcode')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(errorSubcode) => onChange({ ...layer, errorSubcode })}
+                  />
+                </>
+              )}
+
+              {layer.bgpType === 4 && (
+                <p className="field-hint field-span-full">
+                  KEEPALIVE consists only of the 19-byte common BGP header with no payload (RFC 4271 §4.4).
+                </p>
+              )}
             </div>
           )}
         </div>
