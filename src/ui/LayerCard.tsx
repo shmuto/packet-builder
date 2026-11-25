@@ -72,10 +72,11 @@ export function LayerCard({
   const generalWarnings = warnings.filter((w) => w.fieldId === undefined);
   const hasErrors = errors.length > 0;
   const hasWarnings = warnings.length > 0;
+  const isLayerHighlighted = highlight?.kind === 'layer' && highlight.layerIndex === index;
 
   return (
     <section
-      className={`layer-card layer-theme-${layer.type}${hasErrors ? ' has-error' : ''}`}
+      className={`layer-card layer-theme-${layer.type}${hasErrors ? ' has-error' : ''}${isLayerHighlighted ? ' is-layer-highlighted' : ''}`}
       aria-label={`${meta.name} layer`}
     >
       <header className="layer-header">
