@@ -127,16 +127,20 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
   const checksumValue = layer.checksum.mode === 'manual' ? layer.checksum.value : autoChecksum;
   writeUint16BE(header, 6, checksumValue);
 
-  if (
-    layer.checksum.mode === 'manual' &&
-    ctx.ipv4.status === 'valid' &&
-    checksumValue !== autoChecksum
-  ) {
-    warnings.push({
-      layerIndex: ctx.layerIndex,
-      fieldId: 'checksum',
-      message: `UDP Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
-    });
+  if (layer.checksum.mode === 'manual' && ctx.ipv4.status === 'valid') {
+    if (checksumValue === 0) {
+      warnings.push({
+        layerIndex: ctx.layerIndex,
+        fieldId: 'checksum',
+        message: 'UDP Checksum を 0x0000（チェックサム未使用、RFC 768）に設定しています。',
+      });
+    } else if (checksumValue !== autoChecksum) {
+      warnings.push({
+        layerIndex: ctx.layerIndex,
+        fieldId: 'checksum',
+        message: `UDP Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
+      });
+    }
   }
 
   return {

@@ -44,20 +44,34 @@ describe('encodeEthernet', () => {
     expect(result.warnings.some((w) => w.fieldId === 'etherType')).toBe(true);
   });
 
-  it('フレーム長 60 バイト未満（IEEE 802.3 最小長未満）では警告を出す', () => {
-    const result = encodeEthernet(
+  it('フレーム長 59 バイトでは警告が出て、ちょうど 60 バイトでは警告が出ない（IEEE 802.3）', () => {
+    const shortFrame = encodeEthernet(
       {
         type: 'ethernet',
         dstMac: '00:11:22:33:44:55',
         srcMac: '66:77:88:99:aa:bb',
         etherType: autoValue(),
       },
-      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 45 },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 45 }, // 14 + 45 = 59
     );
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.warnings.some((w) => w.message.includes('60 バイト'))).toBe(true);
+    expect(shortFrame.ok).toBe(true);
+    if (!shortFrame.ok) return;
+    expect(shortFrame.warnings.some((w) => w.message.includes('60 バイト'))).toBe(true);
+
+    const exactMinFrame = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 46 }, // 14 + 46 = 60
+    );
+
+    expect(exactMinFrame.ok).toBe(true);
+    if (!exactMinFrame.ok) return;
+    expect(exactMinFrame.warnings).toHaveLength(0);
   });
 
   it('不正な MAC アドレスや範囲外の EtherType はエラーを返す', () => {

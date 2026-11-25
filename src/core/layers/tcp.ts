@@ -103,6 +103,14 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
     }
   }
 
+  const segmentLength = TCP_HEADER_LENGTH + ctx.upperBytes.length;
+  if (segmentLength > 0xffff) {
+    errors.push({
+      layerIndex: ctx.layerIndex,
+      message: `TCP セグメント長が上限 65535 バイトを超えています（現在 ${segmentLength} バイト）。`,
+    });
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
   }

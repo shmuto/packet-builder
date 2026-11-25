@@ -172,4 +172,25 @@ describe('encodeTCP', () => {
       'checksum',
     ]);
   });
+
+  it('TCP セグメント長 65535 バイトは成功し、65536 バイトは fieldId なしのエラーになる', () => {
+    const okMax = encodeTCP(makeBaseTCP(), {
+      layerIndex: 0,
+      upperBytes: new Uint8Array(65515), // 20 + 65515 = 65535
+      ipv4: validIPv4,
+    });
+    expect(okMax.ok).toBe(true);
+
+    const overflow = encodeTCP(makeBaseTCP(), {
+      layerIndex: 0,
+      upperBytes: new Uint8Array(65516), // 20 + 65516 = 65536
+      ipv4: { status: 'absent' },
+    });
+    expect(overflow.ok).toBe(false);
+    if (!overflow.ok) {
+      expect(overflow.errors).toHaveLength(1);
+      expect(overflow.errors[0].fieldId).toBeUndefined();
+      expect(overflow.errors[0].message).toContain('65535');
+    }
+  });
 });
