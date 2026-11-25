@@ -1,6 +1,7 @@
 import type { Layer, LayerType } from '../core/layers/types';
 import {
   createDefaultARP,
+  createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -59,6 +60,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     rfc: 'RFC 9293',
     osiLabel: 'L4',
   },
+  bgp: {
+    type: 'bgp',
+    name: 'BGP-4',
+    shortName: 'BGP',
+    rfc: 'RFC 4271',
+    osiLabel: 'L7',
+  },
 };
 
 export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
@@ -68,6 +76,7 @@ export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'icmp',
   'udp',
   'tcp',
+  'bgp',
 ];
 
 export function createLayerByType(type: LayerType): Layer {
@@ -84,5 +93,7 @@ export function createLayerByType(type: LayerType): Layer {
       return createDefaultUDP();
     case 'tcp':
       return createDefaultTCP();
+    case 'bgp':
+      return createDefaultBGP();
   }
 }

@@ -4,6 +4,7 @@ import { autoValue, type FieldSpan, type Layer } from './layers/types';
 import { buildPacket } from './packet';
 import {
   createDefaultARP,
+  createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -182,6 +183,191 @@ describe('buildPacket', () => {
     expectExactBitCoverage(result.spans, expected.length);
   });
 
+  it('matches known Ethernet II + IPv4 + TCP(179) + BGP-4 OPEN packet byte-for-byte (RFC 4271)', () => {
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      {
+        ...createDefaultTCP(),
+        dstPort: 179,
+        ackNumber: 1,
+        flags: {
+          cwr: false,
+          ece: false,
+          urg: false,
+          ack: true,
+          psh: true,
+          rst: false,
+          syn: false,
+          fin: false,
+        },
+      },
+      createDefaultBGP(),
+    ];
+
+    const result = buildPacket(layers, new Uint8Array(0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // IPv4 (20B): TotalLen=69(0x0045), Proto=6(TCP), Checksum=0xa72b
+      0x45, 0x00, 0x00, 0x45,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x06, 0xa7, 0x2b,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // TCP (20B): 54321 -> 179, Seq=1000, Ack=1, DataOffset=5, PSH+ACK(0x18), Win=65535, Checksum=0x9525
+      0xd4, 0x31, 0x00, 0xb3,
+      0x00, 0x00, 0x03, 0xe8,
+      0x00, 0x00, 0x00, 0x01,
+      0x50, 0x18, 0xff, 0xff,
+      0x95, 0x25, 0x00, 0x00,
+      // BGP-4 OPEN (29B): Marker(16x 0xff), Len=29(0x001d), Type=1, Ver=4, AS=65001, Hold=180, ID=192.168.0.1, OptLen=0
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x00, 0x1d, 0x01,
+      0x04, 0xfd, 0xe9, 0x00, 0xb4,
+      0xc0, 0xa8, 0x00, 0x01, 0x00,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known Ethernet II + IPv4 + TCP(179) + BGP-4 KEEPALIVE, NOTIFICATION, and UPDATE packets byte-for-byte (RFC 4271)', () => {
+    const bgpTcp = {
+      ...createDefaultTCP(),
+      dstPort: 179,
+      ackNumber: 1,
+      flags: {
+        cwr: false,
+        ece: false,
+        urg: false,
+        ack: true,
+        psh: true,
+        rst: false,
+        syn: false,
+        fin: false,
+      },
+    };
+    const ethBytes = [
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+    ];
+    const markerBytes = new Array<number>(16).fill(0xff);
+
+    // 1) KEEPALIVE (19B BGP -> 73B frame, IPv4 TotalLen=59 / 0x003b, IPv4 csum=0xa735, TCP csum=0x5185)
+    const keepaliveRes = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        bgpTcp,
+        { ...createDefaultBGP(), bgpType: 4 },
+      ],
+      new Uint8Array(0),
+    );
+    expect(keepaliveRes.ok).toBe(true);
+    if (keepaliveRes.ok) {
+      const expectedKeepalive = new Uint8Array([
+        ...ethBytes,
+        // IPv4 (20B)
+        0x45, 0x00, 0x00, 0x3b,
+        0x12, 0x34, 0x40, 0x00,
+        0x40, 0x06, 0xa7, 0x35,
+        0xc0, 0xa8, 0x00, 0x01,
+        0xc0, 0xa8, 0x00, 0x02,
+        // TCP (20B)
+        0xd4, 0x31, 0x00, 0xb3,
+        0x00, 0x00, 0x03, 0xe8,
+        0x00, 0x00, 0x00, 0x01,
+        0x50, 0x18, 0xff, 0xff,
+        0x51, 0x85, 0x00, 0x00,
+        // BGP KEEPALIVE (19B): Marker(16x 0xff), Length=19(0x0013), Type=4
+        ...markerBytes,
+        0x00, 0x13, 0x04,
+      ]);
+      expect(keepaliveRes.bytes).toEqual(expectedKeepalive);
+      expect(keepaliveRes.warnings).toHaveLength(0);
+      expectExactBitCoverage(keepaliveRes.spans, expectedKeepalive.length);
+    }
+
+    // 2) NOTIFICATION (21B BGP -> 75B frame, IPv4 TotalLen=61 / 0x003d, IPv4 csum=0xa733, TCP csum=0x4e7b)
+    const notifRes = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        bgpTcp,
+        { ...createDefaultBGP(), bgpType: 3, errorCode: 6, errorSubcode: 4 },
+      ],
+      new Uint8Array(0),
+    );
+    expect(notifRes.ok).toBe(true);
+    if (notifRes.ok) {
+      const expectedNotif = new Uint8Array([
+        ...ethBytes,
+        // IPv4 (20B)
+        0x45, 0x00, 0x00, 0x3d,
+        0x12, 0x34, 0x40, 0x00,
+        0x40, 0x06, 0xa7, 0x33,
+        0xc0, 0xa8, 0x00, 0x01,
+        0xc0, 0xa8, 0x00, 0x02,
+        // TCP (20B)
+        0xd4, 0x31, 0x00, 0xb3,
+        0x00, 0x00, 0x03, 0xe8,
+        0x00, 0x00, 0x00, 0x01,
+        0x50, 0x18, 0xff, 0xff,
+        0x4e, 0x7b, 0x00, 0x00,
+        // BGP NOTIFICATION (21B): Marker(16x 0xff), Length=21(0x0015), Type=3, Code=6, Subcode=4
+        ...markerBytes,
+        0x00, 0x15, 0x03, 0x06, 0x04,
+      ]);
+      expect(notifRes.bytes).toEqual(expectedNotif);
+      expect(notifRes.warnings).toHaveLength(0);
+      expectExactBitCoverage(notifRes.spans, expectedNotif.length);
+    }
+
+    // 3) UPDATE End-of-RIB (23B BGP -> 77B frame, IPv4 TotalLen=63 / 0x003f, IPv4 csum=0xa731, TCP csum=0x537d)
+    const updateRes = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        bgpTcp,
+        { ...createDefaultBGP(), bgpType: 2 },
+      ],
+      new Uint8Array(0),
+    );
+    expect(updateRes.ok).toBe(true);
+    if (updateRes.ok) {
+      const expectedUpdate = new Uint8Array([
+        ...ethBytes,
+        // IPv4 (20B)
+        0x45, 0x00, 0x00, 0x3f,
+        0x12, 0x34, 0x40, 0x00,
+        0x40, 0x06, 0xa7, 0x31,
+        0xc0, 0xa8, 0x00, 0x01,
+        0xc0, 0xa8, 0x00, 0x02,
+        // TCP (20B)
+        0xd4, 0x31, 0x00, 0xb3,
+        0x00, 0x00, 0x03, 0xe8,
+        0x00, 0x00, 0x00, 0x01,
+        0x50, 0x18, 0xff, 0xff,
+        0x53, 0x7d, 0x00, 0x00,
+        // BGP UPDATE (23B): Marker(16x 0xff), Length=23(0x0017), Type=2, WithdrawnLen=0, PathAttrLen=0
+        ...markerBytes,
+        0x00, 0x17, 0x02, 0x00, 0x00, 0x00, 0x00,
+      ]);
+      expect(updateRes.bytes).toEqual(expectedUpdate);
+      expect(updateRes.warnings).toHaveLength(0);
+      expectExactBitCoverage(updateRes.spans, expectedUpdate.length);
+    }
+  });
+
   it('対応していないレイヤー順序はエラーを返す', () => {
     const invalidOrders: Layer[][] = [
       [createDefaultUDP(), createDefaultIPv4()],
@@ -194,6 +380,14 @@ describe('buildPacket', () => {
       [createDefaultARP(), createDefaultIPv4()],
       [createDefaultARP(), createDefaultUDP()],
       [createDefaultARP(), createDefaultARP()],
+      [createDefaultUDP(), createDefaultBGP()],
+      [createDefaultIPv4(), createDefaultBGP()],
+      [createDefaultEthernet(), createDefaultBGP()],
+      [createDefaultARP(), createDefaultBGP()],
+      [createDefaultICMP(), createDefaultBGP()],
+      [createDefaultBGP(), createDefaultIPv4()],
+      [createDefaultBGP(), createDefaultTCP()],
+      [createDefaultBGP(), createDefaultBGP()],
     ];
 
     for (const layers of invalidOrders) {
