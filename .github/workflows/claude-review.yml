@@ -13,8 +13,8 @@ concurrency:
 
 jobs:
   review:
-    # 下書きPRはレビューしない
-    if: github.event.pull_request.draft == false
+    # 下書きPRと、リポジトリの持ち主以外が作ったPRはレビューしない
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
