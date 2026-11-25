@@ -1,13 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
-import { encodeUtf8, parseHexBytes } from './core/bytes';
-import {
-  buildHexDumpRows,
-  formatSpacedHex,
-  summarizeLayerSegments,
-} from './core/inspector';
+import { decodeUtf8Strict, encodeUtf8, parseHexBytes } from './core/bytes';
+import { evaluatePacketDraft, formatSpacedHex } from './core/inspector';
 import type { Layer, LayerType } from './core/layers/types';
-import { buildPacket } from './core/packet';
 import { createPresets, type PacketPreset, type PresetId } from './core/presets';
+import { ok, type Result } from './core/result';
 import { HexDumpInspector } from './ui/HexDumpInspector';
 import { LayerCard } from './ui/LayerCard';
 import { ADDABLE_LAYER_TYPES, createLayerByType, LAYER_META } from './ui/layerMeta';
@@ -32,36 +28,22 @@ export function App() {
   const [payloadHex, setPayloadHex] = useState<string>(() =>
     formatSpacedHex(presets[0].payloadBytes),
   );
+  const [payloadModeSwitchError, setPayloadModeSwitchError] = useState<string | undefined>(
+    undefined,
+  );
 
-  const payloadState = useMemo(() => {
+  const payloadResult: Result<Uint8Array> = useMemo(() => {
     if (payloadMode === 'text') {
-      return { ok: true as const, bytes: encodeUtf8(payloadText) };
+      return ok(encodeUtf8(payloadText));
     }
-    const parsed = parseHexBytes(payloadHex);
-    if (!parsed.ok) {
-      return { ok: false as const, error: parsed.error, bytes: new Uint8Array(0) };
-    }
-    return { ok: true as const, bytes: parsed.value };
+    return parseHexBytes(payloadHex);
   }, [payloadMode, payloadText, payloadHex]);
 
   const layers = useMemo(() => layerItems.map((item) => item.layer), [layerItems]);
 
-  const buildResult = useMemo(
-    () => buildPacket(layers, payloadState.bytes),
-    [layers, payloadState.bytes],
-  );
-
-  const hexRows = useMemo(
-    () =>
-      buildResult.ok && payloadState.ok
-        ? buildHexDumpRows(buildResult.bytes, buildResult.spans)
-        : [],
-    [buildResult, payloadState.ok],
-  );
-
-  const segments = useMemo(
-    () => (buildResult.ok && payloadState.ok ? summarizeLayerSegments(buildResult.spans) : []),
-    [buildResult, payloadState.ok],
+  const draft = useMemo(
+    () => evaluatePacketDraft(layers, payloadResult),
+    [layers, payloadResult],
   );
 
   const applyPreset = (preset: PacketPreset) => {
@@ -70,6 +52,7 @@ export function App() {
     setPayloadMode('text');
     setPayloadText(preset.payloadText);
     setPayloadHex(formatSpacedHex(preset.payloadBytes));
+    setPayloadModeSwitchError(undefined);
   };
 
   const handleLayerChange = (index: number, nextLayer: Layer) => {
@@ -105,10 +88,32 @@ export function App() {
 
   const handlePayloadModeChange = (nextMode: PayloadMode) => {
     if (nextMode === payloadMode) return;
+
     if (nextMode === 'hex') {
       setPayloadHex(formatSpacedHex(encodeUtf8(payloadText)));
+      setPayloadModeSwitchError(undefined);
+      setPayloadMode('hex');
+      return;
     }
-    setPayloadMode(nextMode);
+
+    // Hex -> Text への切替時は、現在の Hex を UTF-8 として厳密に復元できた場合のみ切り替える
+    const parsed = parseHexBytes(payloadHex);
+    if (!parsed.ok) {
+      setPayloadModeSwitchError(
+        `16 進入力にエラーがあるためテキストモードへ切り替えられません（${parsed.error}）`,
+      );
+      return;
+    }
+    const decoded = decodeUtf8Strict(parsed.value);
+    if (!decoded.ok) {
+      setPayloadModeSwitchError(
+        `${decoded.error} テキストモードへ切り替える前に 16 進内容を修正してください。`,
+      );
+      return;
+    }
+    setPayloadText(decoded.value);
+    setPayloadModeSwitchError(undefined);
+    setPayloadMode('text');
   };
 
   return (
@@ -169,13 +174,9 @@ export function App() {
             )}
 
             {layerItems.map((item, index) => {
-              const layerErrors = buildResult.ok
-                ? []
-                : buildResult.errors.filter((e) => e.layerIndex === index);
-              const layerWarnings = buildResult.warnings.filter((w) => w.layerIndex === index);
-              const resolvedAuto = buildResult.ok
-                ? buildResult.resolvedAutoValues[index]
-                : undefined;
+              const layerErrors = draft.errors.filter((e) => e.layerIndex === index);
+              const layerWarnings = draft.warnings.filter((w) => w.layerIndex === index);
+              const resolvedAuto = draft.resolvedAutoValues?.[index];
 
               return (
                 <LayerCard
@@ -199,8 +200,9 @@ export function App() {
               mode={payloadMode}
               textValue={payloadText}
               hexValue={payloadHex}
-              byteLength={payloadState.bytes.length}
-              error={payloadState.ok ? undefined : payloadState.error}
+              byteLength={payloadResult.ok ? payloadResult.value.length : 0}
+              error={draft.payloadError}
+              modeSwitchError={payloadModeSwitchError}
               onModeChange={handlePayloadModeChange}
               onTextChange={(next) => {
                 setActivePresetId(null);
@@ -208,6 +210,7 @@ export function App() {
               }}
               onHexChange={(next) => {
                 setActivePresetId(null);
+                setPayloadModeSwitchError(undefined);
                 setPayloadHex(next);
               }}
             />
@@ -215,12 +218,7 @@ export function App() {
         </section>
 
         <div className="inspector-column">
-          <HexDumpInspector
-            buildResult={buildResult}
-            payloadError={payloadState.ok ? undefined : payloadState.error}
-            rows={hexRows}
-            segments={segments}
-          />
+          <HexDumpInspector draft={draft} />
         </div>
       </main>
     </div>

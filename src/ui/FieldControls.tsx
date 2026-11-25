@@ -10,6 +10,38 @@ interface BaseFieldProps {
   readonly warning?: string;
 }
 
+function getFeedbackId(id: string, error?: string, warning?: string): string | undefined {
+  if (error) return `${id}-error`;
+  if (warning) return `${id}-warning`;
+  return undefined;
+}
+
+function FieldFeedback({
+  id,
+  error,
+  warning,
+}: {
+  readonly id: string;
+  readonly error?: string;
+  readonly warning?: string;
+}) {
+  if (error) {
+    return (
+      <p id={`${id}-error`} className="field-msg is-error" role="alert">
+        {error}
+      </p>
+    );
+  }
+  if (warning) {
+    return (
+      <p id={`${id}-warning`} className="field-msg is-warning">
+        {warning}
+      </p>
+    );
+  }
+  return null;
+}
+
 export interface TextFieldProps extends BaseFieldProps {
   readonly value: string;
   readonly placeholder?: string;
@@ -26,7 +58,7 @@ export function TextField({
   placeholder,
   onChange,
 }: TextFieldProps) {
-  const feedbackId = error ? `${id}-error` : warning ? `${id}-warning` : undefined;
+  const feedbackId = getFeedbackId(id, error, warning);
 
   return (
     <div className="field">
@@ -46,16 +78,7 @@ export function TextField({
         aria-describedby={feedbackId}
         onChange={(e) => onChange(e.target.value)}
       />
-      {error && (
-        <p id={`${id}-error`} className="field-msg is-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!error && warning && (
-        <p id={`${id}-warning`} className="field-msg is-warning">
-          {warning}
-        </p>
-      )}
+      <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
 }
@@ -104,7 +127,7 @@ export function NumberField({
     }
   }, [value, allowHex, hexDigits]);
 
-  const feedbackId = error ? `${id}-error` : warning ? `${id}-warning` : undefined;
+  const feedbackId = getFeedbackId(id, error, warning);
 
   return (
     <div className="field">
@@ -129,16 +152,7 @@ export function NumberField({
           onChange(parseUnsignedIntInput(nextRaw, allowHex));
         }}
       />
-      {error && (
-        <p id={`${id}-error`} className="field-msg is-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!error && warning && (
-        <p id={`${id}-warning`} className="field-msg is-warning">
-          {warning}
-        </p>
-      )}
+      <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
 }
@@ -182,7 +196,8 @@ export function AutoManualField({
   }, [value, allowHex, hexDigits]);
 
   const isAuto = value.mode === 'auto';
-  const feedbackId = error ? `${id}-error` : warning ? `${id}-warning` : undefined;
+  const feedbackId = getFeedbackId(id, error, warning);
+  const autoLabelId = `${id}-label`;
 
   const autoDisplayText =
     resolvedAutoValue === undefined
@@ -204,9 +219,15 @@ export function AutoManualField({
   return (
     <div className="field">
       <div className="field-label-row">
-        <label className="field-label" htmlFor={id}>
-          {label}
-        </label>
+        {isAuto ? (
+          <span id={autoLabelId} className="field-label">
+            {label}
+          </span>
+        ) : (
+          <label className="field-label" htmlFor={id}>
+            {label}
+          </label>
+        )}
         <div className="mode-toggle" role="group" aria-label={`${label} の計算モード`}>
           <button
             type="button"
@@ -229,8 +250,9 @@ export function AutoManualField({
 
       {isAuto ? (
         <div
-          id={id}
           className={`field-auto-preview mono${error ? ' is-error' : warning ? ' is-warning' : ''}`}
+          role="group"
+          aria-labelledby={autoLabelId}
           aria-describedby={feedbackId}
         >
           <span className="auto-tag">AUTO</span>
@@ -255,16 +277,7 @@ export function AutoManualField({
         />
       )}
 
-      {error && (
-        <p id={`${id}-error`} className="field-msg is-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!error && warning && (
-        <p id={`${id}-warning`} className="field-msg is-warning">
-          {warning}
-        </p>
-      )}
+      <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
 }

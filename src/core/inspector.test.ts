@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { encodeUtf8 } from './bytes';
+import { encodeUtf8, parseHexBytes } from './bytes';
 import {
   buildHexDumpRows,
+  evaluatePacketDraft,
   formatByteAscii,
   formatHex,
   formatSpacedHex,
@@ -9,7 +10,13 @@ import {
   summarizeLayerSegments,
 } from './inspector';
 import { buildPacket } from './packet';
-import { createDefaultEthernet, createDefaultIPv4, createDefaultTCP } from './presets';
+import {
+  createDefaultEthernet,
+  createDefaultIPv4,
+  createDefaultTCP,
+  createDefaultUDP,
+} from './presets';
+import { ok } from './result';
 
 describe('parseUnsignedIntInput', () => {
   it('10 進整数と空白トリムを正しくパースできる', () => {
@@ -108,5 +115,51 @@ describe('buildHexDumpRows / summarizeLayerSegments', () => {
     const rows = buildHexDumpRows(new Uint8Array(65537), []);
     expect(rows[0].offsetLabel).toBe('00000');
     expect(rows[rows.length - 1].offsetLabel).toBe('10000');
+  });
+});
+
+describe('evaluatePacketDraft', () => {
+  it('正常なレイヤーとペイロードからダンプ行・構成サマリー・自動計算値を返す', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      ok(encodeUtf8('Hello, tsumiki!!!!')),
+    );
+
+    expect(draft.ok).toBe(true);
+    expect(draft.bytes?.length).toBe(60);
+    expect(draft.rows.length).toBeGreaterThan(0);
+    expect(draft.segments).toHaveLength(4);
+    expect(draft.resolvedAutoValues?.[2].length).toBe(26);
+    expect(draft.warnings).toHaveLength(0);
+    expect(draft.payloadError).toBeUndefined();
+  });
+
+  it('Hex ペイロードが不正なときは自動計算値・警告・ダンプ行を出さない', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      parseHexBytes('48 65 6'), // 奇数桁で不正
+    );
+
+    expect(draft.ok).toBe(false);
+    expect(draft.bytes).toBeNull();
+    expect(draft.rows).toEqual([]);
+    expect(draft.segments).toEqual([]);
+    // 空ペイロード前提の AUTO 値（UDP Length=8 等）や 60B 未満警告が漏れないこと
+    expect(draft.resolvedAutoValues).toBeUndefined();
+    expect(draft.warnings).toEqual([]);
+    expect(draft.payloadError).toBeTruthy();
+  });
+
+  it('ペイロード不正と同時にレイヤー側エラーがある場合もレイヤーエラーを保持しつつ AUTO 値と警告は抑止する', () => {
+    const draft = evaluatePacketDraft(
+      [{ ...createDefaultEthernet(), dstMac: 'bad' }, createDefaultIPv4(), createDefaultUDP()],
+      parseHexBytes('zz'),
+    );
+
+    expect(draft.ok).toBe(false);
+    expect(draft.payloadError).toBeTruthy();
+    expect(draft.errors.some((e) => e.layerIndex === 0 && e.fieldId === 'dstMac')).toBe(true);
+    expect(draft.resolvedAutoValues).toBeUndefined();
+    expect(draft.warnings).toEqual([]);
   });
 });

@@ -6,6 +6,7 @@ export interface PayloadCardProps {
   readonly hexValue: string;
   readonly byteLength: number;
   readonly error?: string;
+  readonly modeSwitchError?: string;
   readonly onModeChange: (mode: PayloadMode) => void;
   readonly onTextChange: (next: string) => void;
   readonly onHexChange: (next: string) => void;
@@ -17,10 +18,13 @@ export function PayloadCard({
   hexValue,
   byteLength,
   error,
+  modeSwitchError,
   onModeChange,
   onTextChange,
   onHexChange,
 }: PayloadCardProps) {
+  const feedbackMessage = error ?? modeSwitchError;
+
   return (
     <section
       className={`layer-card layer-theme-payload${error ? ' has-error' : ''}`}
@@ -80,12 +84,16 @@ export function PayloadCard({
               placeholder="例: 48 65 6c 6c 6f（空白・改行区切り可）"
               value={hexValue}
               aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'payload-hex-error' : undefined}
+              aria-describedby={feedbackMessage ? 'payload-hex-error' : undefined}
               onChange={(e) => onHexChange(e.target.value)}
             />
-            {error && (
-              <p id="payload-hex-error" className="field-msg is-error" role="alert">
-                {error}
+            {feedbackMessage && (
+              <p
+                id="payload-hex-error"
+                className={`field-msg ${error ? 'is-error' : 'is-warning'}`}
+                role="alert"
+              >
+                {feedbackMessage}
               </p>
             )}
           </div>

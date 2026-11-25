@@ -1,12 +1,9 @@
-import type { HexDumpRow, LayerSegmentSummary } from '../core/inspector';
-import type { BuildPacketResult, LayerType } from '../core/layers/types';
+import type { EvaluatedPacketDraft } from '../core/inspector';
+import type { LayerType } from '../core/layers/types';
 import { LAYER_META } from './layerMeta';
 
 export interface HexDumpInspectorProps {
-  readonly buildResult: BuildPacketResult;
-  readonly payloadError?: string;
-  readonly rows: readonly HexDumpRow[];
-  readonly segments: readonly LayerSegmentSummary[];
+  readonly draft: EvaluatedPacketDraft;
 }
 
 function segmentShortLabel(type: LayerType | 'payload'): string {
@@ -17,17 +14,10 @@ function segmentFullLabel(type: LayerType | 'payload'): string {
   return type === 'payload' ? 'Payload' : LAYER_META[type].name;
 }
 
-export function HexDumpInspector({
-  buildResult,
-  payloadError,
-  rows,
-  segments,
-}: HexDumpInspectorProps) {
-  const hasPayloadError = Boolean(payloadError);
-  const isSuccess = buildResult.ok && !hasPayloadError;
-  const totalBytes = isSuccess ? buildResult.bytes.length : 0;
-  const warnings = buildResult.warnings;
-  const errors = buildResult.ok ? [] : buildResult.errors;
+export function HexDumpInspector({ draft }: HexDumpInspectorProps) {
+  const { ok: isSuccess, bytes, rows, segments, errors, warnings, payloadError } = draft;
+  const totalBytes = bytes ? bytes.length : 0;
+  const errorCount = errors.length + (payloadError ? 1 : 0);
 
   return (
     <aside className="inspector-panel" aria-label="組み立て結果インスペクタ">
@@ -47,9 +37,7 @@ export function HexDumpInspector({
               </span>
             </>
           ) : (
-            <span className="status-badge is-error">
-              エラー {errors.length + (hasPayloadError ? 1 : 0)} 件
-            </span>
+            <span className="status-badge is-error">エラー {errorCount} 件</span>
           )}
         </div>
       </div>

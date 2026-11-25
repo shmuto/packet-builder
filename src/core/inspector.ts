@@ -1,4 +1,13 @@
-import type { FieldSpan, LayerType } from './layers/types';
+import type {
+  BuildPacketResult,
+  FieldSpan,
+  Layer,
+  LayerType,
+  PacketError,
+  PacketWarning,
+} from './layers/types';
+import { buildPacket } from './packet';
+import type { Result } from './result';
 
 const DECIMAL_PATTERN = /^[0-9]+$/;
 const HEX_PATTERN = /^0[xX][0-9a-fA-F]+$/;
@@ -167,4 +176,68 @@ export function summarizeLayerSegments(spans: readonly FieldSpan[]): LayerSegmen
   }
 
   return segments;
+}
+
+export interface EvaluatedPacketDraft {
+  readonly ok: boolean;
+  readonly bytes: Uint8Array | null;
+  readonly spans: readonly FieldSpan[];
+  readonly rows: readonly HexDumpRow[];
+  readonly segments: readonly LayerSegmentSummary[];
+  readonly resolvedAutoValues?: readonly Readonly<Record<string, number>>[];
+  readonly errors: readonly PacketError[];
+  readonly warnings: readonly PacketWarning[];
+  readonly payloadError?: string;
+}
+
+/**
+ * レイヤー配列とペイロードパース結果から UI 表示用の状態を組み立てる。
+ * ペイロードが不正なときは、空ペイロード前提の誤った AUTO 値や警告を抑止する。
+ */
+export function evaluatePacketDraft(
+  layers: readonly Layer[],
+  payloadResult: Result<Uint8Array>,
+): EvaluatedPacketDraft {
+  if (!payloadResult.ok) {
+    // レイヤー側の入力エラー自体は表示できるよう検証のみ行うが、AUTO 値と警告は抑止する
+    const layerCheck: BuildPacketResult = buildPacket(layers, new Uint8Array(0));
+    return {
+      ok: false,
+      bytes: null,
+      spans: [],
+      rows: [],
+      segments: [],
+      resolvedAutoValues: undefined,
+      errors: layerCheck.ok ? [] : layerCheck.errors,
+      warnings: [],
+      payloadError: payloadResult.error,
+    };
+  }
+
+  const built = buildPacket(layers, payloadResult.value);
+  if (!built.ok) {
+    return {
+      ok: false,
+      bytes: null,
+      spans: [],
+      rows: [],
+      segments: [],
+      resolvedAutoValues: undefined,
+      errors: built.errors,
+      warnings: built.warnings,
+      payloadError: undefined,
+    };
+  }
+
+  return {
+    ok: true,
+    bytes: built.bytes,
+    spans: built.spans,
+    rows: buildHexDumpRows(built.bytes, built.spans),
+    segments: summarizeLayerSegments(built.spans),
+    resolvedAutoValues: built.resolvedAutoValues,
+    errors: [],
+    warnings: built.warnings,
+    payloadError: undefined,
+  };
 }
