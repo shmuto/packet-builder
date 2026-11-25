@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import {
   buildBitDiagramRows,
-  doesSpanMatchHighlight,
+  doesSpanMatchTarget,
   type HighlightTarget,
 } from '../core/inspector';
 import type { FieldSpan, Layer } from '../core/layers/types';
@@ -94,7 +94,7 @@ export function BitDiagram({
               </span>
               <div className="bit-row-grid">
                 {row.cells.map((cell) => {
-                  const active = doesSpanMatchHighlight(cell.span, highlight);
+                  const active = doesSpanMatchTarget(cell.span, highlight);
                   const startBit = cell.span.bitOffset;
                   const endBit = startBit + cell.span.bitLength - 1;
 

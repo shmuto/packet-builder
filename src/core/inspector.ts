@@ -253,7 +253,7 @@ export type HighlightTarget =
   | { readonly kind: 'byte'; readonly byteIndex: number };
 
 /** Returns true if the given FieldSpan matches the active hover/focus target. */
-export function doesSpanMatchHighlight(
+export function doesSpanMatchTarget(
   span: FieldSpan,
   target: HighlightTarget | null,
 ): boolean {
@@ -268,6 +268,37 @@ export function doesSpanMatchHighlight(
   return span.bitOffset < byteEndBit && span.bitOffset + span.bitLength > byteStartBit;
 }
 
+/**
+ * Returns the set of packet byte indices that should be highlighted for the given target.
+ * Sub-byte fields (e.g., 4-bit IPv4 Version/IHL or 3-bit Flags) highlight every byte
+ * containing at least one bit of that field.
+ */
+export function findHighlightedByteIndices(
+  spans: readonly FieldSpan[],
+  target: HighlightTarget | null,
+): ReadonlySet<number> {
+  const indices = new Set<number>();
+  if (!target) {
+    return indices;
+  }
+  if (target.kind === 'byte') {
+    if (Number.isInteger(target.byteIndex) && target.byteIndex >= 0) {
+      indices.add(target.byteIndex);
+    }
+    return indices;
+  }
+  for (const span of spans) {
+    if (span.layerIndex === target.layerIndex && span.fieldId === target.fieldId) {
+      const startByte = Math.floor(span.bitOffset / 8);
+      const endByte = Math.floor((span.bitOffset + span.bitLength - 1) / 8);
+      for (let b = startByte; b <= endByte; b++) {
+        indices.add(b);
+      }
+    }
+  }
+  return indices;
+}
+
 /** Returns true if the given hex dump byte cell should be highlighted. */
 export function isByteHighlighted(
   cell: HexByteCell,
@@ -279,9 +310,7 @@ export function isByteHighlighted(
   if (target.kind === 'byte') {
     return cell.byteIndex === target.byteIndex;
   }
-  return cell.spans.some(
-    (s) => s.layerIndex === target.layerIndex && s.fieldId === target.fieldId,
-  );
+  return cell.spans.some((s) => doesSpanMatchTarget(s, target));
 }
 
 /** Returns true if the given editor field should be highlighted. */
@@ -297,14 +326,11 @@ export function isFieldHighlighted(
   if (target.kind === 'field') {
     return target.layerIndex === layerIndex && target.fieldId === fieldId;
   }
-  const byteStartBit = target.byteIndex * 8;
-  const byteEndBit = byteStartBit + 8;
   return spans.some(
     (s) =>
       s.layerIndex === layerIndex &&
       s.fieldId === fieldId &&
-      s.bitOffset < byteEndBit &&
-      s.bitOffset + s.bitLength > byteStartBit,
+      doesSpanMatchTarget(s, target),
   );
 }
 

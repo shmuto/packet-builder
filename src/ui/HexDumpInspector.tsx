@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toHexDump, toHexString } from '../core/bytes';
 import {
+  findHighlightedByteIndices,
   formatByteBinary,
-  isByteHighlighted,
   type EvaluatedPacketDraft,
+  type HexDumpRow,
   type HighlightTarget,
 } from '../core/inspector';
 import type { Layer, LayerType } from '../core/layers/types';
@@ -28,6 +29,53 @@ function segmentFullLabel(type: LayerType | 'payload'): string {
   return type === 'payload' ? 'Payload' : LAYER_META[type].name;
 }
 
+interface HexDumpRowViewProps {
+  readonly row: HexDumpRow;
+  /** 16-bit bitmask of highlighted columns in this row so untouched rows skip re-rendering */
+  readonly highlightMask: number;
+  readonly onHoverByte: (byteIndex: number) => void;
+}
+
+const HexDumpRowView = memo(function HexDumpRowView({
+  row,
+  highlightMask,
+  onHoverByte,
+}: HexDumpRowViewProps) {
+  return (
+    <div className="hexdump-row">
+      <span className="hexdump-offset-col">{row.offsetLabel}:</span>
+      <span className="hexdump-bytes-col">
+        {row.cells.map((cell, idx) => {
+          const highlighted = (highlightMask & (1 << idx)) !== 0;
+          return (
+            <span
+              key={cell.byteIndex}
+              className={`hex-byte${cell.layerType ? ` layer-fg-${cell.layerType}` : ''}${idx === 7 ? ' is-mid-gap' : ''}${highlighted ? ' is-highlighted' : ''}`}
+              onMouseEnter={() => onHoverByte(cell.byteIndex)}
+            >
+              {cell.hex}
+            </span>
+          );
+        })}
+      </span>
+      <span className="hexdump-ascii-col">
+        {row.cells.map((cell, idx) => {
+          const highlighted = (highlightMask & (1 << idx)) !== 0;
+          return (
+            <span
+              key={cell.byteIndex}
+              className={`ascii-char${cell.layerType ? ` layer-fg-${cell.layerType}` : ''}${highlighted ? ' is-highlighted' : ''}`}
+              onMouseEnter={() => onHoverByte(cell.byteIndex)}
+            >
+              {cell.ascii}
+            </span>
+          );
+        })}
+      </span>
+    </div>
+  );
+});
+
 export function HexDumpInspector({
   layers,
   draft,
@@ -50,6 +98,19 @@ export function HexDumpInspector({
     };
   }, []);
 
+  // Precompute highlighted byte indices once per highlight change for O(1) lookup
+  const highlightedByteSet = useMemo(
+    () => findHighlightedByteIndices(spans, highlight),
+    [spans, highlight],
+  );
+
+  const handleHoverByte = useCallback(
+    (byteIndex: number) => {
+      onHighlightChange({ kind: 'byte', byteIndex });
+    },
+    [onHighlightChange],
+  );
+
   // Follow hovered layer automatically in the 32-bit diagram
   useEffect(() => {
     if (!highlight) return;
@@ -61,7 +122,10 @@ export function HexDumpInspector({
     }
     const byteStart = highlight.byteIndex * 8;
     const match = spans.find(
-      (s) => s.section === 'layer' && s.bitOffset < byteStart + 8 && s.bitOffset + s.bitLength > byteStart,
+      (s) =>
+        s.section === 'layer' &&
+        s.bitOffset < byteStart + 8 &&
+        s.bitOffset + s.bitLength > byteStart,
     );
     if (match) {
       setSelectedDiagramLayer(match.layerIndex);
@@ -102,10 +166,10 @@ export function HexDumpInspector({
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    // Defer revoking the object URL so asynchronous download initiation succeeds across browsers
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  // Compute live detail strip for the active hover target
   const hoveredByteDetail = (() => {
     if (!isSuccess || !bytes || !highlight) return null;
     if (highlight.kind === 'byte') {
@@ -275,43 +339,24 @@ export function HexDumpInspector({
               <span className="hexdump-ascii-col">ASCII</span>
             </div>
             <div className="hexdump-rows">
-              {rows.map((row) => (
-                <div key={row.offset} className="hexdump-row">
-                  <span className="hexdump-offset-col">{row.offsetLabel}:</span>
-                  <span className="hexdump-bytes-col">
-                    {row.cells.map((cell, idx) => {
-                      const highlighted = isByteHighlighted(cell, highlight);
-                      return (
-                        <span
-                          key={cell.byteIndex}
-                          className={`hex-byte${cell.layerType ? ` layer-fg-${cell.layerType}` : ''}${idx === 7 ? ' is-mid-gap' : ''}${highlighted ? ' is-highlighted' : ''}`}
-                          onMouseEnter={() =>
-                            onHighlightChange({ kind: 'byte', byteIndex: cell.byteIndex })
-                          }
-                        >
-                          {cell.hex}
-                        </span>
-                      );
-                    })}
-                  </span>
-                  <span className="hexdump-ascii-col">
-                    {row.cells.map((cell) => {
-                      const highlighted = isByteHighlighted(cell, highlight);
-                      return (
-                        <span
-                          key={cell.byteIndex}
-                          className={`ascii-char${cell.layerType ? ` layer-fg-${cell.layerType}` : ''}${highlighted ? ' is-highlighted' : ''}`}
-                          onMouseEnter={() =>
-                            onHighlightChange({ kind: 'byte', byteIndex: cell.byteIndex })
-                          }
-                        >
-                          {cell.ascii}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </div>
-              ))}
+              {rows.map((row) => {
+                let mask = 0;
+                if (highlightedByteSet.size > 0) {
+                  for (let idx = 0; idx < row.cells.length; idx++) {
+                    if (highlightedByteSet.has(row.cells[idx].byteIndex)) {
+                      mask |= 1 << idx;
+                    }
+                  }
+                }
+                return (
+                  <HexDumpRowView
+                    key={row.offset}
+                    row={row}
+                    highlightMask={mask}
+                    onHoverByte={handleHoverByte}
+                  />
+                );
+              })}
             </div>
           </div>
 

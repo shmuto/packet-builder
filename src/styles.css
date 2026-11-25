@@ -873,7 +873,9 @@ body {
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
-.fixed-field-chip.is-highlighted {
+.fixed-field-chip.is-highlighted,
+.fixed-field-chip:focus-visible {
+  outline: none;
   border-style: solid;
   border-color: var(--accent);
   background: var(--accent-soft);

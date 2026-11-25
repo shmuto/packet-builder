@@ -65,9 +65,12 @@ export function FixedFieldChip({
 }: FixedFieldChipProps) {
   return (
     <span
+      tabIndex={0}
       className={`fixed-field-chip mono${isHighlighted ? ' is-highlighted' : ''}`}
       onMouseEnter={onHoverStart}
       onMouseLeave={onHoverEnd}
+      onFocus={onHoverStart}
+      onBlur={onHoverEnd}
     >
       <span className="fixed-field-name">{label}</span>
       <span className="fixed-field-val">{value}</span>
