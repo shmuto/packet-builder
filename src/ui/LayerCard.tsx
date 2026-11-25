@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { isFieldHighlighted, type HighlightTarget } from '../core/inspector';
+import {
+  isFieldHighlighted,
+  resolveHighlightedLayerIndex,
+  type HighlightTarget,
+} from '../core/inspector';
 import { BGP_DEFAULT_MARKER_HEX } from '../core/layers/bgp';
 import type {
   BGPMessageType,
@@ -87,10 +91,11 @@ export function LayerCard({
   const generalWarnings = warnings.filter((w) => w.fieldId === undefined);
   const hasErrors = errors.length > 0;
   const hasWarnings = warnings.length > 0;
+  const isLayerHighlighted = resolveHighlightedLayerIndex(spans, highlight) === index;
 
   return (
     <section
-      className={`layer-card layer-theme-${layer.type}${hasErrors ? ' has-error' : ''}`}
+      className={`layer-card layer-theme-${layer.type}${hasErrors ? ' has-error' : ''}${isLayerHighlighted ? ' is-layer-highlighted' : ''}`}
       aria-label={`${meta.name} layer`}
     >
       <header className="layer-header">

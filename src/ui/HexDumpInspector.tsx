@@ -86,7 +86,6 @@ export function HexDumpInspector({
   const totalBytes = bytes ? bytes.length : 0;
   const errorCount = errors.length + (payloadError ? 1 : 0);
 
-  const [selectedDiagramLayer, setSelectedDiagramLayer] = useState(0);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const copyTimerRef = useRef<number | null>(null);
 
@@ -110,27 +109,6 @@ export function HexDumpInspector({
     },
     [onHighlightChange],
   );
-
-  // Follow hovered layer automatically in the 32-bit diagram
-  useEffect(() => {
-    if (!highlight) return;
-    if (highlight.kind === 'field') {
-      if (highlight.layerIndex >= 0 && highlight.layerIndex < layers.length) {
-        setSelectedDiagramLayer(highlight.layerIndex);
-      }
-      return;
-    }
-    const byteStart = highlight.byteIndex * 8;
-    const match = spans.find(
-      (s) =>
-        s.section === 'layer' &&
-        s.bitOffset < byteStart + 8 &&
-        s.bitOffset + s.bitLength > byteStart,
-    );
-    if (match) {
-      setSelectedDiagramLayer(match.layerIndex);
-    }
-  }, [highlight, layers.length, spans]);
 
   const scheduleCopyReset = () => {
     if (copyTimerRef.current !== null) {
@@ -172,6 +150,21 @@ export function HexDumpInspector({
 
   const hoveredByteDetail = (() => {
     if (!isSuccess || !bytes || !highlight) return null;
+    if (highlight.kind === 'layer') {
+      const seg = segments.find(
+        (s) => s.layerIndex === highlight.layerIndex && s.layerType !== 'payload',
+      );
+      if (!seg || seg.layerType === 'payload') return null;
+      const meta = LAYER_META[seg.layerType];
+      const endByte = seg.byteOffset + seg.byteLength - 1;
+      const startBit = seg.byteOffset * 8;
+      const endBit = (seg.byteOffset + seg.byteLength) * 8 - 1;
+      return {
+        title: `${meta.name} Header`,
+        metrics: `${seg.byteLength} bytes (${seg.byteLength * 8} bits) · bytes ${seg.byteOffset}..${endByte} · bits ${startBit}..${endBit}`,
+        fields: meta.rfc,
+      };
+    }
     if (highlight.kind === 'byte') {
       const value = bytes[highlight.byteIndex];
       if (value === undefined) return null;
@@ -260,30 +253,57 @@ export function HexDumpInspector({
       </div>
 
       {isSuccess && segments.length > 0 && (
-        <div className="segment-overview">
-          <div className="segment-bar" aria-label="Byte breakdown by layer">
-            {segments.map((seg) => (
-              <div
-                key={`${seg.layerIndex}-${seg.layerType}`}
-                className={`segment-bar-slice layer-bg-${seg.layerType}`}
-                style={{ flexGrow: seg.byteLength }}
-                title={`${segmentFullLabel(seg.layerType)}: ${seg.byteLength} bytes (offset ${seg.byteOffset}..${seg.byteOffset + seg.byteLength - 1})`}
-              >
-                <span>{segmentShortLabel(seg.layerType)}</span>
-              </div>
-            ))}
+        <div
+          className="segment-overview"
+          onMouseLeave={() => onHighlightChange(null)}
+        >
+          <div className="segment-bar" role="group" aria-label="Byte breakdown by layer">
+            {segments.map((seg) => {
+              const target: HighlightTarget =
+                seg.layerType === 'payload'
+                  ? { kind: 'field', layerIndex: seg.layerIndex, fieldId: 'payload' }
+                  : { kind: 'layer', layerIndex: seg.layerIndex };
+              return (
+                <button
+                  key={`${seg.layerIndex}-${seg.layerType}`}
+                  type="button"
+                  className={`segment-bar-slice layer-bg-${seg.layerType}`}
+                  style={{ flexGrow: seg.byteLength }}
+                  title={`${segmentFullLabel(seg.layerType)}: ${seg.byteLength} bytes (offset ${seg.byteOffset}..${seg.byteOffset + seg.byteLength - 1})`}
+                  onClick={() => onHighlightChange(target)}
+                  onMouseEnter={() => onHighlightChange(target)}
+                  onMouseLeave={() => onHighlightChange(null)}
+                  onFocus={() => onHighlightChange(target)}
+                  onBlur={() => onHighlightChange(null)}
+                >
+                  <span>{segmentShortLabel(seg.layerType)}</span>
+                </button>
+              );
+            })}
           </div>
-          <div className="segment-legend">
-            {segments.map((seg) => (
-              <span
-                key={`${seg.layerIndex}-${seg.layerType}`}
-                className="legend-item"
-              >
-                <span className={`legend-swatch layer-bg-${seg.layerType}`} />
-                <span>{segmentFullLabel(seg.layerType)}</span>
-                <span className="mono legend-bytes">{seg.byteLength}B</span>
-              </span>
-            ))}
+          <div className="segment-legend" role="group" aria-label="Layer byte legend">
+            {segments.map((seg) => {
+              const target: HighlightTarget =
+                seg.layerType === 'payload'
+                  ? { kind: 'field', layerIndex: seg.layerIndex, fieldId: 'payload' }
+                  : { kind: 'layer', layerIndex: seg.layerIndex };
+              return (
+                <button
+                  key={`${seg.layerIndex}-${seg.layerType}`}
+                  type="button"
+                  className="legend-item"
+                  onClick={() => onHighlightChange(target)}
+                  onMouseEnter={() => onHighlightChange(target)}
+                  onMouseLeave={() => onHighlightChange(null)}
+                  onFocus={() => onHighlightChange(target)}
+                  onBlur={() => onHighlightChange(null)}
+                >
+                  <span className={`legend-swatch layer-bg-${seg.layerType}`} />
+                  <span>{segmentFullLabel(seg.layerType)}</span>
+                  <span className="mono legend-bytes">{seg.byteLength}B</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -320,7 +340,7 @@ export function HexDumpInspector({
               </>
             ) : (
               <span className="hover-detail-placeholder">
-                Hover a field, hex byte, or bit-diagram cell to inspect bit &amp; byte mapping.
+                Hover a field, hex byte, header pill, or bit-diagram cell to inspect bit &amp; byte mapping.
               </span>
             )}
           </div>
@@ -363,9 +383,8 @@ export function HexDumpInspector({
           <BitDiagram
             layers={layers}
             spans={spans}
-            selectedLayerIndex={selectedDiagramLayer}
+            segments={segments}
             highlight={highlight}
-            onSelectLayer={setSelectedDiagramLayer}
             onHighlightChange={onHighlightChange}
           />
         </>

@@ -3,6 +3,7 @@ import { encodeUtf8, parseHexBytes } from './bytes';
 import {
   buildBitDiagramRows,
   buildHexDumpRows,
+  buildUnifiedBitDiagramRows,
   doesSpanMatchTarget,
   evaluatePacketDraft,
   findHighlightedByteIndices,
@@ -13,6 +14,7 @@ import {
   isByteHighlighted,
   isFieldHighlighted,
   parseUnsignedIntInput,
+  resolveHighlightedLayerIndex,
   summarizeLayerSegments,
   type BitDiagramRow,
 } from './inspector';
@@ -476,5 +478,159 @@ describe('buildBitDiagramRows', () => {
 
     // Missing layer index returns empty array
     expect(buildBitDiagramRows(tcpDraft.spans, 99)).toEqual([]);
+  });
+});
+
+describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
+  it('lays out all headers continuously in wire order with exact layer start/end boundaries and excludes Payload', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      ok(encodeUtf8('Hello')),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Ethernet (14B=112b) + IPv4 (20B=160b) + UDP (8B=64b) = 42B = 336 bits -> 11 rows (10x32 + 16)
+    const rows = buildUnifiedBitDiagramRows(draft.spans);
+    expect(rows).toHaveLength(11);
+
+    let totalBits = 0;
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      expect(row.rowIndex).toBe(r);
+      expect(row.bitOffset).toBe(r * 32);
+      expect(row.byteOffset).toBe(r * 4);
+      let colCursor = 0;
+      for (const cell of row.cells) {
+        expect(cell.span.section).toBe('layer');
+        expect(cell.colStart).toBe(colCursor);
+        expect(cell.colSpan).toBeGreaterThan(0);
+        expect(cell.bitLengthInRow).toBe(cell.colSpan);
+        colCursor += cell.colSpan;
+      }
+      expect(colCursor).toBe(row.totalBitsInRow);
+      if (r < rows.length - 1) {
+        expect(colCursor).toBe(32);
+      }
+      totalBits += colCursor;
+    }
+    expect(totalBits).toBe(336);
+
+    // Row 0: Ethernet starts at bit 0
+    expect(rows[0].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 32,
+      isLayerStart: true,
+      isLayerEnd: false,
+    });
+
+    // Row 3 (bit 96): mid-row boundary from Ethernet EtherType -> IPv4 Version/IHL/TOS
+    expect(
+      rows[3].cells.map((c) => [
+        c.span.layerType,
+        c.span.fieldId,
+        c.colStart,
+        c.colSpan,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      ['ethernet', 'etherType', 0, 16, false, true],
+      ['ipv4', 'version', 16, 4, true, false],
+      ['ipv4', 'ihl', 20, 4, false, false],
+      ['ipv4', 'tos', 24, 8, false, false],
+    ]);
+
+    // Row 8 (bit 256): mid-row boundary from IPv4 dstIp (cont.) -> UDP srcPort
+    expect(
+      rows[8].cells.map((c) => [
+        c.span.layerType,
+        c.span.fieldId,
+        c.colStart,
+        c.colSpan,
+        c.isContinuation,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      ['ipv4', 'dstIp', 0, 16, true, false, true],
+      ['udp', 'srcPort', 16, 16, false, true, false],
+    ]);
+
+    // Row 10 (bit 320): UDP checksum ends the header block
+    expect(rows[10].cells).toHaveLength(1);
+    expect(rows[10].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 16,
+      isLayerStart: false,
+      isLayerEnd: true,
+    });
+    expect(rows[10].cells[0].span.fieldId).toBe('checksum');
+  });
+
+  it('returns empty rows for payload-only packets and aligns Raw IPv4 + TCP cleanly on 32-bit rows', () => {
+    const payloadOnly = evaluatePacketDraft([], ok(encodeUtf8('abc')));
+    expect(payloadOnly.ok).toBe(true);
+    expect(buildUnifiedBitDiagramRows(payloadOnly.spans)).toEqual([]);
+
+    const rawIpTcp = evaluatePacketDraft(
+      [createDefaultIPv4(), createDefaultTCP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(rawIpTcp.ok).toBe(true);
+    const rows = buildUnifiedBitDiagramRows(rawIpTcp.spans);
+    expect(rows).toHaveLength(10); // 160 + 160 = 320 bits
+    expect(rows[0].cells[0]).toMatchObject({ isLayerStart: true });
+    expect(rows[4].cells[0]).toMatchObject({ isLayerEnd: true });
+    expect(rows[5].cells[0]).toMatchObject({ isLayerStart: true });
+    expect(rows[9].cells[rows[9].cells.length - 1]).toMatchObject({ isLayerEnd: true });
+  });
+
+  it('supports layer-range HighlightTarget and resolves active header index across field/byte/layer targets', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      ok(encodeUtf8('Hello')),
+    );
+    expect(draft.ok).toBe(true);
+
+    const ipv4Target = { kind: 'layer' as const, layerIndex: 1 };
+    const ipv4Bytes = findHighlightedByteIndices(draft.spans, ipv4Target);
+    // IPv4 occupies bytes 14..33 (20 bytes)
+    expect(ipv4Bytes.size).toBe(20);
+    expect(ipv4Bytes.has(13)).toBe(false);
+    expect(ipv4Bytes.has(14)).toBe(true);
+    expect(ipv4Bytes.has(33)).toBe(true);
+    expect(ipv4Bytes.has(34)).toBe(false);
+
+    // doesSpanMatchTarget matches only IPv4 spans
+    const ethSpan = draft.spans.find((s) => s.layerIndex === 0)!;
+    const ipSpan = draft.spans.find((s) => s.layerIndex === 1 && s.fieldId === 'ttl')!;
+    const payloadSpan = draft.spans.find((s) => s.section === 'payload')!;
+    expect(doesSpanMatchTarget(ethSpan, ipv4Target)).toBe(false);
+    expect(doesSpanMatchTarget(ipSpan, ipv4Target)).toBe(true);
+    expect(doesSpanMatchTarget(payloadSpan, ipv4Target)).toBe(false);
+
+    // Layer target should not light up individual form inputs inside LayerCard
+    expect(isFieldHighlighted(1, 'ttl', draft.spans, ipv4Target)).toBe(false);
+
+    // resolveHighlightedLayerIndex across all target kinds
+    expect(resolveHighlightedLayerIndex(draft.spans, null)).toBeNull();
+    expect(resolveHighlightedLayerIndex(draft.spans, ipv4Target)).toBe(1);
+    expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'layer', layerIndex: 99 })).toBeNull();
+    expect(
+      resolveHighlightedLayerIndex(draft.spans, {
+        kind: 'field',
+        layerIndex: 2,
+        fieldId: 'srcPort',
+      }),
+    ).toBe(2);
+    expect(
+      resolveHighlightedLayerIndex(draft.spans, {
+        kind: 'field',
+        layerIndex: 3,
+        fieldId: 'payload',
+      }),
+    ).toBeNull();
+    expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 14 })).toBe(1);
+    expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 42 })).toBeNull();
   });
 });

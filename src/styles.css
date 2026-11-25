@@ -34,6 +34,8 @@
   --layer-bgp: #a14d1c;
   --layer-payload: #5b6574;
 
+  --layer-on-solid: #ffffff;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.03);
@@ -76,6 +78,7 @@
     --layer-tcp: #f2798f;
     --layer-bgp: #e09362;
     --layer-payload: #9aa5b6;
+    --layer-on-solid: #11141a;
 
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
   }
@@ -273,6 +276,12 @@ body {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.layer-card.is-layer-highlighted {
+  border-color: var(--layer-color, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--layer-color, var(--accent)) 28%, transparent);
 }
 
 .layer-card.has-error {
@@ -690,16 +699,25 @@ body {
 }
 
 .segment-bar-slice {
+  appearance: none;
+  border: 0;
+  padding: 0 0.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  color: var(--layer-on-solid);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 700;
   min-width: 1.6rem;
   overflow: hidden;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.segment-bar-slice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .segment-legend {
@@ -711,9 +729,24 @@ body {
 }
 
 .legend-item {
+  appearance: none;
+  border: 0;
+  padding: 0.08rem 0.25rem;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  cursor: pointer;
+}
+
+.legend-item:hover,
+.legend-item:focus-visible {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  outline: none;
 }
 
 .legend-swatch {
@@ -1001,7 +1034,7 @@ body {
   border-radius: 3px;
 }
 
-/* 32-bit RFC header diagram */
+/* 32-bit unified RFC header diagram */
 .bit-diagram-section {
   display: flex;
   flex-direction: column;
@@ -1030,29 +1063,55 @@ body {
   color: var(--text-muted);
 }
 
-.bit-diagram-tabs {
-  display: inline-flex;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-surface);
+.bit-layer-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
-.bit-tab {
+.bit-layer-pill {
   appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--layer-color, var(--border-subtle)) 38%, var(--border-subtle));
+  background: color-mix(in srgb, var(--layer-color, var(--bg-surface)) 10%, var(--bg-surface));
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 0.24rem 0.55rem;
   cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
 }
 
-.bit-tab.is-active {
-  background: var(--accent);
-  color: #ffffff;
+.bit-layer-pill:hover,
+.bit-layer-pill:focus-visible,
+.bit-layer-pill.is-active {
+  background: var(--layer-color, var(--accent));
+  border-color: var(--layer-color, var(--accent));
+  color: var(--layer-on-solid);
+  outline: none;
+}
+
+.bit-layer-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.bit-layer-pill:hover .bit-layer-dot,
+.bit-layer-pill:focus-visible .bit-layer-dot,
+.bit-layer-pill.is-active .bit-layer-dot {
+  background: var(--layer-on-solid);
+}
+
+.bit-layer-range {
+  font-size: 0.66rem;
+  font-weight: 500;
+  opacity: 0.82;
 }
 
 .bit-diagram-frame {
@@ -1066,7 +1125,7 @@ body {
 .bit-ruler,
 .bit-row {
   display: grid;
-  grid-template-columns: 2.4rem minmax(24rem, 1fr);
+  grid-template-columns: 2.8rem minmax(24rem, 1fr);
   align-items: stretch;
   gap: 0.45rem;
 }
@@ -1105,8 +1164,8 @@ body {
 
 .bit-cell {
   appearance: none;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--layer-color, var(--border-subtle)) 34%, var(--border-subtle));
+  background: color-mix(in srgb, var(--layer-color, var(--bg-surface)) 11%, var(--bg-surface));
   color: var(--text-primary);
   padding: 0.34rem 0.25rem;
   min-height: 2.1rem;
@@ -1117,11 +1176,24 @@ body {
   gap: 0.08rem;
   overflow: hidden;
   cursor: pointer;
-  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease, opacity 0.1s ease;
 }
 
 .bit-cell.is-continuation {
   border-style: dashed;
+}
+
+.bit-cell.is-layer-start {
+  border-left: 3px solid var(--layer-color, var(--accent));
+}
+
+.bit-cell.is-layer-active {
+  background: color-mix(in srgb, var(--layer-color, var(--accent)) 24%, var(--bg-surface));
+  border-color: var(--layer-color, var(--accent));
+}
+
+.bit-cell.is-layer-dimmed {
+  opacity: 0.42;
 }
 
 .bit-cell-label {
@@ -1136,17 +1208,19 @@ body {
 
 .bit-cell-size {
   font-size: 0.62rem;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .bit-cell.is-highlighted {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
+  background: var(--layer-color, var(--accent));
+  border-color: var(--layer-color, var(--accent));
+  color: var(--layer-on-solid);
+  opacity: 1;
 }
 
 .bit-cell.is-highlighted .bit-cell-size {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--layer-on-solid);
+  opacity: 0.85;
 }
 
 /* Import Hex panel & decoded notes banner */

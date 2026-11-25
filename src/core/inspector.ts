@@ -250,7 +250,8 @@ export function formatByteBinary(byte: number): string {
 
 export type HighlightTarget =
   | { readonly kind: 'field'; readonly layerIndex: number; readonly fieldId: string }
-  | { readonly kind: 'byte'; readonly byteIndex: number };
+  | { readonly kind: 'byte'; readonly byteIndex: number }
+  | { readonly kind: 'layer'; readonly layerIndex: number };
 
 /** Returns true if the given FieldSpan matches the active hover/focus target. */
 export function doesSpanMatchTarget(
@@ -260,12 +261,43 @@ export function doesSpanMatchTarget(
   if (!target) {
     return false;
   }
+  if (target.kind === 'layer') {
+    return span.section === 'layer' && span.layerIndex === target.layerIndex;
+  }
   if (target.kind === 'field') {
     return span.layerIndex === target.layerIndex && span.fieldId === target.fieldId;
   }
   const byteStartBit = target.byteIndex * 8;
   const byteEndBit = byteStartBit + 8;
   return span.bitOffset < byteEndBit && span.bitOffset + span.bitLength > byteStartBit;
+}
+
+/**
+ * Resolves which protocol header layer index is currently active for the given highlight target,
+ * or null if nothing (or only Payload) is highlighted.
+ */
+export function resolveHighlightedLayerIndex(
+  spans: readonly FieldSpan[],
+  target: HighlightTarget | null,
+): number | null {
+  if (!target) {
+    return null;
+  }
+  if (target.kind === 'layer') {
+    const exists = spans.some((s) => s.section === 'layer' && s.layerIndex === target.layerIndex);
+    return exists ? target.layerIndex : null;
+  }
+  if (target.kind === 'field') {
+    const match = spans.find(
+      (s) =>
+        s.section === 'layer' &&
+        s.layerIndex === target.layerIndex &&
+        s.fieldId === target.fieldId,
+    );
+    return match ? match.layerIndex : null;
+  }
+  const match = spans.find((s) => s.section === 'layer' && doesSpanMatchTarget(s, target));
+  return match ? match.layerIndex : null;
 }
 
 /**
@@ -288,7 +320,7 @@ export function findHighlightedByteIndices(
     return indices;
   }
   for (const span of spans) {
-    if (span.layerIndex === target.layerIndex && span.fieldId === target.fieldId) {
+    if (doesSpanMatchTarget(span, target)) {
       const startByte = Math.floor(span.bitOffset / 8);
       const endByte = Math.floor((span.bitOffset + span.bitLength - 1) / 8);
       for (let b = startByte; b <= endByte; b++) {
@@ -320,7 +352,7 @@ export function isFieldHighlighted(
   spans: readonly FieldSpan[],
   target: HighlightTarget | null,
 ): boolean {
-  if (!target) {
+  if (!target || target.kind === 'layer') {
     return false;
   }
   if (target.kind === 'field') {
@@ -349,7 +381,84 @@ export interface BitDiagramRow {
   readonly cells: readonly BitDiagramCell[];
 }
 
+export interface UnifiedBitDiagramCell extends BitDiagramCell {
+  /** True for the very first cell of a protocol header layer */
+  readonly isLayerStart: boolean;
+  /** True for the very last cell of a protocol header layer */
+  readonly isLayerEnd: boolean;
+}
+
+export interface UnifiedBitDiagramRow {
+  readonly rowIndex: number;
+  /** Packet-level bit offset at the start of this 32-bit row (0, 32, 64, ...) */
+  readonly bitOffset: number;
+  /** Packet-level byte offset at the start of this 32-bit row (0, 4, 8, ...) */
+  readonly byteOffset: number;
+  readonly totalBitsInRow: number;
+  readonly cells: readonly UnifiedBitDiagramCell[];
+}
+
 const BITS_PER_DIAGRAM_ROW = 32;
+
+function splitSpansInto32BitRows<TCell extends BitDiagramCell>(
+  spans: readonly FieldSpan[],
+  baseBitOffset: number,
+  createCell: (
+    base: BitDiagramCell,
+    spanBitStart: number,
+    spanBitEnd: number,
+  ) => TCell,
+): { readonly rowIndex: number; readonly totalBitsInRow: number; readonly cells: readonly TCell[] }[] {
+  const rowMap = new Map<number, TCell[]>();
+
+  for (const span of spans) {
+    let remaining = span.bitLength;
+    let relCursor = span.bitOffset - baseBitOffset;
+    let absCursor = span.bitOffset;
+    let firstPart = true;
+
+    while (remaining > 0) {
+      const rowIndex = Math.floor(relCursor / BITS_PER_DIAGRAM_ROW);
+      const colStart = relCursor % BITS_PER_DIAGRAM_ROW;
+      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
+      const take = Math.min(remaining, spaceInRow);
+
+      const cells = rowMap.get(rowIndex) ?? [];
+      cells.push(
+        createCell(
+          {
+            span,
+            colStart,
+            colSpan: take,
+            bitLengthInRow: take,
+            isContinuation: !firstPart,
+          },
+          absCursor,
+          absCursor + take,
+        ),
+      );
+      rowMap.set(rowIndex, cells);
+
+      relCursor += take;
+      absCursor += take;
+      remaining -= take;
+      firstPart = false;
+    }
+  }
+
+  const rows: {
+    readonly rowIndex: number;
+    readonly totalBitsInRow: number;
+    readonly cells: readonly TCell[];
+  }[] = [];
+  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
+  for (const rowIndex of sortedIndices) {
+    const cells = rowMap.get(rowIndex)!;
+    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
+    rows.push({ rowIndex, totalBitsInRow, cells });
+  }
+  return rows;
+}
 
 /**
  * Splits a single layer's FieldSpan entries into RFC-style 32-bit-wide rows.
@@ -365,48 +474,53 @@ export function buildBitDiagramRows(
     return [];
   }
 
-  const baseBitOffset = layerSpans[0].bitOffset;
-  const rowMap = new Map<number, BitDiagramCell[]>();
+  return splitSpansInto32BitRows(layerSpans, layerSpans[0].bitOffset, (base) => base).map(
+    (row) => ({
+      rowIndex: row.rowIndex,
+      bitOffsetInLayer: row.rowIndex * BITS_PER_DIAGRAM_ROW,
+      totalBitsInRow: row.totalBitsInRow,
+      cells: row.cells,
+    }),
+  );
+}
 
-  for (const span of layerSpans) {
-    let remaining = span.bitLength;
-    let relCursor = span.bitOffset - baseBitOffset;
-    let firstPart = true;
+/**
+ * Splits ALL protocol header layers (`section === 'layer'`) continuously into a single
+ * unified 32-bit-wide diagram in wire order, marking header start/end boundaries so the UI
+ * can color-code and emphasize each header's exact bit range.
+ */
+export function buildUnifiedBitDiagramRows(
+  spans: readonly FieldSpan[],
+): UnifiedBitDiagramRow[] {
+  const headerSpans = spans.filter((s) => s.section === 'layer');
+  if (headerSpans.length === 0) {
+    return [];
+  }
 
-    while (remaining > 0) {
-      const rowIndex = Math.floor(relCursor / BITS_PER_DIAGRAM_ROW);
-      const colStart = relCursor % BITS_PER_DIAGRAM_ROW;
-      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
-      const take = Math.min(remaining, spaceInRow);
-
-      const cells = rowMap.get(rowIndex) ?? [];
-      cells.push({
-        span,
-        colStart,
-        colSpan: take,
-        bitLengthInRow: take,
-        isContinuation: !firstPart,
-      });
-      rowMap.set(rowIndex, cells);
-
-      relCursor += take;
-      remaining -= take;
-      firstPart = false;
+  const layerRanges = new Map<number, { startBit: number; endBit: number }>();
+  for (const span of headerSpans) {
+    const spanEnd = span.bitOffset + span.bitLength;
+    const existing = layerRanges.get(span.layerIndex);
+    if (!existing) {
+      layerRanges.set(span.layerIndex, { startBit: span.bitOffset, endBit: spanEnd });
+    } else {
+      if (span.bitOffset < existing.startBit) existing.startBit = span.bitOffset;
+      if (spanEnd > existing.endBit) existing.endBit = spanEnd;
     }
   }
 
-  const rows: BitDiagramRow[] = [];
-  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
-  for (const rowIndex of sortedIndices) {
-    const cells = rowMap.get(rowIndex)!;
-    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
-    rows.push({
-      rowIndex,
-      bitOffsetInLayer: rowIndex * BITS_PER_DIAGRAM_ROW,
-      totalBitsInRow,
-      cells,
-    });
-  }
-
-  return rows;
+  return splitSpansInto32BitRows(headerSpans, 0, (base, absStart, absEnd) => {
+    const range = layerRanges.get(base.span.layerIndex)!;
+    return {
+      ...base,
+      isLayerStart: absStart === range.startBit,
+      isLayerEnd: absEnd === range.endBit,
+    };
+  }).map((row) => ({
+    rowIndex: row.rowIndex,
+    bitOffset: row.rowIndex * BITS_PER_DIAGRAM_ROW,
+    byteOffset: row.rowIndex * (BITS_PER_DIAGRAM_ROW / 8),
+    totalBitsInRow: row.totalBitsInRow,
+    cells: row.cells,
+  }));
 }
