@@ -10,13 +10,13 @@ import type {
 } from './types';
 import { validateUintRange } from './types';
 
-/** IPv4 ヘッダ長（オプションなし、IHL=5 固定で 20 バイト） */
+/** IPv4 header length without options (IHL=5 fixed, 20 bytes) */
 export const IPV4_HEADER_LENGTH = 20;
 export const IPV4_VERSION = 4;
 export const IPV4_IHL = 5;
 export const IPV4_MAX_TOTAL_LENGTH = 0xffff;
 
-/** IPv4 プロトコル番号（IANA / RFC 792, 9293, 768） */
+/** IPv4 protocol numbers (IANA / RFC 792, 9293, 768) */
 export const IP_PROTOCOL_ICMP = 1;
 export const IP_PROTOCOL_TCP = 6;
 export const IP_PROTOCOL_UDP = 17;
@@ -32,8 +32,8 @@ export const IPV4_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'ttl', label: 'TTL', bitOffset: 64, bitLength: 8 },
   { fieldId: 'protocol', label: 'Protocol', bitOffset: 72, bitLength: 8 },
   { fieldId: 'headerChecksum', label: 'Header Checksum', bitOffset: 80, bitLength: 16 },
-  { fieldId: 'srcIp', label: '送信元 IPv4 アドレス', bitOffset: 96, bitLength: 32 },
-  { fieldId: 'dstIp', label: '宛先 IPv4 アドレス', bitOffset: 128, bitLength: 32 },
+  { fieldId: 'srcIp', label: 'Source IPv4', bitOffset: 96, bitLength: 32 },
+  { fieldId: 'dstIp', label: 'Destination IPv4', bitOffset: 128, bitLength: 32 },
 ];
 
 export interface EncodeIPv4Context {
@@ -56,7 +56,7 @@ function protocolNumberForUpperLayer(upperLayerType: LayerType | null): number |
 }
 
 /**
- * IPv4 ヘッダ（オプションなし 20 バイト、IHL=5）をエンコードする（RFC 791）。
+ * Encodes an IPv4 header without options (20 bytes, IHL=5, RFC 791).
  */
 export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncodeResult {
   const errors: PacketError[] = [];
@@ -92,13 +92,13 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'dstIp', message: dstIpResult.error });
   }
 
-  // 全長の上限チェック（RFC 791 Section 3.1: Total Length は 16 ビット最大 65535 バイト）
+  // RFC 791 Section 3.1: Total Length is 16-bit (max 65535 bytes)
   const actualTotalLength = IPV4_HEADER_LENGTH + ctx.upperBytesLength;
   if (actualTotalLength > IPV4_MAX_TOTAL_LENGTH) {
     errors.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'totalLength',
-      message: `IPv4 の全長が上限 65535 バイトを超えています（現在 ${actualTotalLength} バイト）。`,
+      message: `IPv4 total length exceeds the 65535-byte limit (got ${actualTotalLength} bytes, RFC 791).`,
     });
   }
 
@@ -113,13 +113,13 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'totalLength',
-          message: `Total Length（${totalLengthValue}）が IPv4 ヘッダ長 20 バイト未満です（RFC 791）。`,
+          message: `Manual Total Length (${totalLengthValue}) is smaller than the 20-byte IPv4 header (RFC 791).`,
         });
       } else if (actualTotalLength <= IPV4_MAX_TOTAL_LENGTH && totalLengthValue !== actualTotalLength) {
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'totalLength',
-          message: `Total Length に手動値 ${totalLengthValue} を使用しています（実際の長さは ${actualTotalLength} バイト）。`,
+          message: `Using manual Total Length ${totalLengthValue} (actual packet length is ${actualTotalLength} bytes).`,
         });
       }
     }
@@ -138,7 +138,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'protocol',
-          message: `Protocol に手動値 ${protocolValue} を使用しています（上位レイヤーの標準値は ${inferredProtocol}）。`,
+          message: `Using manual Protocol ${protocolValue} (expected ${inferredProtocol} for the upper layer).`,
         });
       }
     }
@@ -146,7 +146,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'protocol',
-      message: '上位に ICMP / TCP / UDP レイヤーがないため、Protocol に 0 を設定しています。',
+      message: 'No ICMP / TCP / UDP upper layer found; defaulting Protocol to 0.',
     });
   }
 
@@ -161,7 +161,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'flags',
-      message: 'IPv4 Flags の Reserved ビットが 1 に設定されています（RFC 791 では 0 固定）。',
+      message: 'IPv4 Reserved flag bit is set to 1 (must be 0 per RFC 791 Section 3.1).',
     });
   }
 
@@ -170,30 +170,20 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
   }
 
   const header = new Uint8Array(IPV4_HEADER_LENGTH);
-  // Byte 0: Version (4bit) + IHL (4bit)
   header[0] = (IPV4_VERSION << 4) | IPV4_IHL;
-  // Byte 1: TOS
   header[1] = layer.tos;
-  // Bytes 2..3: Total Length
   writeUint16BE(header, 2, totalLengthValue);
-  // Bytes 4..5: Identification
   writeUint16BE(header, 4, layer.identification);
-  // Bytes 6..7: Flags (3bit: bit0=R, bit1=DF, bit2=MF) + Fragment Offset (13bit)
   const flagsBits =
     (layer.flags.reserved ? 0b100 : 0) |
     (layer.flags.df ? 0b010 : 0) |
     (layer.flags.mf ? 0b001 : 0);
   writeUint16BE(header, 6, (flagsBits << 13) | layer.fragmentOffset);
-  // Byte 8: TTL
   header[8] = layer.ttl;
-  // Byte 9: Protocol
   header[9] = protocolValue;
-  // Bytes 10..11: Header Checksum（計算前は 0）
   header[10] = 0;
   header[11] = 0;
-  // Bytes 12..15: Source IP
   header.set(srcIpResult.value, 12);
-  // Bytes 16..19: Destination IP
   header.set(dstIpResult.value, 16);
 
   const autoChecksum = internetChecksum(header);
@@ -205,7 +195,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'headerChecksum',
-      message: `Header Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
+      message: `Using manual Header Checksum 0x${checksumValue.toString(16).padStart(4, '0')} (computed value is 0x${autoChecksum.toString(16).padStart(4, '0')}).`,
     });
   }
 

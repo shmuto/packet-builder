@@ -2,11 +2,11 @@ import { writeUint16BE } from './bytes';
 import { err, ok, type Result } from './result';
 
 /**
- * RFC 1071 に従い、16 ビットのインターネットチェックサムを計算する。
+ * Computes the 16-bit Internet Checksum defined in RFC 1071.
  *
- * - バイト列はネットワークバイトオーダー（ビッグエンディアン）の 16 ビット語列として扱う。
- * - バイト長が奇数の場合は、末尾に 0x00 を補って 16 ビット語にする。
- * - 1 の補数和を取り、その 1 の補数を 0x0000〜0xffff の整数で返す。
+ * - Treats bytes as big-endian 16-bit words.
+ * - Pads odd-length input with a trailing 0x00 byte (RFC 1071 Section 4.1).
+ * - Returns the one's complement of the one's complement sum (0x0000-0xffff).
  */
 export function internetChecksum(bytes: Uint8Array): number {
   let sum = 0;
@@ -16,7 +16,7 @@ export function internetChecksum(bytes: Uint8Array): number {
     const low = i + 1 < bytes.length ? bytes[i + 1] : 0;
     const word = (high << 8) | low;
     sum += word;
-    // 毎回 16 ビットに折り畳むことで、長いバイト列でも 32 ビットオーバーフローを防ぐ
+    // Fold carry into 16 bits on every step to prevent 32-bit overflow on large inputs
     if (sum > 0xffff) {
       sum = (sum & 0xffff) + (sum >>> 16);
     }
@@ -26,42 +26,40 @@ export function internetChecksum(bytes: Uint8Array): number {
 }
 
 export interface IPv4PseudoHeaderParams {
-  /** 送信元 IPv4 アドレス（4 バイト） */
+  /** Source IPv4 address (4 bytes) */
   readonly srcIp: Uint8Array;
-  /** 宛先 IPv4 アドレス（4 バイト） */
+  /** Destination IPv4 address (4 bytes) */
   readonly dstIp: Uint8Array;
-  /** IPv4 プロトコル番号（例: TCP=6, UDP=17） */
+  /** IPv4 protocol number (e.g., TCP=6, UDP=17) */
   readonly protocol: number;
-  /** チェックサム対象の上位層バイト列（ヘッダ＋ペイロード、チェックサム欄は 0 埋め） */
+  /** Upper-layer header + payload with checksum field zeroed */
   readonly segment: Uint8Array;
 }
 
 /**
- * IPv4 擬似ヘッダ（RFC 768 / RFC 9293）を先頭に付与したうえで
- * RFC 1071 インターネットチェックサムを計算する。
+ * Computes the RFC 1071 checksum prefixed with the 12-byte IPv4 pseudo-header
+ * (RFC 768 / RFC 9293 Section 3.1).
  *
- * 注意: UDP における「計算結果が 0x0000 のときは 0xffff を格納する（RFC 768）」変換は
- * TCP（RFC 9293）には適用されないため、本関数は生のチェックサム値を返す。
+ * Note: Returns the raw checksum value; UDP's 0x0000 -> 0xffff mapping (RFC 768)
+ * is applied by the UDP encoder because TCP (RFC 9293) keeps 0x0000 as-is.
  */
 export function ipv4PseudoHeaderChecksum(params: IPv4PseudoHeaderParams): Result<number> {
   const { srcIp, dstIp, protocol, segment } = params;
 
   if (srcIp.length !== 4) {
-    return err(`送信元 IPv4 アドレスは 4 バイトである必要があります（現在 ${srcIp.length} バイト）。`);
+    return err(`Source IPv4 address must be 4 bytes (got ${srcIp.length}).`);
   }
   if (dstIp.length !== 4) {
-    return err(`宛先 IPv4 アドレスは 4 バイトである必要があります（現在 ${dstIp.length} バイト）。`);
+    return err(`Destination IPv4 address must be 4 bytes (got ${dstIp.length}).`);
   }
   if (!Number.isInteger(protocol) || protocol < 0 || protocol > 0xff) {
-    return err(`プロトコル番号は 0〜255 の整数で指定してください（現在 ${protocol}）。`);
+    return err(`Protocol number must be an integer between 0 and 255 (got ${protocol}).`);
   }
   if (segment.length > 0xffff) {
-    return err(
-      `上位層セグメント長が 65535 バイトを超えています（現在 ${segment.length} バイト）。`,
-    );
+    return err(`Upper-layer segment exceeds 65535 bytes (got ${segment.length}).`);
   }
 
-  // IPv4 擬似ヘッダ（12 バイト）+ セグメント本体
+  // IPv4 pseudo-header (12 bytes) + upper-layer segment
   const buffer = new Uint8Array(12 + segment.length);
   buffer.set(srcIp, 0);
   buffer.set(dstIp, 4);

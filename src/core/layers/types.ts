@@ -210,10 +210,10 @@ export function validateUintRange(
   fieldLabel: string,
 ): string | null {
   if (Number.isNaN(value)) {
-    return `${fieldLabel}に 0〜${max} の整数を入力してください。`;
+    return `${fieldLabel} must be an integer between 0 and ${max}.`;
   }
   if (!Number.isInteger(value) || value < 0 || value > max) {
-    return `${fieldLabel}は 0〜${max} の整数で指定してください（現在: ${value}）。`;
+    return `${fieldLabel} must be an integer between 0 and ${max} (got ${value}).`;
   }
   return null;
 }

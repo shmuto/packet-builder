@@ -11,13 +11,13 @@ import type {
 } from './types';
 import { validateUintRange } from './types';
 
-/** TCP 基本ヘッダ長（オプションなし 20 バイト、RFC 9293 Section 3.1） */
+/** Base TCP header length without options (20 bytes, RFC 9293 Section 3.1) */
 export const TCP_HEADER_LENGTH = 20;
 export const TCP_DEFAULT_DATA_OFFSET = 5;
 
 export const TCP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
-  { fieldId: 'srcPort', label: '送信元ポート', bitOffset: 0, bitLength: 16 },
-  { fieldId: 'dstPort', label: '宛先ポート', bitOffset: 16, bitLength: 16 },
+  { fieldId: 'srcPort', label: 'Source Port', bitOffset: 0, bitLength: 16 },
+  { fieldId: 'dstPort', label: 'Destination Port', bitOffset: 16, bitLength: 16 },
   { fieldId: 'seqNumber', label: 'Sequence Number', bitOffset: 32, bitLength: 32 },
   { fieldId: 'ackNumber', label: 'Acknowledgment Number', bitOffset: 64, bitLength: 32 },
   { fieldId: 'dataOffset', label: 'Data Offset', bitOffset: 96, bitLength: 4 },
@@ -31,24 +31,24 @@ export const TCP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
 export interface EncodeTCPContext {
   readonly layerIndex: number;
   readonly upperBytes: Uint8Array;
-  /** 下位 IPv4 レイヤーの状態（擬似ヘッダ計算用） */
+  /** Underlying IPv4 layer state used for pseudo-header checksum calculation */
   readonly ipv4: IPv4PseudoContext;
 }
 
 /**
- * TCP ヘッダ（オプションなし基本 20 バイト）をエンコードする（RFC 9293 Section 3.1）。
- * TCP ではチェックサム計算結果が 0x0000 の場合もそのまま 0x0000 を格納する。
+ * Encodes a 20-byte base TCP header (RFC 9293 Section 3.1).
+ * Keeps a computed checksum of 0x0000 as 0x0000 per RFC 9293.
  */
 export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeResult {
   const errors: PacketError[] = [];
   const warnings: PacketWarning[] = [];
 
-  const srcPortErr = validateUintRange(layer.srcPort, 0xffff, '送信元ポート');
+  const srcPortErr = validateUintRange(layer.srcPort, 0xffff, 'Source Port');
   if (srcPortErr !== null) {
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'srcPort', message: srcPortErr });
   }
 
-  const dstPortErr = validateUintRange(layer.dstPort, 0xffff, '宛先ポート');
+  const dstPortErr = validateUintRange(layer.dstPort, 0xffff, 'Destination Port');
   if (dstPortErr !== null) {
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'dstPort', message: dstPortErr });
   }
@@ -74,13 +74,13 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'dataOffset',
-          message: `Data Offset（${dataOffsetValue}）が最小値 5 未満です（RFC 9293）。`,
+          message: `Manual Data Offset (${dataOffsetValue}) is smaller than the minimum of 5 (RFC 9293).`,
         });
       } else if (dataOffsetValue !== TCP_DEFAULT_DATA_OFFSET) {
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'dataOffset',
-          message: `Data Offset に手動値 ${dataOffsetValue} を使用しています（オプションなし基本ヘッダは 5）。`,
+          message: `Using manual Data Offset ${dataOffsetValue} (base header without options is 5).`,
         });
       }
     }
@@ -107,7 +107,7 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
   if (segmentLength > 0xffff) {
     errors.push({
       layerIndex: ctx.layerIndex,
-      message: `TCP セグメント長が上限 65535 バイトを超えています（現在 ${segmentLength} バイト）。`,
+      message: `TCP segment length exceeds the 65535-byte limit (got ${segmentLength} bytes).`,
     });
   }
 
@@ -120,9 +120,7 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
   writeUint16BE(header, 2, layer.dstPort);
   writeUint32BE(header, 4, layer.seqNumber);
   writeUint32BE(header, 8, layer.ackNumber);
-  // Byte 12: Data Offset (4bit) + Reserved (4bit = 0)
   header[12] = (dataOffsetValue & 0x0f) << 4;
-  // Byte 13: Control Bits (CWR, ECE, URG, ACK, PSH, RST, SYN, FIN)
   const flagsByte =
     (layer.flags.cwr ? 0x80 : 0) |
     (layer.flags.ece ? 0x40 : 0) |
@@ -134,7 +132,6 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
     (layer.flags.fin ? 0x01 : 0);
   header[13] = flagsByte;
   writeUint16BE(header, 14, layer.windowSize);
-  // Bytes 16..17: Checksum（計算前は 0）
   header[16] = 0;
   header[17] = 0;
   writeUint16BE(header, 18, layer.urgentPointer);
@@ -152,13 +149,12 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
       errors.push({ layerIndex: ctx.layerIndex, fieldId: 'checksum', message: csumResult.error });
       return { ok: false, errors, warnings };
     }
-    // RFC 9293: TCP では計算結果が 0x0000 でもそのまま 0x0000 を格納する
     autoChecksum = csumResult.value;
   } else if (ctx.ipv4.status === 'absent' && layer.checksum.mode === 'auto') {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: '下位に IPv4 レイヤーがないため擬似ヘッダを作成できず、TCP Checksum を 0x0000 に設定しました。',
+      message: 'No underlying IPv4 layer for pseudo-header; setting TCP Checksum to 0x0000.',
     });
   }
 
@@ -173,7 +169,7 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: `TCP Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
+      message: `Using manual TCP Checksum 0x${checksumValue.toString(16).padStart(4, '0')} (computed value is 0x${autoChecksum.toString(16).padStart(4, '0')}).`,
     });
   }
 

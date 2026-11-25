@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { encodeUtf8, parseHexBytes } from './bytes';
 import {
+  buildBitDiagramRows,
   buildHexDumpRows,
+  doesSpanMatchHighlight,
   evaluatePacketDraft,
   formatByteAscii,
+  formatByteBinary,
   formatHex,
   formatSpacedHex,
+  isByteHighlighted,
+  isFieldHighlighted,
   parseUnsignedIntInput,
   summarizeLayerSegments,
 } from './inspector';
@@ -161,5 +166,98 @@ describe('evaluatePacketDraft', () => {
     expect(draft.errors.some((e) => e.layerIndex === 0 && e.fieldId === 'dstMac')).toBe(true);
     expect(draft.resolvedAutoValues).toBeUndefined();
     expect(draft.warnings).toEqual([]);
+  });
+});
+
+describe('formatByteBinary & bidirectional highlight helpers', () => {
+  it('formatByteBinary splits 8 bits into two 4-bit nibbles', () => {
+    expect(formatByteBinary(0x00)).toBe('0000 0000');
+    expect(formatByteBinary(0x45)).toBe('0100 0101');
+    expect(formatByteBinary(0xff)).toBe('1111 1111');
+  });
+
+  it('highlights sub-byte fields (IPv4 Version/IHL) and containing bytes bidirectionally', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      ok(encodeUtf8('ok')),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Byte 14 is IPv4 byte 0 containing both Version (4b) and IHL (4b)
+    const ipv4FirstByte = draft.rows[0].cells[14];
+    const ethLastByte = draft.rows[0].cells[13];
+
+    // Hovering IPv4 Version (4-bit field) highlights byte 14, not byte 13
+    const versionTarget = { kind: 'field' as const, layerIndex: 1, fieldId: 'version' };
+    expect(isByteHighlighted(ipv4FirstByte, versionTarget)).toBe(true);
+    expect(isByteHighlighted(ethLastByte, versionTarget)).toBe(false);
+
+    // Hovering byte 14 highlights BOTH Version and IHL fields, not TOS
+    const byte14Target = { kind: 'byte' as const, byteIndex: 14 };
+    expect(isFieldHighlighted(1, 'version', draft.spans, byte14Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'ihl', draft.spans, byte14Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'tos', draft.spans, byte14Target)).toBe(false);
+
+    const versionSpan = draft.spans.find((s) => s.layerIndex === 1 && s.fieldId === 'version')!;
+    expect(doesSpanMatchHighlight(versionSpan, byte14Target)).toBe(true);
+    expect(doesSpanMatchHighlight(versionSpan, { kind: 'byte', byteIndex: 15 })).toBe(false);
+    expect(doesSpanMatchHighlight(versionSpan, null)).toBe(false);
+  });
+});
+
+describe('buildBitDiagramRows', () => {
+  it('wraps Ethernet II 48-bit MAC fields cleanly across 32-bit rows without gaps', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Ethernet II (112 bits = 32 + 32 + 32 + 16)
+    const ethRows = buildBitDiagramRows(draft.spans, 0);
+    expect(ethRows).toHaveLength(4);
+    expect(ethRows.map((r) => r.totalBitsInRow)).toEqual([32, 32, 32, 16]);
+    expect(ethRows[0].cells).toHaveLength(1);
+    expect(ethRows[0].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 32,
+      isContinuation: false,
+    });
+    // Row 1: dstMac continuation (16b) + srcMac start (16b)
+    expect(ethRows[1].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan, c.isContinuation])).toEqual([
+      ['dstMac', 0, 16, true],
+      ['srcMac', 16, 16, false],
+    ]);
+    // Row 2: srcMac continuation (32b)
+    expect(ethRows[2].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 32,
+      isContinuation: true,
+    });
+    // Row 3: etherType (16b)
+    expect(ethRows[3].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 16,
+      isContinuation: false,
+    });
+
+    // IPv4 (160 bits = 5 rows of exactly 32 bits)
+    const ipv4Rows = buildBitDiagramRows(draft.spans, 1);
+    expect(ipv4Rows).toHaveLength(5);
+    expect(ipv4Rows.every((r) => r.totalBitsInRow === 32)).toBe(true);
+    expect(ipv4Rows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['version', 4],
+      ['ihl', 4],
+      ['tos', 8],
+      ['totalLength', 16],
+    ]);
+    expect(ipv4Rows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['identification', 16],
+      ['flags', 3],
+      ['fragmentOffset', 13],
+    ]);
+
+    // Missing layer index returns empty array
+    expect(buildBitDiagramRows(draft.spans, 99)).toEqual([]);
   });
 });
