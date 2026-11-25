@@ -1,5 +1,6 @@
 import { encodeUtf8 } from './bytes';
 import type {
+  ARPLayer,
   EthernetLayer,
   ICMPLayer,
   IPv4Layer,
@@ -9,7 +10,7 @@ import type {
 } from './layers/types';
 import { autoValue } from './layers/types';
 
-export type PresetId = 'udp' | 'tcp-syn' | 'icmp-echo';
+export type PresetId = 'udp' | 'tcp-syn' | 'icmp-echo' | 'arp-request';
 
 export interface PacketPreset {
   readonly id: PresetId;
@@ -26,6 +27,21 @@ export function createDefaultEthernet(): EthernetLayer {
     dstMac: '00:11:22:33:44:55',
     srcMac: '66:77:88:99:aa:bb',
     etherType: autoValue(),
+  };
+}
+
+export function createDefaultARP(): ARPLayer {
+  return {
+    type: 'arp',
+    hardwareType: autoValue(),
+    protocolType: autoValue(),
+    hardwareLength: autoValue(),
+    protocolLength: autoValue(),
+    operation: 1,
+    senderMac: '66:77:88:99:aa:bb',
+    senderIp: '192.168.0.1',
+    targetMac: '00:00:00:00:00:00',
+    targetIp: '192.168.0.2',
   };
 }
 
@@ -90,7 +106,7 @@ export function createDefaultICMP(): ICMPLayer {
   };
 }
 
-/** 初期表示および切り替え用の定番パケットプリセット一覧を生成する */
+/** Creates the built-in packet presets for quick exploration */
 export function createPresets(): readonly PacketPreset[] {
   const udpText = 'Hello, tsumiki!!!!';
   const icmpText = 'tsumiki-icmp-ping!';
@@ -119,6 +135,17 @@ export function createPresets(): readonly PacketPreset[] {
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultICMP()],
       payloadText: icmpText,
       payloadBytes: encodeUtf8(icmpText),
+    },
+    {
+      id: 'arp-request',
+      name: 'ARP Request',
+      description: 'Broadcast Ethernet II + ARP Request (who-has 192.168.0.2)',
+      layers: [
+        { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+        createDefaultARP(),
+      ],
+      payloadText: '',
+      payloadBytes: new Uint8Array(0),
     },
   ];
 }

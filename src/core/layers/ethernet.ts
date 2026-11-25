@@ -15,6 +15,8 @@ export const ETHERNET_HEADER_LENGTH = 14;
 export const ETHERNET_MIN_FRAME_LENGTH = 60;
 /** EtherType for IPv4 (RFC 894) */
 export const ETHERTYPE_IPV4 = 0x0800;
+/** EtherType for ARP (RFC 826) */
+export const ETHERTYPE_ARP = 0x0806;
 
 export const ETHERNET_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'dstMac', label: 'Destination MAC', bitOffset: 0, bitLength: 48 },
@@ -26,6 +28,12 @@ export interface EncodeEthernetContext {
   readonly layerIndex: number;
   readonly upperLayerType: LayerType | null;
   readonly upperBytesLength: number;
+}
+
+function etherTypeForUpperLayer(upperLayerType: LayerType | null): number | null {
+  if (upperLayerType === 'ipv4') return ETHERTYPE_IPV4;
+  if (upperLayerType === 'arp') return ETHERTYPE_ARP;
+  return null;
 }
 
 /**
@@ -48,7 +56,8 @@ export function encodeEthernet(
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'srcMac', message: srcMacResult.error });
   }
 
-  const autoEtherType = ETHERTYPE_IPV4;
+  const inferredEtherType = etherTypeForUpperLayer(ctx.upperLayerType);
+  const autoEtherType = inferredEtherType ?? ETHERTYPE_IPV4;
   let etherTypeValue = autoEtherType;
 
   if (layer.etherType.mode === 'manual') {
@@ -57,19 +66,21 @@ export function encodeEthernet(
       errors.push({ layerIndex: ctx.layerIndex, fieldId: 'etherType', message: rangeErr });
     } else {
       etherTypeValue = layer.etherType.value;
-      if (ctx.upperLayerType === 'ipv4' && etherTypeValue !== autoEtherType) {
+      if (inferredEtherType !== null && etherTypeValue !== inferredEtherType) {
+        const expectedHex = `0x${inferredEtherType.toString(16).padStart(4, '0')}`;
+        const upperName = ctx.upperLayerType === 'arp' ? 'ARP' : 'IPv4';
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'etherType',
-          message: `Using manual EtherType 0x${etherTypeValue.toString(16).padStart(4, '0')} (standard IPv4 value is 0x0800, RFC 894).`,
+          message: `Using manual EtherType 0x${etherTypeValue.toString(16).padStart(4, '0')} (standard ${upperName} value is ${expectedHex}).`,
         });
       }
     }
-  } else if (ctx.upperLayerType !== 'ipv4') {
+  } else if (inferredEtherType === null) {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'etherType',
-      message: 'Upper layer is not IPv4; defaulting EtherType to 0x0800.',
+      message: 'Upper layer is not IPv4 or ARP; defaulting EtherType to 0x0800.',
     });
   }
 

@@ -18,6 +18,7 @@ import {
 } from './inspector';
 import { buildPacket } from './packet';
 import {
+  createDefaultARP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -356,6 +357,37 @@ describe('buildBitDiagramRows', () => {
     expect(icmpRows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
       ['identifier', 16],
       ['sequenceNumber', 16],
+    ]);
+
+    // ARP (224 bits = 7 rows of 32 bits, RFC 826, wraps 48-bit MAC & 32-bit IP across 32-bit rows)
+    const arpDraft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultARP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(arpDraft.ok).toBe(true);
+    const arpRows = buildBitDiagramRows(arpDraft.spans, 1);
+    expect(arpRows).toHaveLength(7);
+    expectContiguousBitDiagram(arpRows, 224);
+    expect(arpRows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['hardwareType', 16],
+      ['protocolType', 16],
+    ]);
+    expect(arpRows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['hardwareLength', 8],
+      ['protocolLength', 8],
+      ['operation', 16],
+    ]);
+    expect(
+      arpRows[3].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['senderMac', 0, 16, true],
+      ['senderIp', 16, 16, false],
+    ]);
+    expect(
+      arpRows[4].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['senderIp', 0, 16, true],
+      ['targetMac', 16, 16, false],
     ]);
 
     // Missing layer index returns empty array

@@ -26,6 +26,7 @@
   --status-err-border: #f3b5b1;
 
   --layer-ethernet: #3b63c4;
+  --layer-arp: #5c7d1f;
   --layer-ipv4: #158467;
   --layer-icmp: #0e7c94;
   --layer-udp: #b86b0b;
@@ -67,6 +68,7 @@
     --status-err-border: rgba(252, 165, 165, 0.35);
 
     --layer-ethernet: #7aa2f7;
+    --layer-arp: #9ece6a;
     --layer-ipv4: #4fd1a5;
     --layer-icmp: #56c2d6;
     --layer-udp: #f0b254;
@@ -277,6 +279,7 @@ body {
 }
 
 .layer-theme-ethernet { --layer-color: var(--layer-ethernet); }
+.layer-theme-arp { --layer-color: var(--layer-arp); }
 .layer-theme-ipv4 { --layer-color: var(--layer-ipv4); }
 .layer-theme-icmp { --layer-color: var(--layer-icmp); }
 .layer-theme-udp { --layer-color: var(--layer-udp); }
@@ -721,6 +724,7 @@ body {
 }
 
 .layer-bg-ethernet { background: var(--layer-ethernet); }
+.layer-bg-arp { background: var(--layer-arp); }
 .layer-bg-ipv4 { background: var(--layer-ipv4); }
 .layer-bg-icmp { background: var(--layer-icmp); }
 .layer-bg-udp { background: var(--layer-udp); }
@@ -728,6 +732,7 @@ body {
 .layer-bg-payload { background: var(--layer-payload); }
 
 .layer-fg-ethernet { color: var(--layer-ethernet); }
+.layer-fg-arp { color: var(--layer-arp); }
 .layer-fg-ipv4 { color: var(--layer-ipv4); }
 .layer-fg-icmp { color: var(--layer-icmp); }
 .layer-fg-udp { color: var(--layer-udp); }

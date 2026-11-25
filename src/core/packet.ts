@@ -1,4 +1,5 @@
 import { concatBytes, parseIPv4 } from './bytes';
+import { ARP_HEADER_LENGTH, encodeARP } from './layers/arp';
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
@@ -17,6 +18,7 @@ import { UDP_HEADER_LENGTH, encodeUDP, type IPv4PseudoContext } from './layers/u
 
 const LAYER_LABELS: Readonly<Record<LayerType, string>> = {
   ethernet: 'Ethernet II',
+  arp: 'ARP',
   ipv4: 'IPv4',
   icmp: 'ICMP',
   udp: 'UDP',
@@ -25,6 +27,7 @@ const LAYER_LABELS: Readonly<Record<LayerType, string>> = {
 
 const FIXED_HEADER_LENGTH: Readonly<Record<LayerType, number>> = {
   ethernet: ETHERNET_HEADER_LENGTH,
+  arp: ARP_HEADER_LENGTH,
   ipv4: IPV4_HEADER_LENGTH,
   icmp: ICMP_HEADER_LENGTH,
   udp: UDP_HEADER_LENGTH,
@@ -33,7 +36,7 @@ const FIXED_HEADER_LENGTH: Readonly<Record<LayerType, number>> = {
 
 function isValidTransition(lower: LayerType, upper: LayerType): boolean {
   if (lower === 'ethernet') {
-    return upper === 'ipv4';
+    return upper === 'ipv4' || upper === 'arp';
   }
   if (lower === 'ipv4') {
     return upper === 'icmp' || upper === 'udp' || upper === 'tcp';
@@ -42,7 +45,7 @@ function isValidTransition(lower: LayerType, upper: LayerType): boolean {
 }
 
 /**
- * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4 -> ICMP/UDP/TCP）になっているか検証する。
+ * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> ICMP/UDP/TCP）になっているか検証する。
  */
 export function validateLayerOrder(layers: readonly Layer[]): PacketError[] {
   const errors: PacketError[] = [];
@@ -108,6 +111,9 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
           upperLayerType,
           upperBytesLength: currentUpperBytes.length,
         });
+        break;
+      case 'arp':
+        result = encodeARP(layer, { layerIndex: i });
         break;
       case 'ipv4':
         result = encodeIPv4(layer, {

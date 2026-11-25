@@ -171,7 +171,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-etherType`}
                 label="EtherType"
-                hint="0x0800 = IPv4"
+                hint="0x0800=IPv4 / 0x0806=ARP"
                 allowHex
                 hexDigits={4}
                 value={layer.etherType}
@@ -182,6 +182,151 @@ export function LayerCard({
                 onHoverStart={hoverStart('etherType')}
                 onHoverEnd={hoverEnd}
                 onChange={(etherType) => onChange({ ...layer, etherType })}
+              />
+            </div>
+          )}
+
+          {layer.type === 'arp' && (
+            <div className="field-grid">
+              <NumberField
+                id={`${id}-operation`}
+                label="Operation"
+                hint="1=Request / 2=Reply"
+                value={layer.operation}
+                error={fieldError('operation')}
+                warning={fieldWarning('operation')}
+                isHighlighted={isHighlighted('operation')}
+                onHoverStart={hoverStart('operation')}
+                onHoverEnd={hoverEnd}
+                onChange={(operation) => onChange({ ...layer, operation })}
+              />
+              <div className="field">
+                <div className="field-label-row">
+                  <span className="field-label">Quick Operation</span>
+                  <span className="field-hint">RFC 826</span>
+                </div>
+                <div className="flag-chip-row">
+                  <button
+                    type="button"
+                    className={`preset-btn${layer.operation === 1 ? ' is-active' : ''}`}
+                    onClick={() => onChange({ ...layer, operation: 1 })}
+                  >
+                    1: Request
+                  </button>
+                  <button
+                    type="button"
+                    className={`preset-btn${layer.operation === 2 ? ' is-active' : ''}`}
+                    onClick={() => onChange({ ...layer, operation: 2 })}
+                  >
+                    2: Reply
+                  </button>
+                </div>
+              </div>
+              <TextField
+                id={`${id}-senderMac`}
+                label="Sender MAC (SHA)"
+                hint="48 bit"
+                placeholder="66:77:88:99:aa:bb"
+                value={layer.senderMac}
+                error={fieldError('senderMac')}
+                warning={fieldWarning('senderMac')}
+                isHighlighted={isHighlighted('senderMac')}
+                onHoverStart={hoverStart('senderMac')}
+                onHoverEnd={hoverEnd}
+                onChange={(senderMac) => onChange({ ...layer, senderMac })}
+              />
+              <TextField
+                id={`${id}-senderIp`}
+                label="Sender IPv4 (SPA)"
+                hint="32 bit"
+                placeholder="192.168.0.1"
+                value={layer.senderIp}
+                error={fieldError('senderIp')}
+                warning={fieldWarning('senderIp')}
+                isHighlighted={isHighlighted('senderIp')}
+                onHoverStart={hoverStart('senderIp')}
+                onHoverEnd={hoverEnd}
+                onChange={(senderIp) => onChange({ ...layer, senderIp })}
+              />
+              <TextField
+                id={`${id}-targetMac`}
+                label="Target MAC (THA)"
+                hint="48 bit"
+                placeholder="00:00:00:00:00:00"
+                value={layer.targetMac}
+                error={fieldError('targetMac')}
+                warning={fieldWarning('targetMac')}
+                isHighlighted={isHighlighted('targetMac')}
+                onHoverStart={hoverStart('targetMac')}
+                onHoverEnd={hoverEnd}
+                onChange={(targetMac) => onChange({ ...layer, targetMac })}
+              />
+              <TextField
+                id={`${id}-targetIp`}
+                label="Target IPv4 (TPA)"
+                hint="32 bit"
+                placeholder="192.168.0.2"
+                value={layer.targetIp}
+                error={fieldError('targetIp')}
+                warning={fieldWarning('targetIp')}
+                isHighlighted={isHighlighted('targetIp')}
+                onHoverStart={hoverStart('targetIp')}
+                onHoverEnd={hoverEnd}
+                onChange={(targetIp) => onChange({ ...layer, targetIp })}
+              />
+              <AutoManualField
+                id={`${id}-hardwareType`}
+                label="Hardware Type (HTYPE)"
+                hint="1 = Ethernet"
+                value={layer.hardwareType}
+                resolvedAutoValue={resolvedAutoValues?.hardwareType}
+                error={fieldError('hardwareType')}
+                warning={fieldWarning('hardwareType')}
+                isHighlighted={isHighlighted('hardwareType')}
+                onHoverStart={hoverStart('hardwareType')}
+                onHoverEnd={hoverEnd}
+                onChange={(hardwareType) => onChange({ ...layer, hardwareType })}
+              />
+              <AutoManualField
+                id={`${id}-protocolType`}
+                label="Protocol Type (PTYPE)"
+                hint="0x0800 = IPv4"
+                allowHex
+                hexDigits={4}
+                value={layer.protocolType}
+                resolvedAutoValue={resolvedAutoValues?.protocolType}
+                error={fieldError('protocolType')}
+                warning={fieldWarning('protocolType')}
+                isHighlighted={isHighlighted('protocolType')}
+                onHoverStart={hoverStart('protocolType')}
+                onHoverEnd={hoverEnd}
+                onChange={(protocolType) => onChange({ ...layer, protocolType })}
+              />
+              <AutoManualField
+                id={`${id}-hardwareLength`}
+                label="Hardware Size (HLEN)"
+                hint="6 bytes"
+                value={layer.hardwareLength}
+                resolvedAutoValue={resolvedAutoValues?.hardwareLength}
+                error={fieldError('hardwareLength')}
+                warning={fieldWarning('hardwareLength')}
+                isHighlighted={isHighlighted('hardwareLength')}
+                onHoverStart={hoverStart('hardwareLength')}
+                onHoverEnd={hoverEnd}
+                onChange={(hardwareLength) => onChange({ ...layer, hardwareLength })}
+              />
+              <AutoManualField
+                id={`${id}-protocolLength`}
+                label="Protocol Size (PLEN)"
+                hint="4 bytes"
+                value={layer.protocolLength}
+                resolvedAutoValue={resolvedAutoValues?.protocolLength}
+                error={fieldError('protocolLength')}
+                warning={fieldWarning('protocolLength')}
+                isHighlighted={isHighlighted('protocolLength')}
+                onHoverStart={hoverStart('protocolLength')}
+                onHoverEnd={hoverEnd}
+                onChange={(protocolLength) => onChange({ ...layer, protocolLength })}
               />
             </div>
           )}

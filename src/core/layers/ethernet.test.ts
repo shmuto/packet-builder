@@ -44,6 +44,37 @@ describe('encodeEthernet', () => {
     expect(result.warnings.some((w) => w.fieldId === 'etherType')).toBe(true);
   });
 
+  it('直上が ARP のとき EtherType を自動で 0x0806 に設定する（RFC 826）', () => {
+    const autoArp = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: 'ff:ff:ff:ff:ff:ff',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'arp', upperBytesLength: 46 },
+    );
+
+    expect(autoArp.ok).toBe(true);
+    if (!autoArp.ok) return;
+    expect(autoArp.bytes.slice(12, 14)).toEqual(new Uint8Array([0x08, 0x06]));
+    expect(autoArp.resolvedAutoValues).toEqual({ etherType: 0x0806 });
+    expect(autoArp.warnings).toHaveLength(0);
+
+    const manualWrong = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: 'ff:ff:ff:ff:ff:ff',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: manualValue(0x0800),
+      },
+      { layerIndex: 0, upperLayerType: 'arp', upperBytesLength: 46 },
+    );
+    expect(manualWrong.ok).toBe(true);
+    if (!manualWrong.ok) return;
+    expect(manualWrong.warnings.some((w) => w.fieldId === 'etherType' && w.message.includes('0x0806'))).toBe(true);
+  });
+
   it('フレーム長 59 バイトでは警告が出て、ちょうど 60 バイトでは警告が出ない（IEEE 802.3）', () => {
     const shortFrame = encodeEthernet(
       {

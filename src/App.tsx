@@ -142,7 +142,7 @@ export function App() {
             <span className="brand-sub">packet builder</span>
           </div>
           <p className="brand-desc">
-            Stack Ethernet II, IPv4, ICMP, UDP, and TCP layers like building blocks to inspect and export raw network packets.
+            Stack Ethernet II, ARP, IPv4, ICMP, UDP, and TCP layers like building blocks to inspect and export raw network packets.
           </p>
         </div>
 
