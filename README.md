@@ -9,7 +9,7 @@ Ethernet II / IPv4 / ICMP / UDP / TCP のレイヤーを積み木のように重
 ## 実装状況
 
 - [x] **Step 1**: バイト列ユーティリティ・RFC 1071 チェックサム・IPv4 擬似ヘッダチェックサム
-- [ ] **Step 2**: プロトコルエンコーダ一式（Ethernet II / IPv4 / ICMP / UDP / TCP）とビット範囲マップ
+- [x] **Step 2**: プロトコルエンコーダ一式（Ethernet II / IPv4 / ICMP / UDP / TCP）とビット範囲マップ
 - [ ] **Step 3**: 積み木レイヤーエディタ UI & ライブ 16 進ダンプ（プリセット・自動/手動切替・エラー/警告表示）
 - [ ] **Step 4**: フィールド⇔バイト双方向ハイライト・32-bit ビット図・Hex コピー＆PCAP ダウンロード
 
@@ -19,6 +19,9 @@ Ethernet II / IPv4 / ICMP / UDP / TCP のレイヤーを積み木のように重
   - `result.ts`：例外を投げずに成功・エラーを返す `Result<T>` 型と `ok` / `err` ヘルパー
   - `bytes.ts`：MAC / IPv4 / Hex 文字列のパース、UTF-8 変換、ビッグエンディアン書き込み、16 進ダンプ整形
   - `checksum.ts`：RFC 1071 インターネットチェックサム・IPv4 擬似ヘッダチェックサム
+  - `layers/`：Ethernet II / IPv4 / ICMP / UDP / TCP の型定義とエンコーダ
+  - `packet.ts`：レイヤー配列とペイロードからパケット全体とビット範囲マップ（`FieldSpan[]`）を生成する `buildPacket`
+  - `presets.ts`：初期プリセット（UDP / TCP SYN / ICMP Ping）
 - `src/ui/`：React コンポーネント（`src/core/` の関数を呼び出して表示のみを担当。Step 3 で追加予定）
 
 ## 開発

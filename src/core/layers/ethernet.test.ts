@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { encodeEthernet } from './ethernet';
+import { autoValue, manualValue } from './types';
+
+describe('encodeEthernet', () => {
+  it('標準的な Ethernet II ヘッダ（14 バイト）を組み立てられる', () => {
+    const result = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 46 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bytes).toEqual(
+      new Uint8Array([
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+        0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+        0x08, 0x00,
+      ]),
+    );
+    expect(result.warnings).toHaveLength(0);
+    expect(result.resolvedAutoValues).toEqual({ etherType: 0x0800 });
+  });
+
+  it('手動 EtherType を優先し、IPv4 以外の値には警告を出す', () => {
+    const result = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: 'ff:ff:ff:ff:ff:ff',
+        srcMac: '00:00:00:00:00:00',
+        etherType: manualValue(0x86dd),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 46 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bytes.slice(12, 14)).toEqual(new Uint8Array([0x86, 0xdd]));
+    expect(result.warnings.some((w) => w.fieldId === 'etherType')).toBe(true);
+  });
+
+  it('フレーム長 60 バイト未満（IEEE 802.3 最小長未満）では警告を出す', () => {
+    const result = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 45 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings.some((w) => w.message.includes('60 バイト'))).toBe(true);
+  });
+
+  it('不正な MAC アドレスや範囲外の EtherType はエラーを返す', () => {
+    const result = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: 'invalid',
+        srcMac: 'zz:77:88:99:aa:bb',
+        etherType: manualValue(0x10000),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv4', upperBytesLength: 46 },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.map((e) => e.fieldId)).toEqual(['dstMac', 'srcMac', 'etherType']);
+  });
+});
