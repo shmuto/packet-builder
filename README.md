@@ -1,24 +1,24 @@
 # tsumiki (packet-builder)
 
-**An interactive, client-side educational packet builder for stacking Ethernet II, ARP, IPv4, ICMP, UDP, and TCP layers like building blocks.**
+**An interactive, client-side educational packet builder for stacking Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4 layers like building blocks.**
 
 Everything runs purely in the browser (no backend required) and deploys as a static site on GitHub Pages.
 
 ## Features
 
 - **Building-Block Layer Stack**
-  - Stack, reorder, add, or remove Ethernet II, ARP, IPv4, ICMP, UDP, and TCP headers alongside UTF-8 text or hexadecimal payloads.
-  - Switch between built-in presets (**UDP Packet**, **TCP SYN**, **ICMP Ping**, **ARP Request**) to inspect real, valid packets immediately.
+  - Stack, reorder, add, or remove Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4 headers alongside UTF-8 text or hexadecimal payloads.
+  - Switch between built-in presets (**UDP Packet**, **TCP SYN**, **ICMP Ping**, **ARP Request**, **BGP OPEN**) to inspect real, valid packets immediately.
 - **Auto Calculation + Manual Overrides**
-  - EtherType (`0x0800` for IPv4, `0x0806` for ARP), ARP hardware/protocol metadata, IPv4 Total Length / Protocol / Header Checksum, ICMP Checksum, UDP Length / Checksum, and TCP Data Offset / Checksum are automatically calculated per RFC specifications.
+  - EtherType (`0x0800` for IPv4, `0x0806` for ARP), ARP hardware/protocol metadata, IPv4 Total Length / Protocol / Header Checksum, ICMP Checksum, UDP Length / Checksum, TCP Data Offset / Checksum, and BGP-4 Marker / Length / Version / Optional Parameters Length are automatically calculated per RFC specifications.
   - Toggle any auto-calculated field to **Manual** mode to intentionally craft malformed checksums, lengths, or flags and observe how the raw bytes change.
 - **Errors vs. Learning Warnings**
-  - Impossible inputs (invalid MAC/IPv4 addresses, out-of-range integers, >65535-byte IPv4/UDP/TCP lengths, invalid layer ordering) are reported inline per field without breaking the UI.
-  - Protocol edge cases (Ethernet frames under IEEE 802.3's 60-byte minimum, IPv4 Reserved bit set, UDP checksum `0x0000` disabled per RFC 768) surface as non-blocking warnings.
+  - Impossible inputs (invalid MAC/IPv4 addresses, out-of-range integers, >65535-byte IPv4/UDP/TCP/BGP lengths, >255-byte BGP OPEN Optional Parameters, invalid layer ordering) are reported inline per field without breaking the UI.
+  - Protocol edge cases (Ethernet frames under IEEE 802.3's 60-byte minimum, IPv4 Reserved bit set, UDP checksum `0x0000` disabled per RFC 768, BGP Hold Time `1` or `2` seconds, BGP KEEPALIVE with payload, BGP over non-179 TCP ports) surface as non-blocking warnings.
 - **Bit-Accurate Inspection & Export**
   - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), and an **RFC-style 32-bit header bit diagram**—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
   - **One-click export**: copy continuous hex strings (**Copy Hex**), formatted hex dumps (**Copy Dump**), or download Wireshark-compatible `.pcap` files (**Download .pcap**).
-  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets) to decode them back into editable layers while preserving auto vs. manual checksum/length states.
+  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets, including BGP-4 over TCP port 179) to decode them back into editable layers while preserving auto vs. manual checksum/length states.
 
 ## Supported Protocols & Specifications
 
@@ -30,6 +30,7 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
 | L3 (over IPv4) | **ICMP** (8B base) | RFC 792 | Checksum (RFC 1071 over header + payload) |
 | L4 | **UDP** (8B) | RFC 768 | Length, Checksum (with IPv4 pseudo-header; `0x0000` mapped to `0xffff`) |
 | L4 | **TCP** (20B base) | RFC 9293 Section 3.1 | Data Offset (`5`), Checksum (with IPv4 pseudo-header; `0x0000` preserved) |
+| L7 (over TCP) | **BGP-4** (19-29B: OPEN / UPDATE / NOTIFICATION / KEEPALIVE) | RFC 4271 | Marker (`0xff` × 16), Length, OPEN Version (`4`) & Opt. Parm Len, UPDATE Withdrawn / Path Attr Lengths (`0`) |
 
 ## Local Development
 
@@ -49,10 +50,10 @@ npm run check      # Run typecheck, tests, and production build
   - `result.ts` — Non-throwing `Result<T>` type and `ok` / `err` helpers
   - `bytes.ts` — MAC / IPv4 / hex / hex-dump parsing, UTF-8 encode & strict BOM-preserving decode, big-endian readers/writers, hex string & dump formatters
   - `checksum.ts` — RFC 1071 Internet Checksum and IPv4 pseudo-header checksum
-  - `layers/` — Types and encoders for Ethernet II, ARP, IPv4, ICMP, UDP, and TCP
+  - `layers/` — Types and encoders for Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4
   - `packet.ts` — Layer order validation and `buildPacket` producing raw bytes and contiguous `FieldSpan[]` bit mappings
-  - `decode.ts` — Raw byte decoder (`decodePacket`) reconstructing layer stacks & payload from Ethernet II or Raw IPv4 packets
-  - `presets.ts` — Default layer factories and UDP / TCP SYN / ICMP Ping / ARP Request presets
+  - `decode.ts` — Raw byte decoder (`decodePacket`) reconstructing layer stacks & payload from Ethernet II or Raw IPv4 packets (including BGP-4 over TCP port 179)
+  - `presets.ts` — Default layer factories and UDP / TCP SYN / ICMP Ping / ARP Request / BGP OPEN presets
   - `inspector.ts` — Form integer parsing, hex dump rows, layer summaries, bidirectional highlight matching, and 32-bit bit diagram layout
   - `pcap.ts` — Classic libpcap (v2.4) encoder and link-layer type selector for Wireshark export
 - `src/ui/` — React presentation components delegating all computation to `src/core/`

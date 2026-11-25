@@ -19,6 +19,7 @@ import {
 import { buildPacket } from './packet';
 import {
   createDefaultARP,
+  createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -388,6 +389,89 @@ describe('buildBitDiagramRows', () => {
     ).toEqual([
       ['senderIp', 0, 16, true],
       ['targetMac', 16, 16, false],
+    ]);
+
+    // BGP-4 (RFC 4271): verify contiguous 32-bit row layout for all 4 message types
+    const tcp179 = { ...createDefaultTCP(), dstPort: 179 };
+
+    // 1) BGP OPEN: 29B = 232 bits (8 rows: 7 full 32-bit rows + 8-bit tail)
+    const bgpOpenDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), tcp179, createDefaultBGP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(bgpOpenDraft.ok).toBe(true);
+    const bgpOpenRows = buildBitDiagramRows(bgpOpenDraft.spans, 2);
+    expect(bgpOpenRows).toHaveLength(8);
+    expectContiguousBitDiagram(bgpOpenRows, 232);
+    expect(bgpOpenRows[4].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['length', 16],
+      ['bgpType', 8],
+      ['version', 8],
+    ]);
+    expect(bgpOpenRows[5].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['myAs', 16],
+      ['holdTime', 16],
+    ]);
+    expect(bgpOpenRows[6].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['bgpIdentifier', 32],
+    ]);
+    expect(bgpOpenRows[7].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['optParamLength', 8],
+    ]);
+
+    // 2) BGP UPDATE: 23B = 184 bits (6 rows: 5 full 32-bit rows + 24-bit tail)
+    const bgpUpdateDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), tcp179, { ...createDefaultBGP(), bgpType: 2 }],
+      ok(new Uint8Array(0)),
+    );
+    expect(bgpUpdateDraft.ok).toBe(true);
+    const bgpUpdateRows = buildBitDiagramRows(bgpUpdateDraft.spans, 2);
+    expect(bgpUpdateRows).toHaveLength(6);
+    expectContiguousBitDiagram(bgpUpdateRows, 184);
+    expect(
+      bgpUpdateRows[4].cells.map((c) => [c.span.fieldId, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['length', 16, false],
+      ['bgpType', 8, false],
+      ['withdrawnRoutesLength', 8, false],
+    ]);
+    expect(
+      bgpUpdateRows[5].cells.map((c) => [c.span.fieldId, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['withdrawnRoutesLength', 8, true],
+      ['totalPathAttrLength', 16, false],
+    ]);
+
+    // 3) BGP NOTIFICATION: 21B = 168 bits (6 rows: 5 full 32-bit rows + 8-bit tail)
+    const bgpNotifDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), tcp179, { ...createDefaultBGP(), bgpType: 3 }],
+      ok(new Uint8Array(0)),
+    );
+    expect(bgpNotifDraft.ok).toBe(true);
+    const bgpNotifRows = buildBitDiagramRows(bgpNotifDraft.spans, 2);
+    expect(bgpNotifRows).toHaveLength(6);
+    expectContiguousBitDiagram(bgpNotifRows, 168);
+    expect(bgpNotifRows[4].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['length', 16],
+      ['bgpType', 8],
+      ['errorCode', 8],
+    ]);
+    expect(bgpNotifRows[5].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['errorSubcode', 8],
+    ]);
+
+    // 4) BGP KEEPALIVE: 19B = 152 bits (5 rows: 4 full 32-bit rows + 24-bit tail)
+    const bgpKaDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), tcp179, { ...createDefaultBGP(), bgpType: 4 }],
+      ok(new Uint8Array(0)),
+    );
+    expect(bgpKaDraft.ok).toBe(true);
+    const bgpKaRows = buildBitDiagramRows(bgpKaDraft.spans, 2);
+    expect(bgpKaRows).toHaveLength(5);
+    expectContiguousBitDiagram(bgpKaRows, 152);
+    expect(bgpKaRows[4].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['length', 16],
+      ['bgpType', 8],
     ]);
 
     // Missing layer index returns empty array

@@ -14,6 +14,16 @@ import {
   ARP_PTYPE_IPV4,
 } from './layers/arp';
 import {
+  BGP_COMMON_HEADER_LENGTH,
+  BGP_PORT,
+  BGP_TYPE_KEEPALIVE,
+  BGP_TYPE_NOTIFICATION,
+  BGP_TYPE_OPEN,
+  BGP_TYPE_UPDATE,
+  BGP_VERSION_4,
+  getBGPHeaderLength,
+} from './layers/bgp';
+import {
   ETHERNET_HEADER_LENGTH,
   ETHERTYPE_ARP,
   ETHERTYPE_IPV4,
@@ -32,6 +42,8 @@ import {
   autoValue,
   manualValue,
   type ARPLayer,
+  type BGPLayer,
+  type BGPMessageType,
   type EthernetLayer,
   type ICMPLayer,
   type IPv4Layer,
@@ -207,6 +219,156 @@ function decodeTCPAt(
   };
 }
 
+const BGP_TYPE_NAMES: Readonly<Record<BGPMessageType, string>> = {
+  1: 'OPEN',
+  2: 'UPDATE',
+  3: 'NOTIFICATION',
+  4: 'KEEPALIVE',
+};
+
+function isBGPMessageType(value: number): value is BGPMessageType {
+  return (
+    value === BGP_TYPE_OPEN ||
+    value === BGP_TYPE_UPDATE ||
+    value === BGP_TYPE_NOTIFICATION ||
+    value === BGP_TYPE_KEEPALIVE
+  );
+}
+
+function isAllFF(bytes: Uint8Array): boolean {
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0xff) return false;
+  }
+  return true;
+}
+
+function decodeBGPAt(
+  tcpPayload: Uint8Array,
+  notes: string[],
+): { layer: BGPLayer; payload: Uint8Array } | null {
+  // RFC 4271 §4.1: BGP messages begin with a 16-octet all-ones Marker (0xff * 16).
+  if (tcpPayload.length < 16 || !isAllFF(tcpPayload.subarray(0, 16))) {
+    return null;
+  }
+
+  if (tcpPayload.length < BGP_COMMON_HEADER_LENGTH) {
+    notes.push(
+      `BGP-4 message on TCP port 179 is truncated (${tcpPayload.length} bytes, need at least ${BGP_COMMON_HEADER_LENGTH}); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+
+  const bgpLength = readUint16BE(tcpPayload, 16);
+  const rawType = tcpPayload[18];
+
+  if (!isBGPMessageType(rawType)) {
+    notes.push(
+      `BGP message Type ${rawType} is not decoded into a layer (supported: 1=OPEN, 2=UPDATE, 3=NOTIFICATION, 4=KEEPALIVE); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+
+  const headerLen = getBGPHeaderLength(rawType);
+  if (tcpPayload.length < headerLen) {
+    notes.push(
+      `BGP-4 ${BGP_TYPE_NAMES[rawType]} message on TCP port 179 is truncated (${tcpPayload.length} bytes, need at least ${headerLen}); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+
+  if (bgpLength < headerLen) {
+    notes.push(
+      `BGP Length (${bgpLength}) is smaller than the ${headerLen}-byte ${BGP_TYPE_NAMES[rawType]} header; kept as manual Length.`,
+    );
+  } else if (bgpLength < tcpPayload.length) {
+    notes.push(
+      `BGP Length (${bgpLength}) is smaller than TCP payload (${tcpPayload.length} bytes); additional bytes (e.g., pipelined BGP messages) are preserved in Payload.`,
+    );
+  } else if (bgpLength > tcpPayload.length) {
+    notes.push(
+      `BGP Length (${bgpLength}) exceeds available TCP payload (${tcpPayload.length} bytes); kept as manual Length.`,
+    );
+  }
+
+  const baseLayer: BGPLayer = {
+    type: 'bgp',
+    bgpType: rawType,
+    marker: autoValue<string>(),
+    length: bgpLength === tcpPayload.length ? autoValue() : manualValue(bgpLength),
+    version: autoValue(),
+    myAs: 65001,
+    holdTime: 180,
+    bgpIdentifier: '192.0.2.1',
+    optParamLength: autoValue(),
+    withdrawnRoutesLength: autoValue(),
+    totalPathAttrLength: autoValue(),
+    errorCode: 6,
+    errorSubcode: 0,
+  };
+
+  if (rawType === BGP_TYPE_OPEN) {
+    const versionByte = tcpPayload[19];
+    const myAs = readUint16BE(tcpPayload, 20);
+    const holdTime = readUint16BE(tcpPayload, 22);
+    const bgpIdentifier = formatIPv4(tcpPayload.subarray(24, 28));
+    const optParamLen = tcpPayload[28];
+    const remainingPayload = tcpPayload.slice(headerLen);
+
+    return {
+      layer: {
+        ...baseLayer,
+        version: versionByte === BGP_VERSION_4 ? autoValue() : manualValue(versionByte),
+        myAs,
+        holdTime,
+        bgpIdentifier,
+        optParamLength:
+          optParamLen === remainingPayload.length ? autoValue() : manualValue(optParamLen),
+      },
+      payload: remainingPayload,
+    };
+  }
+
+  if (rawType === BGP_TYPE_UPDATE) {
+    const withdrawnLen = readUint16BE(tcpPayload, 19);
+    const attrLen = readUint16BE(tcpPayload, 21);
+    const remainingPayload = tcpPayload.slice(headerLen);
+
+    if (withdrawnLen > 0) {
+      notes.push(
+        `BGP UPDATE has non-zero Withdrawn Routes Length (${withdrawnLen}); RFC 4271 §4.3 places Withdrawn Routes before Total Path Attribute Length, so bytes 21..22 were preserved in Total Path Attribute Length for lossless round-trip.`,
+      );
+    }
+
+    return {
+      layer: {
+        ...baseLayer,
+        withdrawnRoutesLength: withdrawnLen === 0 ? autoValue() : manualValue(withdrawnLen),
+        totalPathAttrLength: attrLen === 0 ? autoValue() : manualValue(attrLen),
+      },
+      payload: remainingPayload,
+    };
+  }
+
+  if (rawType === BGP_TYPE_NOTIFICATION) {
+    const errorCode = tcpPayload[19];
+    const errorSubcode = tcpPayload[20];
+    return {
+      layer: {
+        ...baseLayer,
+        errorCode,
+        errorSubcode,
+      },
+      payload: tcpPayload.slice(headerLen),
+    };
+  }
+
+  // Type 4: KEEPALIVE
+  return {
+    layer: baseLayer,
+    payload: tcpPayload.slice(headerLen),
+  };
+}
+
 function isAllZero(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length; i++) {
     if (bytes[i] !== 0) return false;
@@ -260,7 +422,7 @@ function decodeIPv4Chain(
   const upperOffset = offset + IPV4_HEADER_LENGTH;
   const upperRemaining = scopedBytes.length - upperOffset;
 
-  let decodedUpperLayer: Layer | null = null;
+  const decodedUpperLayers: Layer[] = [];
   let payload: Uint8Array = scopedBytes.slice(upperOffset);
 
   if (fragmentOffset !== 0) {
@@ -270,16 +432,30 @@ function decodeIPv4Chain(
     );
   } else if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
     const res = decodeICMPAt(scopedBytes, upperOffset);
-    decodedUpperLayer = res.layer;
+    decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
     const res = decodeUDPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes);
-    decodedUpperLayer = res.layer;
+    decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
     const res = decodeTCPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes, notes);
-    decodedUpperLayer = res.layer;
-    payload = res.payload;
+    decodedUpperLayers.push(res.layer);
+    if (
+      res.layer.dataOffset.mode === 'auto' &&
+      (res.layer.srcPort === BGP_PORT || res.layer.dstPort === BGP_PORT) &&
+      res.payload.length > 0
+    ) {
+      const bgpRes = decodeBGPAt(res.payload, notes);
+      if (bgpRes !== null) {
+        decodedUpperLayers.push(bgpRes.layer);
+        payload = bgpRes.payload;
+      } else {
+        payload = res.payload;
+      }
+    } else {
+      payload = res.payload;
+    }
   } else if (
     protocol === IP_PROTOCOL_ICMP ||
     protocol === IP_PROTOCOL_UDP ||
@@ -306,17 +482,14 @@ function decodeIPv4Chain(
     },
     fragmentOffset,
     ttl,
-    protocol: decodedUpperLayer !== null ? autoValue() : manualValue(protocol),
+    protocol: decodedUpperLayers.length > 0 ? autoValue() : manualValue(protocol),
     headerChecksum:
       headerChecksum === computedHeaderChecksum ? autoValue() : manualValue(headerChecksum),
     srcIp: formatIPv4(srcIpBytes),
     dstIp: formatIPv4(dstIpBytes),
   };
 
-  layers.push(ipv4Layer);
-  if (decodedUpperLayer !== null) {
-    layers.push(decodedUpperLayer);
-  }
+  layers.push(ipv4Layer, ...decodedUpperLayers);
   return payload;
 }
 

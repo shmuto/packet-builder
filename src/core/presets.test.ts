@@ -53,4 +53,24 @@ describe('presets', () => {
     // ARP Operation = 1 (Request)
     expect(result.bytes.slice(20, 22)).toEqual(new Uint8Array([0x00, 0x01]));
   });
+
+  it('BGP OPEN preset builds an 83-byte RFC 4271 frame over TCP port 179 with zero warnings', () => {
+    const bgpPreset = createPresets().find((p) => p.id === 'bgp-open');
+    expect(bgpPreset).toBeDefined();
+    if (!bgpPreset) return;
+
+    const result = buildPacket(bgpPreset.layers, bgpPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Ethernet) + 20(IPv4) + 20(TCP) + 29(BGP OPEN) = 83 bytes
+    expect(result.bytes.length).toBe(83);
+    expect(result.warnings).toHaveLength(0);
+    // TCP Destination Port = 179 (0x00b3) at offset 36..37
+    expect(result.bytes.slice(36, 38)).toEqual(new Uint8Array([0x00, 0xb3]));
+    // BGP Marker = 16 bytes of 0xff at offset 54..69
+    expect(result.bytes.slice(54, 70)).toEqual(new Uint8Array(16).fill(0xff));
+    // BGP Length = 29 (0x001d), Type = 1 (OPEN), Version = 4
+    expect(result.bytes.slice(70, 74)).toEqual(new Uint8Array([0x00, 0x1d, 0x01, 0x04]));
+  });
 });

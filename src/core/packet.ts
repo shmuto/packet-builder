@@ -1,5 +1,6 @@
 import { concatBytes, parseIPv4 } from './bytes';
 import { ARP_HEADER_LENGTH, encodeARP } from './layers/arp';
+import { encodeBGP, getBGPHeaderLength } from './layers/bgp';
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
@@ -23,16 +24,27 @@ const LAYER_LABELS: Readonly<Record<LayerType, string>> = {
   icmp: 'ICMP',
   udp: 'UDP',
   tcp: 'TCP',
+  bgp: 'BGP-4',
 };
 
-const FIXED_HEADER_LENGTH: Readonly<Record<LayerType, number>> = {
-  ethernet: ETHERNET_HEADER_LENGTH,
-  arp: ARP_HEADER_LENGTH,
-  ipv4: IPV4_HEADER_LENGTH,
-  icmp: ICMP_HEADER_LENGTH,
-  udp: UDP_HEADER_LENGTH,
-  tcp: TCP_HEADER_LENGTH,
-};
+function getLayerHeaderLength(layer: Layer): number {
+  switch (layer.type) {
+    case 'ethernet':
+      return ETHERNET_HEADER_LENGTH;
+    case 'arp':
+      return ARP_HEADER_LENGTH;
+    case 'ipv4':
+      return IPV4_HEADER_LENGTH;
+    case 'icmp':
+      return ICMP_HEADER_LENGTH;
+    case 'udp':
+      return UDP_HEADER_LENGTH;
+    case 'tcp':
+      return TCP_HEADER_LENGTH;
+    case 'bgp':
+      return getBGPHeaderLength(layer.bgpType);
+  }
+}
 
 function isValidTransition(lower: LayerType, upper: LayerType): boolean {
   if (lower === 'ethernet') {
@@ -41,11 +53,14 @@ function isValidTransition(lower: LayerType, upper: LayerType): boolean {
   if (lower === 'ipv4') {
     return upper === 'icmp' || upper === 'udp' || upper === 'tcp';
   }
+  if (lower === 'tcp') {
+    return upper === 'bgp';
+  }
   return false;
 }
 
 /**
- * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> ICMP/UDP/TCP）になっているか検証する。
+ * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> ICMP/UDP/TCP -> BGP）になっているか検証する。
  */
 export function validateLayerOrder(layers: readonly Layer[]): PacketError[] {
   const errors: PacketError[] = [];
@@ -77,6 +92,29 @@ function resolveIPv4ContextBefore(layers: readonly Layer[], layerIndex: number):
     }
   }
   return { status: 'absent' };
+}
+
+function resolveTCPPortsBefore(
+  layers: readonly Layer[],
+  layerIndex: number,
+): { readonly srcPort: number; readonly dstPort: number } | null {
+  for (let i = layerIndex - 1; i >= 0; i--) {
+    const candidate = layers[i];
+    if (candidate.type === 'tcp') {
+      if (
+        Number.isInteger(candidate.srcPort) &&
+        candidate.srcPort >= 0 &&
+        candidate.srcPort <= 0xffff &&
+        Number.isInteger(candidate.dstPort) &&
+        candidate.dstPort >= 0 &&
+        candidate.dstPort <= 0xffff
+      ) {
+        return { srcPort: candidate.srcPort, dstPort: candidate.dstPort };
+      }
+      return null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -142,6 +180,13 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
           ipv4: resolveIPv4ContextBefore(layers, i),
         });
         break;
+      case 'bgp':
+        result = encodeBGP(layer, {
+          layerIndex: i,
+          upperBytesLength: currentUpperBytes.length,
+          tcpPorts: resolveTCPPortsBefore(layers, i),
+        });
+        break;
     }
 
     layerWarnings[i].push(...result.warnings);
@@ -152,9 +197,9 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
       currentUpperBytes = concatBytes(result.bytes, currentUpperBytes);
     } else {
       layerErrors[i].push(...result.errors);
-      // 外側レイヤーの検証も継続できるよう、固定ヘッダ長分のプレースホルダを積む
+      // 外側レイヤーの検証も継続できるよう、ヘッダ長分のプレースホルダを積む
       currentUpperBytes = concatBytes(
-        new Uint8Array(FIXED_HEADER_LENGTH[layer.type]),
+        new Uint8Array(getLayerHeaderLength(layer)),
         currentUpperBytes,
       );
     }

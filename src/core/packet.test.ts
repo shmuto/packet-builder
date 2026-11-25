@@ -4,6 +4,7 @@ import { autoValue, type FieldSpan, type Layer } from './layers/types';
 import { buildPacket } from './packet';
 import {
   createDefaultARP,
+  createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -182,6 +183,62 @@ describe('buildPacket', () => {
     expectExactBitCoverage(result.spans, expected.length);
   });
 
+  it('matches known Ethernet II + IPv4 + TCP(179) + BGP-4 OPEN packet byte-for-byte (RFC 4271)', () => {
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      {
+        ...createDefaultTCP(),
+        dstPort: 179,
+        ackNumber: 1,
+        flags: {
+          cwr: false,
+          ece: false,
+          urg: false,
+          ack: true,
+          psh: true,
+          rst: false,
+          syn: false,
+          fin: false,
+        },
+      },
+      createDefaultBGP(),
+    ];
+
+    const result = buildPacket(layers, new Uint8Array(0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // IPv4 (20B): TotalLen=69(0x0045), Proto=6(TCP), Checksum=0xa72b
+      0x45, 0x00, 0x00, 0x45,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x06, 0xa7, 0x2b,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // TCP (20B): 54321 -> 179, Seq=1000, Ack=1, DataOffset=5, PSH+ACK(0x18), Win=65535, Checksum=0x9525
+      0xd4, 0x31, 0x00, 0xb3,
+      0x00, 0x00, 0x03, 0xe8,
+      0x00, 0x00, 0x00, 0x01,
+      0x50, 0x18, 0xff, 0xff,
+      0x95, 0x25, 0x00, 0x00,
+      // BGP-4 OPEN (29B): Marker(16x 0xff), Len=29(0x001d), Type=1, Ver=4, AS=65001, Hold=180, ID=192.168.0.1, OptLen=0
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x00, 0x1d, 0x01,
+      0x04, 0xfd, 0xe9, 0x00, 0xb4,
+      0xc0, 0xa8, 0x00, 0x01, 0x00,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
   it('対応していないレイヤー順序はエラーを返す', () => {
     const invalidOrders: Layer[][] = [
       [createDefaultUDP(), createDefaultIPv4()],
@@ -194,6 +251,14 @@ describe('buildPacket', () => {
       [createDefaultARP(), createDefaultIPv4()],
       [createDefaultARP(), createDefaultUDP()],
       [createDefaultARP(), createDefaultARP()],
+      [createDefaultUDP(), createDefaultBGP()],
+      [createDefaultIPv4(), createDefaultBGP()],
+      [createDefaultEthernet(), createDefaultBGP()],
+      [createDefaultARP(), createDefaultBGP()],
+      [createDefaultICMP(), createDefaultBGP()],
+      [createDefaultBGP(), createDefaultIPv4()],
+      [createDefaultBGP(), createDefaultTCP()],
+      [createDefaultBGP(), createDefaultBGP()],
     ];
 
     for (const layers of invalidOrders) {
