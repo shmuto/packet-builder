@@ -35,4 +35,22 @@ describe('presets', () => {
       expect(icmpResult.warnings).toHaveLength(0);
     }
   });
+
+  it('ARP Request プリセットはブロードキャスト宛先・EtherType 0x0806・42 バイトフレームを生成する', () => {
+    const arpPreset = createPresets().find((p) => p.id === 'arp-request');
+    expect(arpPreset).toBeDefined();
+    if (!arpPreset) return;
+
+    const result = buildPacket(arpPreset.layers, arpPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.bytes.length).toBe(42);
+    // Destination MAC = ff:ff:ff:ff:ff:ff
+    expect(result.bytes.slice(0, 6)).toEqual(new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]));
+    // EtherType = 0x0806 (ARP)
+    expect(result.bytes.slice(12, 14)).toEqual(new Uint8Array([0x08, 0x06]));
+    // ARP Operation = 1 (Request)
+    expect(result.bytes.slice(20, 22)).toEqual(new Uint8Array([0x00, 0x01]));
+  });
 });

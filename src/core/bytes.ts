@@ -99,6 +99,70 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
+// Matches `0000: <hex bytes>` emitted by toHexDump
+const COLON_DUMP_LINE_PATTERN = /^\s*([0-9a-fA-F]{4,}):\s*(.*)$/;
+// Matches Wireshark "Copy as Hex Dump": `<offset>  <1..16 hex bytes>[   <ASCII>]`
+const WIRESHARK_DUMP_LINE_PATTERN =
+  /^\s*([0-9a-fA-F]{4,})\s{2,}([0-9a-fA-F]{2}(?:\s{1,2}[0-9a-fA-F]{2}){0,15})(?:(\s{3,}.*)|\s*)$/;
+
+function tryStripHexDumpLines(text: string): string | null {
+  const nonEmptyLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+
+  if (nonEmptyLines.length === 0) {
+    return null;
+  }
+
+  // 1) Colon-prefixed hex dump (`0000: 00 11 ...`, emitted by toHexDump):
+  //    every line must start with a 4+ hex digit offset followed by a colon.
+  const colonMatches = nonEmptyLines.map((line) => COLON_DUMP_LINE_PATTERN.exec(line));
+  if (colonMatches.every((m) => m !== null)) {
+    return colonMatches.map((m) => m![2]).join(' ');
+  }
+
+  // 2) Wireshark "Copy as Hex Dump" (`0000   00 11 ...   ASCII`):
+  //    require every line to match, start at offset 0, advance offsets monotonically by byte count,
+  //    and either span multiple lines or include the 3+ space ASCII column so plain spaced hex streams
+  //    like "deadbeef  cafe" or "0000  00 11" are never misclassified as dumps.
+  const wsMatches = nonEmptyLines.map((line) => WIRESHARK_DUMP_LINE_PATTERN.exec(line));
+  if (wsMatches.every((m) => m !== null)) {
+    let expectedOffset = 0;
+    let hasAsciiColumn = false;
+    const hexParts: string[] = [];
+
+    for (const match of wsMatches) {
+      const offsetValue = Number.parseInt(match![1], 16);
+      if (offsetValue !== expectedOffset) {
+        return null;
+      }
+      const hexPart = match![2];
+      const byteCount = hexPart.trim().split(/\s+/).length;
+      expectedOffset += byteCount;
+      if (match![3] !== undefined) {
+        hasAsciiColumn = true;
+      }
+      hexParts.push(hexPart);
+    }
+
+    if (wsMatches.length > 1 || hasAsciiColumn) {
+      return hexParts.join(' ');
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parses raw hex streams (continuous or whitespace-separated), `toHexDump` output
+ * (`0000: 00 11 ...`), or Wireshark "Copy as Hex Dump" output (`0000   00 11 ...   ASCII`).
+ */
+export function parseHexOrDump(text: string): Result<Uint8Array> {
+  const stripped = tryStripHexDumpLines(text);
+  return parseHexBytes(stripped ?? text);
+}
+
 /** Encodes a UTF-8 string into bytes. */
 export function encodeUtf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -158,6 +222,48 @@ export function writeUint32BE(target: Uint8Array, offset: number, value: number)
   target[offset + 1] = (value >>> 16) & 0xff;
   target[offset + 2] = (value >>> 8) & 0xff;
   target[offset + 3] = value & 0xff;
+}
+
+/** Reads an unsigned 16-bit integer in network byte order (big-endian). */
+export function readUint16BE(source: Uint8Array, offset: number): number {
+  if (!Number.isInteger(offset) || offset < 0 || offset + 2 > source.length) {
+    throw new RangeError(`Read offset out of range (offset=${offset}, length=${source.length}).`);
+  }
+  return (source[offset] << 8) | source[offset + 1];
+}
+
+/** Reads an unsigned 32-bit integer in network byte order (big-endian). */
+export function readUint32BE(source: Uint8Array, offset: number): number {
+  if (!Number.isInteger(offset) || offset < 0 || offset + 4 > source.length) {
+    throw new RangeError(`Read offset out of range (offset=${offset}, length=${source.length}).`);
+  }
+  return (
+    ((source[offset] << 24) |
+      (source[offset + 1] << 16) |
+      (source[offset + 2] << 8) |
+      source[offset + 3]) >>>
+    0
+  );
+}
+
+/** Formats a 6-byte Uint8Array as a colon-separated lowercase MAC address. */
+export function formatMac(bytes: Uint8Array): string {
+  if (bytes.length !== 6) {
+    throw new RangeError(`MAC address must be 6 bytes (got ${bytes.length}).`);
+  }
+  const parts: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    parts.push(bytes[i].toString(16).padStart(2, '0'));
+  }
+  return parts.join(':');
+}
+
+/** Formats a 4-byte Uint8Array as a dotted-quad IPv4 address. */
+export function formatIPv4(bytes: Uint8Array): string {
+  if (bytes.length !== 4) {
+    throw new RangeError(`IPv4 address must be 4 bytes (got ${bytes.length}).`);
+  }
+  return `${bytes[0]}.${bytes[1]}.${bytes[2]}.${bytes[3]}`;
 }
 
 /** Formats bytes as a continuous lowercase hexadecimal string without spaces. */

@@ -3,9 +3,14 @@ import {
   concatBytes,
   decodeUtf8Strict,
   encodeUtf8,
+  formatIPv4,
+  formatMac,
   parseHexBytes,
+  parseHexOrDump,
   parseIPv4,
   parseMac,
+  readUint16BE,
+  readUint32BE,
   toHexDump,
   toHexString,
   writeUint16BE,
@@ -233,5 +238,77 @@ describe('toHexString / toHexDump', () => {
     const lines65549 = toHexDump(new Uint8Array(65549)).split('\n');
     expect(lines65549[0].startsWith('00000: ')).toBe(true);
     expect(lines65549[lines65549.length - 1].startsWith('10000: ')).toBe(true);
+  });
+});
+
+describe('parseHexOrDump / readUintBE / formatMac / formatIPv4', () => {
+  it('parseHexOrDump accepts compact hex, toHexDump, and Wireshark Copy as Hex Dump formats', () => {
+    const dump = ['0000: 00 11 22 33', '0010: aa bb cc'].join('\n');
+    expect(parseHexOrDump(dump)).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x11, 0x22, 0x33, 0xaa, 0xbb, 0xcc]),
+    });
+
+    // Wireshark "Copy as Hex Dump" (offset + 2+ spaces + hex bytes + 2+ spaces + ASCII column)
+    const wiresharkDump = [
+      '0000   00 11 22 33 44 55 66 77  88 99 aa bb 08 00 45 00   .."3DUfw......E.',
+      '0010   48 65 6c                                          Hel',
+    ].join('\n');
+    expect(parseHexOrDump(wiresharkDump)).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0x08, 0x00, 0x45, 0x00,
+        0x48, 0x65, 0x6c,
+      ]),
+    });
+
+    expect(parseHexOrDump('deadbeef')).toEqual({
+      ok: true,
+      value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+    });
+    // Regression: multi-space-separated hex streams must keep all leading bytes
+    expect(parseHexOrDump('deadbeef  cafe')).toEqual({
+      ok: true,
+      value: new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe]),
+    });
+    expect(parseHexOrDump('4500  003c')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x45, 0x00, 0x00, 0x3c]),
+    });
+    expect(parseHexOrDump('0000  00 11')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x00, 0x00, 0x11]),
+    });
+    // Single-line Wireshark dump with 3+ space ASCII column is still decoded as a dump
+    expect(parseHexOrDump('0000   00 11   ..')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x11]),
+    });
+    // Invalid hex byte after offset still fails
+    expect(parseHexOrDump('0000: 00 zz').ok).toBe(false);
+    // Colon-separated MAC-style text (2-digit prefix) is rejected rather than misread as an offset
+    expect(parseHexOrDump('aa:bb:cc').ok).toBe(false);
+  });
+
+  it('readUint16BE and readUint32BE read unsigned big-endian integers and validate bounds', () => {
+    const buf = new Uint8Array([0x08, 0x06, 0xff, 0xff, 0xff, 0xff]);
+    expect(readUint16BE(buf, 0)).toBe(0x0806);
+    expect(readUint32BE(buf, 2)).toBe(0xffffffff);
+
+    expect(() => readUint16BE(buf, -1)).toThrow(RangeError);
+    expect(() => readUint16BE(buf, 5)).toThrow(RangeError);
+    expect(() => readUint32BE(buf, -1)).toThrow(RangeError);
+    expect(() => readUint32BE(buf, 3)).toThrow(RangeError);
+  });
+
+  it('formatMac and formatIPv4 format fixed-length byte arrays and reject wrong lengths', () => {
+    expect(formatMac(new Uint8Array([0x00, 0x0a, 0x1b, 0x2c, 0x3d, 0xff]))).toBe(
+      '00:0a:1b:2c:3d:ff',
+    );
+    expect(formatIPv4(new Uint8Array([192, 168, 0, 1]))).toBe('192.168.0.1');
+
+    expect(() => formatMac(new Uint8Array(5))).toThrow(RangeError);
+    expect(() => formatIPv4(new Uint8Array(3))).toThrow(RangeError);
   });
 });
