@@ -16,7 +16,7 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
   - Impossible inputs (invalid MAC/IPv4 addresses, out-of-range integers, >65535-byte IPv4/UDP/TCP/BGP lengths, >255-byte BGP OPEN Optional Parameters, invalid layer ordering) are reported inline per field without breaking the UI.
   - Protocol edge cases (Ethernet frames under IEEE 802.3's 60-byte minimum, IPv4 Reserved bit set, UDP checksum `0x0000` disabled per RFC 768, BGP Hold Time `1` or `2` seconds, BGP KEEPALIVE with payload, BGP over non-179 TCP ports) surface as non-blocking warnings.
 - **Bit-Accurate Inspection & Export**
-  - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), and an **RFC-style 32-bit header bit diagram**—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
+  - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), layer segment summaries, and a **unified, color-coded 32-bit header bit diagram** showing all stacked headers continuously in wire order with header-range emphasis—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
   - **One-click export**: copy continuous hex strings (**Copy Hex**), formatted hex dumps (**Copy Dump**), or download Wireshark-compatible `.pcap` files (**Download .pcap**).
   - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets, including BGP-4 over TCP port 179) to decode them back into editable layers while preserving auto vs. manual checksum/length states.
 
