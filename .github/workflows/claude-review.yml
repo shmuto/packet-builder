@@ -29,6 +29,7 @@ jobs:
           fetch-depth: 1
 
       - uses: anthropics/claude-code-action@v1
+        id: review
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
@@ -64,7 +65,28 @@ jobs:
             - まとめコメントの先頭に、マージしてよいかの判断を1行で書く。
               例：「判断：【必須】が2件あるため、修正後に再レビューが必要です。」
             - 問題がなければ、無理に指摘を作らず「指摘なし」と書く。
+
+            ## 結果の返し方
+            - 最後に、このPRに残っている【必須】の指摘の件数を must_fix として返す。
+            - 前回までに指摘して、すでに直っているものは数えない。
           claude_args: |
             --model claude-opus-5-5
             --max-turns 30
+            --json-schema '{"type":"object","properties":{"must_fix":{"type":"integer","minimum":0}},"required":["must_fix"]}'
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
+
+      # 【必須】が残っていたら失敗させる。結果が取れなかったときも失敗にする。
+      - name: 【必須】の指摘が残っていないか確認
+        env:
+          RESULT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          must_fix="$(printf '%s' "$RESULT" | jq -r '.must_fix // empty' 2>/dev/null || true)"
+          if [[ -z "$must_fix" ]]; then
+            echo "レビュー結果を取得できませんでした。"
+            exit 1
+          fi
+          if (( must_fix > 0 )); then
+            echo "【必須】の指摘が ${must_fix} 件残っています。"
+            exit 1
+          fi
+          echo "【必須】の指摘はありません。"
