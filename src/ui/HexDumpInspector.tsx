@@ -257,41 +257,51 @@ export function HexDumpInspector({
           className="segment-overview"
           onMouseLeave={() => onHighlightChange(null)}
         >
-          <div className="segment-bar" aria-label="Byte breakdown by layer">
+          <div className="segment-bar" role="group" aria-label="Byte breakdown by layer">
             {segments.map((seg) => {
               const target: HighlightTarget =
                 seg.layerType === 'payload'
                   ? { kind: 'field', layerIndex: seg.layerIndex, fieldId: 'payload' }
                   : { kind: 'layer', layerIndex: seg.layerIndex };
               return (
-                <div
+                <button
                   key={`${seg.layerIndex}-${seg.layerType}`}
+                  type="button"
                   className={`segment-bar-slice layer-bg-${seg.layerType}`}
                   style={{ flexGrow: seg.byteLength }}
                   title={`${segmentFullLabel(seg.layerType)}: ${seg.byteLength} bytes (offset ${seg.byteOffset}..${seg.byteOffset + seg.byteLength - 1})`}
+                  onClick={() => onHighlightChange(target)}
                   onMouseEnter={() => onHighlightChange(target)}
+                  onMouseLeave={() => onHighlightChange(null)}
+                  onFocus={() => onHighlightChange(target)}
+                  onBlur={() => onHighlightChange(null)}
                 >
                   <span>{segmentShortLabel(seg.layerType)}</span>
-                </div>
+                </button>
               );
             })}
           </div>
-          <div className="segment-legend">
+          <div className="segment-legend" role="group" aria-label="Layer byte legend">
             {segments.map((seg) => {
               const target: HighlightTarget =
                 seg.layerType === 'payload'
                   ? { kind: 'field', layerIndex: seg.layerIndex, fieldId: 'payload' }
                   : { kind: 'layer', layerIndex: seg.layerIndex };
               return (
-                <span
+                <button
                   key={`${seg.layerIndex}-${seg.layerType}`}
+                  type="button"
                   className="legend-item"
+                  onClick={() => onHighlightChange(target)}
                   onMouseEnter={() => onHighlightChange(target)}
+                  onMouseLeave={() => onHighlightChange(null)}
+                  onFocus={() => onHighlightChange(target)}
+                  onBlur={() => onHighlightChange(null)}
                 >
                   <span className={`legend-swatch layer-bg-${seg.layerType}`} />
                   <span>{segmentFullLabel(seg.layerType)}</span>
                   <span className="mono legend-bytes">{seg.byteLength}B</span>
-                </span>
+                </button>
               );
             })}
           </div>

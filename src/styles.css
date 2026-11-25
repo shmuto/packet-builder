@@ -699,16 +699,25 @@ body {
 }
 
 .segment-bar-slice {
+  appearance: none;
+  border: 0;
+  padding: 0 0.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  color: var(--layer-on-solid);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   font-weight: 700;
   min-width: 1.6rem;
   overflow: hidden;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.segment-bar-slice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .segment-legend {
@@ -720,9 +729,24 @@ body {
 }
 
 .legend-item {
+  appearance: none;
+  border: 0;
+  padding: 0.08rem 0.25rem;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  cursor: pointer;
+}
+
+.legend-item:hover,
+.legend-item:focus-visible {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  outline: none;
 }
 
 .legend-swatch {
@@ -1197,11 +1221,6 @@ body {
 .bit-cell.is-highlighted .bit-cell-size {
   color: var(--layer-on-solid);
   opacity: 0.85;
-}
-
-.segment-bar-slice,
-.legend-item {
-  cursor: pointer;
 }
 
 /* Import Hex panel & decoded notes banner */

@@ -167,6 +167,7 @@ export function BitDiagram({
                           fieldId: cell.span.fieldId,
                         })
                       }
+                      onMouseLeave={() => onHighlightChange(null)}
                       onFocus={() =>
                         onHighlightChange({
                           kind: 'field',

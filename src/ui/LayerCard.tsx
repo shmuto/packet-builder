@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { isFieldHighlighted, type HighlightTarget } from '../core/inspector';
+import {
+  isFieldHighlighted,
+  resolveHighlightedLayerIndex,
+  type HighlightTarget,
+} from '../core/inspector';
 import { BGP_DEFAULT_MARKER_HEX } from '../core/layers/bgp';
 import type {
   BGPMessageType,
@@ -87,7 +91,7 @@ export function LayerCard({
   const generalWarnings = warnings.filter((w) => w.fieldId === undefined);
   const hasErrors = errors.length > 0;
   const hasWarnings = warnings.length > 0;
-  const isLayerHighlighted = highlight?.kind === 'layer' && highlight.layerIndex === index;
+  const isLayerHighlighted = resolveHighlightedLayerIndex(spans, highlight) === index;
 
   return (
     <section

@@ -400,6 +400,66 @@ export interface UnifiedBitDiagramRow {
 
 const BITS_PER_DIAGRAM_ROW = 32;
 
+function splitSpansInto32BitRows<TCell extends BitDiagramCell>(
+  spans: readonly FieldSpan[],
+  baseBitOffset: number,
+  createCell: (
+    base: BitDiagramCell,
+    spanBitStart: number,
+    spanBitEnd: number,
+  ) => TCell,
+): { readonly rowIndex: number; readonly totalBitsInRow: number; readonly cells: readonly TCell[] }[] {
+  const rowMap = new Map<number, TCell[]>();
+
+  for (const span of spans) {
+    let remaining = span.bitLength;
+    let relCursor = span.bitOffset - baseBitOffset;
+    let absCursor = span.bitOffset;
+    let firstPart = true;
+
+    while (remaining > 0) {
+      const rowIndex = Math.floor(relCursor / BITS_PER_DIAGRAM_ROW);
+      const colStart = relCursor % BITS_PER_DIAGRAM_ROW;
+      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
+      const take = Math.min(remaining, spaceInRow);
+
+      const cells = rowMap.get(rowIndex) ?? [];
+      cells.push(
+        createCell(
+          {
+            span,
+            colStart,
+            colSpan: take,
+            bitLengthInRow: take,
+            isContinuation: !firstPart,
+          },
+          absCursor,
+          absCursor + take,
+        ),
+      );
+      rowMap.set(rowIndex, cells);
+
+      relCursor += take;
+      absCursor += take;
+      remaining -= take;
+      firstPart = false;
+    }
+  }
+
+  const rows: {
+    readonly rowIndex: number;
+    readonly totalBitsInRow: number;
+    readonly cells: readonly TCell[];
+  }[] = [];
+  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
+  for (const rowIndex of sortedIndices) {
+    const cells = rowMap.get(rowIndex)!;
+    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
+    rows.push({ rowIndex, totalBitsInRow, cells });
+  }
+  return rows;
+}
+
 /**
  * Splits a single layer's FieldSpan entries into RFC-style 32-bit-wide rows.
  * Fields spanning a 32-bit boundary (such as 48-bit MAC addresses) are wrapped cleanly
@@ -414,50 +474,14 @@ export function buildBitDiagramRows(
     return [];
   }
 
-  const baseBitOffset = layerSpans[0].bitOffset;
-  const rowMap = new Map<number, BitDiagramCell[]>();
-
-  for (const span of layerSpans) {
-    let remaining = span.bitLength;
-    let relCursor = span.bitOffset - baseBitOffset;
-    let firstPart = true;
-
-    while (remaining > 0) {
-      const rowIndex = Math.floor(relCursor / BITS_PER_DIAGRAM_ROW);
-      const colStart = relCursor % BITS_PER_DIAGRAM_ROW;
-      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
-      const take = Math.min(remaining, spaceInRow);
-
-      const cells = rowMap.get(rowIndex) ?? [];
-      cells.push({
-        span,
-        colStart,
-        colSpan: take,
-        bitLengthInRow: take,
-        isContinuation: !firstPart,
-      });
-      rowMap.set(rowIndex, cells);
-
-      relCursor += take;
-      remaining -= take;
-      firstPart = false;
-    }
-  }
-
-  const rows: BitDiagramRow[] = [];
-  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
-  for (const rowIndex of sortedIndices) {
-    const cells = rowMap.get(rowIndex)!;
-    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
-    rows.push({
-      rowIndex,
-      bitOffsetInLayer: rowIndex * BITS_PER_DIAGRAM_ROW,
-      totalBitsInRow,
-      cells,
-    });
-  }
-
-  return rows;
+  return splitSpansInto32BitRows(layerSpans, layerSpans[0].bitOffset, (base) => base).map(
+    (row) => ({
+      rowIndex: row.rowIndex,
+      bitOffsetInLayer: row.rowIndex * BITS_PER_DIAGRAM_ROW,
+      totalBitsInRow: row.totalBitsInRow,
+      cells: row.cells,
+    }),
+  );
 }
 
 /**
@@ -485,51 +509,18 @@ export function buildUnifiedBitDiagramRows(
     }
   }
 
-  const rowMap = new Map<number, UnifiedBitDiagramCell[]>();
-
-  for (const span of headerSpans) {
-    const range = layerRanges.get(span.layerIndex)!;
-    let remaining = span.bitLength;
-    let cursor = span.bitOffset;
-    let firstPart = true;
-
-    while (remaining > 0) {
-      const rowIndex = Math.floor(cursor / BITS_PER_DIAGRAM_ROW);
-      const colStart = cursor % BITS_PER_DIAGRAM_ROW;
-      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
-      const take = Math.min(remaining, spaceInRow);
-
-      const cells = rowMap.get(rowIndex) ?? [];
-      cells.push({
-        span,
-        colStart,
-        colSpan: take,
-        bitLengthInRow: take,
-        isContinuation: !firstPart,
-        isLayerStart: cursor === range.startBit,
-        isLayerEnd: cursor + take === range.endBit,
-      });
-      rowMap.set(rowIndex, cells);
-
-      cursor += take;
-      remaining -= take;
-      firstPart = false;
-    }
-  }
-
-  const rows: UnifiedBitDiagramRow[] = [];
-  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
-  for (const rowIndex of sortedIndices) {
-    const cells = rowMap.get(rowIndex)!;
-    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
-    rows.push({
-      rowIndex,
-      bitOffset: rowIndex * BITS_PER_DIAGRAM_ROW,
-      byteOffset: rowIndex * (BITS_PER_DIAGRAM_ROW / 8),
-      totalBitsInRow,
-      cells,
-    });
-  }
-
-  return rows;
+  return splitSpansInto32BitRows(headerSpans, 0, (base, absStart, absEnd) => {
+    const range = layerRanges.get(base.span.layerIndex)!;
+    return {
+      ...base,
+      isLayerStart: absStart === range.startBit,
+      isLayerEnd: absEnd === range.endBit,
+    };
+  }).map((row) => ({
+    rowIndex: row.rowIndex,
+    bitOffset: row.rowIndex * BITS_PER_DIAGRAM_ROW,
+    byteOffset: row.rowIndex * (BITS_PER_DIAGRAM_ROW / 8),
+    totalBitsInRow: row.totalBitsInRow,
+    cells: row.cells,
+  }));
 }
