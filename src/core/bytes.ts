@@ -104,6 +104,19 @@ export function encodeUtf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
+/**
+ * バイト列を厳密に UTF-8 文字列へデコードする。
+ * 不正な UTF-8 バイト列を含む場合は例外を投げずエラーを返す。
+ */
+export function decodeUtf8Strict(bytes: Uint8Array): Result<string> {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return ok(text);
+  } catch {
+    return err('有効な UTF-8 バイト列ではないため、テキストとして表現できません。');
+  }
+}
+
 /** 複数のバイト列を順に連結した新しい Uint8Array を返す */
 export function concatBytes(...arrays: readonly Uint8Array[]): Uint8Array {
   let totalLength = 0;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   concatBytes,
+  decodeUtf8Strict,
   encodeUtf8,
   parseHexBytes,
   parseIPv4,
@@ -117,12 +118,29 @@ describe('parseHexBytes', () => {
   });
 });
 
-describe('encodeUtf8 / concatBytes', () => {
+describe('encodeUtf8 / decodeUtf8Strict / concatBytes', () => {
   it('ASCII およびマルチバイト UTF-8 文字列をバイト列へ変換する', () => {
     expect(encodeUtf8('')).toEqual(new Uint8Array(0));
     expect(encodeUtf8('Hello')).toEqual(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]));
     // "あ" = E3 81 82
     expect(encodeUtf8('あ')).toEqual(new Uint8Array([0xe3, 0x81, 0x82]));
+  });
+
+  it('decodeUtf8Strict は有効な UTF-8 を復元し、不正なバイト列はエラーを返す', () => {
+    expect(decodeUtf8Strict(new Uint8Array(0))).toEqual({ ok: true, value: '' });
+    expect(decodeUtf8Strict(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]))).toEqual({
+      ok: true,
+      value: 'Hello',
+    });
+    expect(decodeUtf8Strict(new Uint8Array([0xe3, 0x81, 0x82]))).toEqual({
+      ok: true,
+      value: 'あ',
+    });
+
+    // 不正な UTF-8 シーケンス（de ad be ef、途中切れマルチバイト等）はエラー
+    expect(decodeUtf8Strict(new Uint8Array([0xde, 0xad, 0xbe, 0xef])).ok).toBe(false);
+    expect(decodeUtf8Strict(new Uint8Array([0xe3, 0x81])).ok).toBe(false);
+    expect(decodeUtf8Strict(new Uint8Array([0xff])).ok).toBe(false);
   });
 
   it('複数配列を順序どおりに連結する', () => {
