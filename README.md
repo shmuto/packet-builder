@@ -18,6 +18,7 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
 - **Bit-Accurate Inspection & Export**
   - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), and an **RFC-style 32-bit header bit diagram**—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
   - **One-click export**: copy continuous hex strings (**Copy Hex**), formatted hex dumps (**Copy Dump**), or download Wireshark-compatible `.pcap` files (**Download .pcap**).
+  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets) to decode them back into editable layers while preserving auto vs. manual checksum/length states.
 
 ## Supported Protocols & Specifications
 
@@ -44,12 +45,13 @@ npm run check      # Run typecheck, tests, and production build
 
 ## Project Structure
 
-- `src/core/` — Pure, DOM-free packet encoding, validation, and inspection logic (each module paired with `*.test.ts`)
+- `src/core/` — Pure, DOM-free packet encoding, decoding, validation, and inspection logic (each module paired with `*.test.ts`)
   - `result.ts` — Non-throwing `Result<T>` type and `ok` / `err` helpers
-  - `bytes.ts` — MAC / IPv4 / hex parsing, UTF-8 encode & strict BOM-preserving decode, big-endian writers, hex string & dump formatters
+  - `bytes.ts` — MAC / IPv4 / hex / hex-dump parsing, UTF-8 encode & strict BOM-preserving decode, big-endian readers/writers, hex string & dump formatters
   - `checksum.ts` — RFC 1071 Internet Checksum and IPv4 pseudo-header checksum
   - `layers/` — Types and encoders for Ethernet II, ARP, IPv4, ICMP, UDP, and TCP
   - `packet.ts` — Layer order validation and `buildPacket` producing raw bytes and contiguous `FieldSpan[]` bit mappings
+  - `decode.ts` — Raw byte decoder (`decodePacket`) reconstructing layer stacks & payload from Ethernet II or Raw IPv4 packets
   - `presets.ts` — Default layer factories and UDP / TCP SYN / ICMP Ping / ARP Request presets
   - `inspector.ts` — Form integer parsing, hex dump rows, layer summaries, bidirectional highlight matching, and 32-bit bit diagram layout
   - `pcap.ts` — Classic libpcap (v2.4) encoder and link-layer type selector for Wireshark export
@@ -58,6 +60,7 @@ npm run check      # Run typecheck, tests, and production build
   - `FieldControls.tsx` — Text, numeric, auto/manual toggle, and fixed-bit chip controls
   - `LayerCard.tsx` — Collapsible layer editor cards
   - `PayloadCard.tsx` — UTF-8 text / hexadecimal payload editor
+  - `ImportHexPanel.tsx` — Raw hex / hex-dump import and decoding panel
   - `BitDiagram.tsx` — RFC-style 32-bit header layout visualizer
   - `HexDumpInspector.tsx` — Export toolbar, layer proportion bar, live hover detail strip, hex/ASCII dump, and warnings/errors
 

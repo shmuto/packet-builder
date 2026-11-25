@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { decodeUtf8Strict, encodeUtf8, parseHexBytes } from './core/bytes';
+import { detectPrintableUtf8, type DecodedPacket } from './core/decode';
 import {
   evaluatePacketDraft,
   formatSpacedHex,
@@ -10,6 +11,7 @@ import type { Layer, LayerType } from './core/layers/types';
 import { createPresets, type PacketPreset, type PresetId } from './core/presets';
 import { ok, type Result } from './core/result';
 import { HexDumpInspector } from './ui/HexDumpInspector';
+import { ImportHexPanel } from './ui/ImportHexPanel';
 import { LayerCard } from './ui/LayerCard';
 import { ADDABLE_LAYER_TYPES, createLayerByType, LAYER_META } from './ui/layerMeta';
 import { PayloadCard, type PayloadMode } from './ui/PayloadCard';
@@ -37,6 +39,8 @@ export function App() {
     undefined,
   );
   const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [importNotes, setImportNotes] = useState<readonly string[]>([]);
 
   const payloadResult: Result<Uint8Array> = useMemo(() => {
     if (payloadMode === 'text') {
@@ -59,7 +63,27 @@ export function App() {
     setPayloadText(preset.payloadText);
     setPayloadHex(formatSpacedHex(preset.payloadBytes));
     setPayloadModeSwitchError(undefined);
+    setImportNotes([]);
     setHighlight(null);
+  };
+
+  const handleImportDecoded = (decoded: DecodedPacket) => {
+    setActivePresetId(null);
+    setLayerItems(decoded.layers.map((layer) => ({ id: allocateId(), layer })));
+    const textCheck = detectPrintableUtf8(decoded.payload);
+    if (textCheck.printable) {
+      setPayloadMode('text');
+      setPayloadText(textCheck.text);
+      setPayloadHex(formatSpacedHex(decoded.payload));
+    } else {
+      setPayloadMode('hex');
+      setPayloadText('');
+      setPayloadHex(formatSpacedHex(decoded.payload));
+    }
+    setPayloadModeSwitchError(undefined);
+    setImportNotes(decoded.notes);
+    setHighlight(null);
+    setShowImportPanel(false);
   };
 
   const handleLayerChange = (index: number, nextLayer: Layer) => {
@@ -142,11 +166,11 @@ export function App() {
             <span className="brand-sub">packet builder</span>
           </div>
           <p className="brand-desc">
-            Stack Ethernet II, ARP, IPv4, ICMP, UDP, and TCP layers like building blocks to inspect and export raw network packets.
+            Stack Ethernet II, ARP, IPv4, ICMP, UDP, and TCP layers like building blocks to inspect, decode, and export raw network packets.
           </p>
         </div>
 
-        <nav className="preset-bar" aria-label="Packet presets">
+        <nav className="preset-bar" aria-label="Packet presets and import">
           <span className="preset-label">Presets</span>
           <div className="preset-list">
             {presets.map((preset) => (
@@ -161,9 +185,45 @@ export function App() {
                 {preset.name}
               </button>
             ))}
+            <button
+              type="button"
+              className={`preset-btn is-import${showImportPanel ? ' is-active' : ''}`}
+              aria-expanded={showImportPanel}
+              onClick={() => setShowImportPanel((open) => !open)}
+            >
+              Import Hex
+            </button>
           </div>
         </nav>
       </header>
+
+      {showImportPanel && (
+        <ImportHexPanel
+          onImport={handleImportDecoded}
+          onClose={() => setShowImportPanel(false)}
+        />
+      )}
+
+      {importNotes.length > 0 && (
+        <div className="import-notes-banner" role="status">
+          <div className="import-notes-body">
+            <strong>Import Notes:</strong>
+            <ul className="inspector-msg-list">
+              {importNotes.map((note, i) => (
+                <li key={i}>{note}</li>
+              ))}
+            </ul>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Dismiss import notes"
+            onClick={() => setImportNotes([])}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <main className="workbench">
         <section className="stack-column" aria-label="Layer stack editor">

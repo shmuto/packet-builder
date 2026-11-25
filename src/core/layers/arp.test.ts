@@ -116,4 +116,38 @@ describe('encodeARP', () => {
       'targetIp',
     ]);
   });
+
+  it('accepts minimum (0) and maximum (0xff / 0xffff) boundary values', () => {
+    const minResult = encodeARP(
+      makeBaseARP({
+        hardwareType: manualValue(0),
+        protocolType: manualValue(0),
+        hardwareLength: manualValue(0),
+        protocolLength: manualValue(0),
+        operation: 0,
+      }),
+      { layerIndex: 0 },
+    );
+    expect(minResult.ok).toBe(true);
+    if (minResult.ok) {
+      expect(minResult.bytes.slice(0, 8)).toEqual(new Uint8Array(8));
+    }
+
+    const maxResult = encodeARP(
+      makeBaseARP({
+        hardwareType: manualValue(0xffff),
+        protocolType: manualValue(0xffff),
+        hardwareLength: manualValue(0xff),
+        protocolLength: manualValue(0xff),
+        operation: 0xffff,
+      }),
+      { layerIndex: 0 },
+    );
+    expect(maxResult.ok).toBe(true);
+    if (maxResult.ok) {
+      expect(maxResult.bytes.slice(0, 8)).toEqual(
+        new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+      );
+    }
+  });
 });

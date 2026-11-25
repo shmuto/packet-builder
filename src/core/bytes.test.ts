@@ -3,9 +3,14 @@ import {
   concatBytes,
   decodeUtf8Strict,
   encodeUtf8,
+  formatIPv4,
+  formatMac,
   parseHexBytes,
+  parseHexOrDump,
   parseIPv4,
   parseMac,
+  readUint16BE,
+  readUint32BE,
   toHexDump,
   toHexString,
   writeUint16BE,
@@ -233,5 +238,42 @@ describe('toHexString / toHexDump', () => {
     const lines65549 = toHexDump(new Uint8Array(65549)).split('\n');
     expect(lines65549[0].startsWith('00000: ')).toBe(true);
     expect(lines65549[lines65549.length - 1].startsWith('10000: ')).toBe(true);
+  });
+});
+
+describe('parseHexOrDump / readUintBE / formatMac / formatIPv4', () => {
+  it('parseHexOrDump accepts both compact hex and offset-prefixed hex dumps', () => {
+    const dump = ['0000: 00 11 22 33', '0010: aa bb cc'].join('\n');
+    expect(parseHexOrDump(dump)).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x11, 0x22, 0x33, 0xaa, 0xbb, 0xcc]),
+    });
+    expect(parseHexOrDump('deadbeef')).toEqual({
+      ok: true,
+      value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+    });
+    // Colon-separated MAC-style text (2-digit prefix) is rejected rather than misread as an offset
+    expect(parseHexOrDump('aa:bb:cc').ok).toBe(false);
+  });
+
+  it('readUint16BE and readUint32BE read unsigned big-endian integers and validate bounds', () => {
+    const buf = new Uint8Array([0x08, 0x06, 0xff, 0xff, 0xff, 0xff]);
+    expect(readUint16BE(buf, 0)).toBe(0x0806);
+    expect(readUint32BE(buf, 2)).toBe(0xffffffff);
+
+    expect(() => readUint16BE(buf, -1)).toThrow(RangeError);
+    expect(() => readUint16BE(buf, 5)).toThrow(RangeError);
+    expect(() => readUint32BE(buf, -1)).toThrow(RangeError);
+    expect(() => readUint32BE(buf, 3)).toThrow(RangeError);
+  });
+
+  it('formatMac and formatIPv4 format fixed-length byte arrays and reject wrong lengths', () => {
+    expect(formatMac(new Uint8Array([0x00, 0x0a, 0x1b, 0x2c, 0x3d, 0xff]))).toBe(
+      '00:0a:1b:2c:3d:ff',
+    );
+    expect(formatIPv4(new Uint8Array([192, 168, 0, 1]))).toBe('192.168.0.1');
+
+    expect(() => formatMac(new Uint8Array(5))).toThrow(RangeError);
+    expect(() => formatIPv4(new Uint8Array(3))).toThrow(RangeError);
   });
 });

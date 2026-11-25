@@ -99,6 +99,20 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
+const HEX_DUMP_LINE_OFFSET_PATTERN = /^\s*[0-9a-fA-F]{4,}:\s*/;
+
+/**
+ * Parses either raw hex text (continuous/whitespace-separated) or an offset-prefixed
+ * hex dump (such as `0000: 00 11 22 ...` output by `toHexDump`).
+ */
+export function parseHexOrDump(text: string): Result<Uint8Array> {
+  const stripped = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(HEX_DUMP_LINE_OFFSET_PATTERN, ''))
+    .join(' ');
+  return parseHexBytes(stripped);
+}
+
 /** Encodes a UTF-8 string into bytes. */
 export function encodeUtf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -158,6 +172,48 @@ export function writeUint32BE(target: Uint8Array, offset: number, value: number)
   target[offset + 1] = (value >>> 16) & 0xff;
   target[offset + 2] = (value >>> 8) & 0xff;
   target[offset + 3] = value & 0xff;
+}
+
+/** Reads an unsigned 16-bit integer in network byte order (big-endian). */
+export function readUint16BE(source: Uint8Array, offset: number): number {
+  if (!Number.isInteger(offset) || offset < 0 || offset + 2 > source.length) {
+    throw new RangeError(`Read offset out of range (offset=${offset}, length=${source.length}).`);
+  }
+  return (source[offset] << 8) | source[offset + 1];
+}
+
+/** Reads an unsigned 32-bit integer in network byte order (big-endian). */
+export function readUint32BE(source: Uint8Array, offset: number): number {
+  if (!Number.isInteger(offset) || offset < 0 || offset + 4 > source.length) {
+    throw new RangeError(`Read offset out of range (offset=${offset}, length=${source.length}).`);
+  }
+  return (
+    ((source[offset] << 24) |
+      (source[offset + 1] << 16) |
+      (source[offset + 2] << 8) |
+      source[offset + 3]) >>>
+    0
+  );
+}
+
+/** Formats a 6-byte Uint8Array as a colon-separated lowercase MAC address. */
+export function formatMac(bytes: Uint8Array): string {
+  if (bytes.length !== 6) {
+    throw new RangeError(`MAC address must be 6 bytes (got ${bytes.length}).`);
+  }
+  const parts: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    parts.push(bytes[i].toString(16).padStart(2, '0'));
+  }
+  return parts.join(':');
+}
+
+/** Formats a 4-byte Uint8Array as a dotted-quad IPv4 address. */
+export function formatIPv4(bytes: Uint8Array): string {
+  if (bytes.length !== 4) {
+    throw new RangeError(`IPv4 address must be 4 bytes (got ${bytes.length}).`);
+  }
+  return `${bytes[0]}.${bytes[1]}.${bytes[2]}.${bytes[3]}`;
 }
 
 /** Formats bytes as a continuous lowercase hexadecimal string without spaces. */
