@@ -368,12 +368,58 @@ describe('buildPacket', () => {
     }
   });
 
+  it('matches known Ethernet II + Outer IPv4 (Protocol=4) + Inner IPv4 + UDP + "Hello" packet byte-for-byte (RFC 2003 IP-in-IP)', () => {
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+      createDefaultIPv4(), // Inner: 192.168.0.1 -> 192.168.0.2
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // Outer IPv4 (20B): TotalLen=53(0x0035), Proto=4(IP-in-IP), Checksum=0x148f, 10.0.0.1 -> 10.0.0.2
+      0x45, 0x00, 0x00, 0x35,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x04, 0x14, 0x8f,
+      0x0a, 0x00, 0x00, 0x01,
+      0x0a, 0x00, 0x00, 0x02,
+      // Inner IPv4 (20B): TotalLen=33(0x0021), Proto=17(UDP), Checksum=0xa744, 192.168.0.1 -> 192.168.0.2
+      0x45, 0x00, 0x00, 0x21,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x11, 0xa7, 0x44,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // UDP (8B): 12345 -> 80, Len=13(0x000d), Checksum=0x2a25 (computed with INNER IPv4 pseudo-header)
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x2a, 0x25,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
   it('対応していないレイヤー順序はエラーを返す', () => {
     const invalidOrders: Layer[][] = [
       [createDefaultUDP(), createDefaultIPv4()],
       [createDefaultEthernet(), createDefaultUDP()],
       [createDefaultTCP(), createDefaultUDP()],
-      [createDefaultIPv4(), createDefaultIPv4()],
       [createDefaultEthernet(), createDefaultEthernet()],
       [createDefaultICMP(), createDefaultTCP()],
       [createDefaultIPv4(), createDefaultARP()],

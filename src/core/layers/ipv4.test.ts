@@ -48,11 +48,16 @@ describe('encodeIPv4', () => {
     });
   });
 
-  it('上位レイヤー種別に応じて Protocol 番号を自動設定する（ICMP=1, TCP=6, UDP=17）', () => {
+  it('上位レイヤー種別に応じて Protocol 番号を自動設定する（ICMP=1, IP-in-IP=4, TCP=6, UDP=17）', () => {
     const icmp = encodeIPv4(makeBaseIPv4(), {
       layerIndex: 0,
       upperLayerType: 'icmp',
       upperBytesLength: 8,
+    });
+    const ipip = encodeIPv4(makeBaseIPv4(), {
+      layerIndex: 0,
+      upperLayerType: 'ipv4',
+      upperBytesLength: 20,
     });
     const tcp = encodeIPv4(makeBaseIPv4(), {
       layerIndex: 0,
@@ -66,6 +71,8 @@ describe('encodeIPv4', () => {
     });
 
     expect(icmp.ok && icmp.bytes[9]).toBe(1);
+    expect(ipip.ok && ipip.bytes[9]).toBe(4);
+    expect(ipip.ok && ipip.warnings).toEqual([]);
     expect(tcp.ok && tcp.bytes[9]).toBe(6);
     expect(udp.ok && udp.bytes[9]).toBe(17);
   });

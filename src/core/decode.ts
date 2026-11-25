@@ -32,6 +32,7 @@ import {
 import { ICMP_HEADER_LENGTH } from './layers/icmp';
 import {
   IP_PROTOCOL_ICMP,
+  IP_PROTOCOL_IPIP,
   IP_PROTOCOL_TCP,
   IP_PROTOCOL_UDP,
   IPV4_HEADER_LENGTH,
@@ -370,11 +371,15 @@ function isAllZero(bytes: Uint8Array): boolean {
   return true;
 }
 
+/** Maximum supported IP-in-IP nesting depth to guard against pathological inputs */
+const MAX_IPIP_DEPTH = 16;
+
 function decodeIPv4Chain(
   bytes: Uint8Array,
   offset: number,
   layers: Layer[],
   notes: string[],
+  depth = 0,
 ): Uint8Array {
   const tos = bytes[offset + 1];
   const totalLength = readUint16BE(bytes, offset + 2);
@@ -394,10 +399,14 @@ function decodeIPv4Chain(
   if (totalLength >= IPV4_HEADER_LENGTH && totalLength < actualTotalLength) {
     const trailing = bytes.subarray(offset + totalLength);
     // Per RFC 791 / RFC 768 / RFC 9293 §3.1, upper-layer segments and checksums are bounded
-    // strictly by IPv4 Total Length regardless of whether Ethernet padding bytes are zero or non-zero.
+    // strictly by IPv4 Total Length regardless of whether trailing bytes are zero or non-zero.
     scopedBytes = bytes.subarray(0, offset + totalLength);
     effectiveTotalLength = totalLength;
-    if (isAllZero(trailing)) {
+    if (depth > 0) {
+      notes.push(
+        `Stripped ${trailing.length} trailing byte(s) beyond inner IPv4 Total Length (${totalLength}); re-encoded bytes will omit these trailing bytes.`,
+      );
+    } else if (isAllZero(trailing)) {
       notes.push(
         `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv4 Total Length (${totalLength}).`,
       );
@@ -424,6 +433,22 @@ function decodeIPv4Chain(
     notes.push(
       `Non-initial IPv4 fragment (Fragment Offset = ${fragmentOffset}); upper-layer header is not decoded per RFC 791 and remaining bytes are kept as Payload.`,
     );
+  } else if (protocol === IP_PROTOCOL_IPIP && upperRemaining >= IPV4_HEADER_LENGTH) {
+    if (depth >= MAX_IPIP_DEPTH) {
+      notes.push(
+        `IP-in-IP nesting depth exceeded maximum (${MAX_IPIP_DEPTH}); remaining bytes kept as Payload.`,
+      );
+    } else {
+      const innerVersion = scopedBytes[upperOffset] >>> 4;
+      const innerIhl = scopedBytes[upperOffset] & 0x0f;
+      if (innerVersion === IPV4_VERSION && innerIhl === IPV4_IHL) {
+        payload = decodeIPv4Chain(scopedBytes, upperOffset, decodedUpperLayers, notes, depth + 1);
+      } else {
+        notes.push(
+          `Inner IPv4 header (Protocol ${IP_PROTOCOL_IPIP}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+        );
+      }
+    }
   } else if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
     const res = decodeICMPAt(scopedBytes, upperOffset);
     decodedUpperLayers.push(res.layer);
@@ -465,6 +490,7 @@ function decodeIPv4Chain(
       payload = res.payload;
     }
   } else if (
+    protocol === IP_PROTOCOL_IPIP ||
     protocol === IP_PROTOCOL_ICMP ||
     protocol === IP_PROTOCOL_UDP ||
     protocol === IP_PROTOCOL_TCP

@@ -528,7 +528,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-protocol`}
                 label="Protocol"
-                hint="1=ICMP / 6=TCP / 17=UDP"
+                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP"
                 value={layer.protocol}
                 resolvedAutoValue={resolvedAutoValues?.protocol}
                 error={fieldError('protocol')}
