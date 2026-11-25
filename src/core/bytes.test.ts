@@ -186,4 +186,26 @@ describe('toHexString / toHexDump', () => {
       ].join('\n'),
     );
   });
+
+  it('65536 バイトまでは 4 桁、65537 バイト以上は全行を 5 桁オフセットで揃える', () => {
+    // ちょうど 65536 バイト: 最終行オフセットは 0xfff0（4 桁）
+    const lines65536 = toHexDump(new Uint8Array(65536)).split('\n');
+    expect(lines65536).toHaveLength(4096);
+    expect(lines65536[0].startsWith('0000: ')).toBe(true);
+    expect(lines65536[lines65536.length - 1].startsWith('fff0: ')).toBe(true);
+
+    // 65537 バイト: 最終行オフセットは 0x10000（5 桁）→ 先頭行も 00000: で揃う
+    const bytes65537 = new Uint8Array(65537);
+    bytes65537[65536] = 0xab;
+    const lines65537 = toHexDump(bytes65537).split('\n');
+    expect(lines65537).toHaveLength(4097);
+    expect(lines65537[0].startsWith('00000: ')).toBe(true);
+    expect(lines65537[lines65537.length - 2].startsWith('0fff0: ')).toBe(true);
+    expect(lines65537[lines65537.length - 1]).toBe('10000: ab');
+
+    // Ethernet(14B) + IPv4 最大長(65535B) = 65549 バイトでも列がずれない
+    const lines65549 = toHexDump(new Uint8Array(65549)).split('\n');
+    expect(lines65549[0].startsWith('00000: ')).toBe(true);
+    expect(lines65549[lines65549.length - 1].startsWith('10000: ')).toBe(true);
+  });
 });

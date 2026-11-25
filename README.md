@@ -19,7 +19,7 @@ Ethernet II / IPv4 / ICMP / UDP / TCP のレイヤーを積み木のように重
   - `result.ts`：例外を投げずに成功・エラーを返す `Result<T>` 型と `ok` / `err` ヘルパー
   - `bytes.ts`：MAC / IPv4 / Hex 文字列のパース、UTF-8 変換、ビッグエンディアン書き込み、16 進ダンプ整形
   - `checksum.ts`：RFC 1071 インターネットチェックサム・IPv4 擬似ヘッダチェックサム
-- `src/ui/`：React コンポーネント（`src/core/` の関数を呼び出して表示のみを担当）
+- `src/ui/`：React コンポーネント（`src/core/` の関数を呼び出して表示のみを担当。Step 3 で追加予定）
 
 ## 開発
 

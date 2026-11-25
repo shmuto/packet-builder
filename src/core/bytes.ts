@@ -163,13 +163,18 @@ export function toHexString(bytes: Uint8Array): string {
 }
 
 /**
- * バイト列を 16 バイトごとに改行し、行頭に 4 桁の 16 進オフセットを付けたダンプ文字列を返す。
+ * バイト列を 16 バイトごとに改行し、行頭に 16 進オフセットを付けたダンプ文字列を返す。
+ * オフセット桁数は最小 4 桁とし、65536 バイト以上のデータでは最終行の桁数に合わせて全行を揃える。
  * 空のバイト列に対しては空文字列を返す。
  */
 export function toHexDump(bytes: Uint8Array): string {
   if (bytes.length === 0) {
     return '';
   }
+
+  const lastOffset =
+    Math.floor((bytes.length - 1) / HEX_DUMP_BYTES_PER_LINE) * HEX_DUMP_BYTES_PER_LINE;
+  const offsetWidth = Math.max(4, lastOffset.toString(16).length);
 
   const lines: string[] = [];
   for (let offset = 0; offset < bytes.length; offset += HEX_DUMP_BYTES_PER_LINE) {
@@ -178,7 +183,7 @@ export function toHexDump(bytes: Uint8Array): string {
     for (let i = offset; i < end; i++) {
       hexBytes.push(bytes[i].toString(16).padStart(2, '0'));
     }
-    const offsetLabel = offset.toString(16).padStart(4, '0');
+    const offsetLabel = offset.toString(16).padStart(offsetWidth, '0');
     lines.push(`${offsetLabel}: ${hexBytes.join(' ')}`);
   }
 
