@@ -178,7 +178,7 @@ export interface BGPLayer {
   /** Total Path Attribute Length (16-bit, auto = 0) */
   readonly totalPathAttrLength: AutoOrManual<number>;
   // NOTIFICATION (Type 3, RFC 4271 §4.5)
-  /** Error Code (8-bit, 1..6 per RFC 4271 §4.5) */
+  /** Error Code (8-bit, 1..6 per RFC 4271 §4.5, 7 per RFC 7313) */
   readonly errorCode: number;
   /** Error Subcode (8-bit) */
   readonly errorSubcode: number;

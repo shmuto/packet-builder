@@ -991,7 +991,7 @@ export function LayerCard({
                   <NumberField
                     id={`${id}-errorCode`}
                     label="Error Code"
-                    hint="1-6 (RFC 4271 §4.5)"
+                    hint="0-255 (1-6: RFC 4271, 7: RFC 7313)"
                     value={layer.errorCode}
                     error={fieldError('errorCode')}
                     warning={fieldWarning('errorCode')}

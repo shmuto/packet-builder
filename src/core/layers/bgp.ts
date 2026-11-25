@@ -75,7 +75,7 @@ export interface EncodeBGPContext {
   readonly tcpPorts: { readonly srcPort: number; readonly dstPort: number } | null;
 }
 
-function isAllFF(bytes: Uint8Array): boolean {
+export function isAllFF(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length; i++) {
     if (bytes[i] !== 0xff) return false;
   }

@@ -466,6 +466,38 @@ describe('decodePacket', () => {
         expect(dec.value.notes.some((n) => n.includes('Type 5'))).toBe(true);
       }
     }
+
+    // TCP port 179 segment with TCP options (e.g. Data Offset = 8 / 12-byte RFC 7323 Timestamps) skips BGP decode with a note
+    const tcpOptions12B = new Uint8Array([
+      0x01, 0x01, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02,
+    ]);
+    const keepaliveBytes = new Uint8Array(19).fill(0xff);
+    keepaliveBytes[16] = 0x00;
+    keepaliveBytes[17] = 0x13;
+    keepaliveBytes[18] = 0x04;
+    const optPlusBgp = new Uint8Array(tcpOptions12B.length + keepaliveBytes.length);
+    optPlusBgp.set(tcpOptions12B, 0);
+    optPlusBgp.set(keepaliveBytes, tcpOptions12B.length);
+
+    const tcpOptBgpBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...tcp179, dataOffset: manualValue(8) },
+      ],
+      optPlusBgp,
+    );
+    expect(tcpOptBgpBuilt.ok).toBe(true);
+    if (tcpOptBgpBuilt.ok) {
+      const dec = decodePacket(tcpOptBgpBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
+        expect(dec.value.notes.some((n) => n.includes('BGP-4 decoding skipped'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(tcpOptBgpBuilt.bytes);
+      }
+    }
   });
 });
 

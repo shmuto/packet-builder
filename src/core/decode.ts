@@ -22,6 +22,7 @@ import {
   BGP_TYPE_UPDATE,
   BGP_VERSION_4,
   getBGPHeaderLength,
+  isAllFF,
 } from './layers/bgp';
 import {
   ETHERNET_HEADER_LENGTH,
@@ -235,13 +236,6 @@ function isBGPMessageType(value: number): value is BGPMessageType {
   );
 }
 
-function isAllFF(bytes: Uint8Array): boolean {
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] !== 0xff) return false;
-  }
-  return true;
-}
-
 function decodeBGPAt(
   tcpPayload: Uint8Array,
   notes: string[],
@@ -441,16 +435,30 @@ function decodeIPv4Chain(
   } else if (protocol === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
     const res = decodeTCPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes, notes);
     decodedUpperLayers.push(res.layer);
-    if (
-      res.layer.dataOffset.mode === 'auto' &&
-      (res.layer.srcPort === BGP_PORT || res.layer.dstPort === BGP_PORT) &&
-      res.payload.length > 0
-    ) {
-      const bgpRes = decodeBGPAt(res.payload, notes);
-      if (bgpRes !== null) {
-        decodedUpperLayers.push(bgpRes.layer);
-        payload = bgpRes.payload;
+    const isBgpPort = res.layer.srcPort === BGP_PORT || res.layer.dstPort === BGP_PORT;
+    if (isBgpPort && res.payload.length > 0) {
+      if (res.layer.dataOffset.mode === 'auto') {
+        const bgpRes = decodeBGPAt(res.payload, notes);
+        if (bgpRes !== null) {
+          decodedUpperLayers.push(bgpRes.layer);
+          payload = bgpRes.payload;
+        } else {
+          payload = res.payload;
+        }
       } else {
+        const tcpOptionsBytes = Math.max(
+          0,
+          (res.layer.dataOffset.value - TCP_DEFAULT_DATA_OFFSET) * 4,
+        );
+        if (res.layer.dataOffset.value < TCP_DEFAULT_DATA_OFFSET) {
+          notes.push(
+            `TCP segment on port 179 has invalid Data Offset (${res.layer.dataOffset.value}); BGP-4 decoding skipped.`,
+          );
+        } else if (res.payload.length > tcpOptionsBytes) {
+          notes.push(
+            `TCP options present on port 179 (Data Offset = ${res.layer.dataOffset.value}); BGP-4 decoding skipped so TCP options and application bytes remain preserved in Payload.`,
+          );
+        }
         payload = res.payload;
       }
     } else {
