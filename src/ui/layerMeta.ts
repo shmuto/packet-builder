@@ -1,5 +1,6 @@
 import type { Layer, LayerType } from '../core/layers/types';
 import {
+  createDefaultARP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -22,6 +23,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     shortName: 'ETH',
     rfc: 'RFC 894 / IEEE 802.3',
     osiLabel: 'L2',
+  },
+  arp: {
+    type: 'arp',
+    name: 'ARP',
+    shortName: 'ARP',
+    rfc: 'RFC 826',
+    osiLabel: 'L2.5',
   },
   ipv4: {
     type: 'ipv4',
@@ -55,6 +63,7 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
 
 export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'ethernet',
+  'arp',
   'ipv4',
   'icmp',
   'udp',
@@ -65,6 +74,8 @@ export function createLayerByType(type: LayerType): Layer {
   switch (type) {
     case 'ethernet':
       return createDefaultEthernet();
+    case 'arp':
+      return createDefaultARP();
     case 'ipv4':
       return createDefaultIPv4();
     case 'icmp':

@@ -3,6 +3,7 @@ import { encodeUtf8 } from './bytes';
 import { autoValue, type FieldSpan, type Layer } from './layers/types';
 import { buildPacket } from './packet';
 import {
+  createDefaultARP,
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
@@ -153,6 +154,34 @@ describe('buildPacket', () => {
     expect(findSpan('tcp', 'flags')).toMatchObject({ bitOffset: 272 + 104, bitLength: 8 });
   });
 
+  it('既知の Ethernet II + ARP Request フレームとバイト単位で完全一致する（RFC 826）', () => {
+    const layers: Layer[] = [
+      { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+      createDefaultARP(),
+    ];
+
+    const result = buildPacket(layers, new Uint8Array(0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): broadcast dst, src, EtherType 0x0806 (ARP)
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x06,
+      // ARP (28B): HTYPE=1, PTYPE=0x0800, HLEN=6, PLEN=4, OPER=1
+      0x00, 0x01, 0x08, 0x00,
+      0x06, 0x04, 0x00, 0x01,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0xc0, 0xa8, 0x00, 0x01,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xc0, 0xa8, 0x00, 0x02,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
   it('対応していないレイヤー順序はエラーを返す', () => {
     const invalidOrders: Layer[][] = [
       [createDefaultUDP(), createDefaultIPv4()],
@@ -161,6 +190,10 @@ describe('buildPacket', () => {
       [createDefaultIPv4(), createDefaultIPv4()],
       [createDefaultEthernet(), createDefaultEthernet()],
       [createDefaultICMP(), createDefaultTCP()],
+      [createDefaultIPv4(), createDefaultARP()],
+      [createDefaultARP(), createDefaultIPv4()],
+      [createDefaultARP(), createDefaultUDP()],
+      [createDefaultARP(), createDefaultARP()],
     ];
 
     for (const layers of invalidOrders) {

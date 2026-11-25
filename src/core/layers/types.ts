@@ -16,7 +16,7 @@ export function manualValue<T>(value: T): AutoOrManual<T> {
   return { mode: 'manual', value };
 }
 
-export type LayerType = 'ethernet' | 'ipv4' | 'icmp' | 'udp' | 'tcp';
+export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'icmp' | 'udp' | 'tcp';
 
 export interface EthernetLayer {
   readonly type: 'ethernet';
@@ -24,8 +24,30 @@ export interface EthernetLayer {
   readonly dstMac: string;
   /** 送信元 MAC アドレス（例: 11:22:33:44:55:66） */
   readonly srcMac: string;
-  /** EtherType（16 ビット、自動時は直上が IPv4 なら 0x0800） */
+  /** EtherType（16 ビット、自動時は直上が IPv4 なら 0x0800、ARP なら 0x0806） */
   readonly etherType: AutoOrManual<number>;
+}
+
+export interface ARPLayer {
+  readonly type: 'arp';
+  /** Hardware Type (16 bit, auto = 1 for Ethernet, RFC 826) */
+  readonly hardwareType: AutoOrManual<number>;
+  /** Protocol Type (16 bit, auto = 0x0800 for IPv4, RFC 826) */
+  readonly protocolType: AutoOrManual<number>;
+  /** Hardware Address Length (8 bit, auto = 6 for 48-bit MAC) */
+  readonly hardwareLength: AutoOrManual<number>;
+  /** Protocol Address Length (8 bit, auto = 4 for 32-bit IPv4) */
+  readonly protocolLength: AutoOrManual<number>;
+  /** Operation (16 bit, 1 = Request, 2 = Reply) */
+  readonly operation: number;
+  /** Sender Hardware Address (6-byte MAC) */
+  readonly senderMac: string;
+  /** Sender Protocol Address (4-byte IPv4) */
+  readonly senderIp: string;
+  /** Target Hardware Address (6-byte MAC; 00:00:00:00:00:00 for requests) */
+  readonly targetMac: string;
+  /** Target Protocol Address (4-byte IPv4) */
+  readonly targetIp: string;
 }
 
 export interface IPv4Flags {
@@ -128,7 +150,7 @@ export interface TCPLayer {
   readonly urgentPointer: number;
 }
 
-export type Layer = EthernetLayer | IPv4Layer | ICMPLayer | UDPLayer | TCPLayer;
+export type Layer = EthernetLayer | ARPLayer | IPv4Layer | ICMPLayer | UDPLayer | TCPLayer;
 
 /** レイヤー内の相対フィールド定義（エンコーダ内部で使用） */
 export interface RelativeFieldSpan {
