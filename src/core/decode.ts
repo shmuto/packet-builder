@@ -237,17 +237,17 @@ function decodeIPv4Chain(
 
   if (totalLength >= IPV4_HEADER_LENGTH && totalLength < actualTotalLength) {
     const trailing = bytes.subarray(offset + totalLength);
+    // Per RFC 791 / RFC 768 / RFC 9293 §3.1, upper-layer segments and checksums are bounded
+    // strictly by IPv4 Total Length regardless of whether Ethernet padding bytes are zero or non-zero.
+    scopedBytes = bytes.subarray(0, offset + totalLength);
+    effectiveTotalLength = totalLength;
     if (isAllZero(trailing)) {
-      // Standard IEEE 802.3 Ethernet zero-padding: scope upper-layer decoding & checksums
-      // strictly to IPv4 Total Length per RFC 768 / RFC 9293 §3.1
-      scopedBytes = bytes.subarray(0, offset + totalLength);
-      effectiveTotalLength = totalLength;
       notes.push(
         `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv4 Total Length (${totalLength}).`,
       );
     } else {
       notes.push(
-        `IPv4 Total Length (${totalLength}) is smaller than remaining bytes (${actualTotalLength}) with non-zero trailing data; trailing bytes are preserved in Payload.`,
+        `Stripped ${trailing.length} trailing non-zero byte(s) of Ethernet padding/trailer beyond IPv4 Total Length (${totalLength}) per RFC 791/768/9293; re-encoded bytes will omit these trailing bytes.`,
       );
     }
   }

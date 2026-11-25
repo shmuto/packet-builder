@@ -211,6 +211,19 @@ describe('decodePacket', () => {
     expect(udpIp.type === 'ipv4' && udpIp.totalLength).toEqual(autoValue());
     expect(udpL4.type === 'udp' && udpL4.length).toEqual(autoValue());
     expect(udpL4.type === 'udp' && udpL4.checksum).toEqual(autoValue());
+
+    // 3) Non-zero (0xaa) Ethernet padding on a 60-byte TCP SYN frame also keeps TCP Checksum auto
+    const nonZeroPaddedTcp = new Uint8Array(60).fill(0xaa);
+    nonZeroPaddedTcp.set(tcpBuilt.bytes, 0);
+    const decNonZero = decodePacket(nonZeroPaddedTcp, 'ethernet');
+    expect(decNonZero.ok).toBe(true);
+    if (!decNonZero.ok) return;
+    expect(decNonZero.value.payload).toHaveLength(0);
+    expect(decNonZero.value.notes.some((n) => n.includes('6 trailing non-zero byte(s)'))).toBe(
+      true,
+    );
+    const nzTcp = decNonZero.value.layers[2];
+    expect(nzTcp.type === 'tcp' && nzTcp.checksum).toEqual(autoValue());
   });
 
   it('does not decode upper-layer headers for non-initial IPv4 fragments (Fragment Offset > 0)', () => {

@@ -99,30 +99,68 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
-// Matches either `0000: ...` (toHexDump) or `0000  ...` (Wireshark "Copy as Hex Dump")
-const HEX_DUMP_OFFSET_LINE_PATTERN = /^\s*[0-9a-fA-F]{4,}(?::\s*|\s{2,})(.*)$/;
-// Extracts up to 16 hex bytes (with single/double space separators) followed by optional 2+ space ASCII column
-const HEX_DUMP_BYTES_WITH_ASCII_PATTERN =
-  /^([0-9a-fA-F]{2}(?:\s{1,2}[0-9a-fA-F]{2}){0,15})(?:\s{2,}.*|\s*)$/;
+// Matches `0000: <hex bytes>` emitted by toHexDump
+const COLON_DUMP_LINE_PATTERN = /^\s*([0-9a-fA-F]{4,}):\s*(.*)$/;
+// Matches Wireshark "Copy as Hex Dump": `<offset>  <1..16 hex bytes>[   <ASCII>]`
+const WIRESHARK_DUMP_LINE_PATTERN =
+  /^\s*([0-9a-fA-F]{4,})\s{2,}([0-9a-fA-F]{2}(?:\s{1,2}[0-9a-fA-F]{2}){0,15})(?:(\s{3,}.*)|\s*)$/;
+
+function tryStripHexDumpLines(text: string): string | null {
+  const nonEmptyLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+
+  if (nonEmptyLines.length === 0) {
+    return null;
+  }
+
+  // 1) Colon-prefixed hex dump (`0000: 00 11 ...`, emitted by toHexDump):
+  //    every line must start with a 4+ hex digit offset followed by a colon.
+  const colonMatches = nonEmptyLines.map((line) => COLON_DUMP_LINE_PATTERN.exec(line));
+  if (colonMatches.every((m) => m !== null)) {
+    return colonMatches.map((m) => m![2]).join(' ');
+  }
+
+  // 2) Wireshark "Copy as Hex Dump" (`0000   00 11 ...   ASCII`):
+  //    require every line to match, start at offset 0, advance offsets monotonically by byte count,
+  //    and either span multiple lines or include the 3+ space ASCII column so plain spaced hex streams
+  //    like "deadbeef  cafe" or "0000  00 11" are never misclassified as dumps.
+  const wsMatches = nonEmptyLines.map((line) => WIRESHARK_DUMP_LINE_PATTERN.exec(line));
+  if (wsMatches.every((m) => m !== null)) {
+    let expectedOffset = 0;
+    let hasAsciiColumn = false;
+    const hexParts: string[] = [];
+
+    for (const match of wsMatches) {
+      const offsetValue = Number.parseInt(match![1], 16);
+      if (offsetValue !== expectedOffset) {
+        return null;
+      }
+      const hexPart = match![2];
+      const byteCount = hexPart.trim().split(/\s+/).length;
+      expectedOffset += byteCount;
+      if (match![3] !== undefined) {
+        hasAsciiColumn = true;
+      }
+      hexParts.push(hexPart);
+    }
+
+    if (wsMatches.length > 1 || hasAsciiColumn) {
+      return hexParts.join(' ');
+    }
+  }
+
+  return null;
+}
 
 /**
  * Parses raw hex streams (continuous or whitespace-separated), `toHexDump` output
- * (`0000: 00 11 ...`), or Wireshark "Copy as Hex Dump" output (`0000  00 11 ...  ASCII`).
+ * (`0000: 00 11 ...`), or Wireshark "Copy as Hex Dump" output (`0000   00 11 ...   ASCII`).
  */
 export function parseHexOrDump(text: string): Result<Uint8Array> {
-  const cleanedLines = text.split(/\r?\n/).map((line) => {
-    const offsetMatch = HEX_DUMP_OFFSET_LINE_PATTERN.exec(line);
-    if (!offsetMatch) {
-      return line;
-    }
-    const rest = offsetMatch[1].trimStart();
-    if (rest.length === 0) {
-      return '';
-    }
-    const bytesMatch = HEX_DUMP_BYTES_WITH_ASCII_PATTERN.exec(rest);
-    return bytesMatch ? bytesMatch[1] : rest;
-  });
-  return parseHexBytes(cleanedLines.join(' '));
+  const stripped = tryStripHexDumpLines(text);
+  return parseHexBytes(stripped ?? text);
 }
 
 /** Encodes a UTF-8 string into bytes. */

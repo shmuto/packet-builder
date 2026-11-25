@@ -267,6 +267,24 @@ describe('parseHexOrDump / readUintBE / formatMac / formatIPv4', () => {
       ok: true,
       value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
     });
+    // Regression: multi-space-separated hex streams must keep all leading bytes
+    expect(parseHexOrDump('deadbeef  cafe')).toEqual({
+      ok: true,
+      value: new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe]),
+    });
+    expect(parseHexOrDump('4500  003c')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x45, 0x00, 0x00, 0x3c]),
+    });
+    expect(parseHexOrDump('0000  00 11')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x00, 0x00, 0x11]),
+    });
+    // Single-line Wireshark dump with 3+ space ASCII column is still decoded as a dump
+    expect(parseHexOrDump('0000   00 11   ..')).toEqual({
+      ok: true,
+      value: new Uint8Array([0x00, 0x11]),
+    });
     // Invalid hex byte after offset still fails
     expect(parseHexOrDump('0000: 00 zz').ok).toBe(false);
     // Colon-separated MAC-style text (2-digit prefix) is rejected rather than misread as an offset
