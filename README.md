@@ -2,7 +2,7 @@
 
 画面上の名前は tsumiki（積み木）です。
 
-Ethernet / IPv4 / UDP のレイヤーを積み木のように重ねて、パケットを組み立てる学習用の Web アプリです。
+パケットを組み立てる学習用の Web アプリです。
 
 実装は Gemini（Antigravity CLI）が書き、レビューは Claude Opus が自動で行う、という分担を試すためのリポジトリでもあります。
 
@@ -21,7 +21,6 @@ npm run check    # 型チェック・テスト・ビルド
 3. Claude GitHub App（https://github.com/apps/claude）をこのリポジトリにインストールする。
 4. 手元で `claude setup-token` を実行し、出てきたトークンをリポジトリのシークレット `CLAUDE_CODE_OAUTH_TOKEN` に登録する。
 5. 手元で `agy` を一度起動し、Google AI Pro / Ultra のアカウントでログインしておく。
-6. `scripts/create-issues.sh` で、`docs/issues/` の内容から Issue を作る。
 
 ## 1 つの Issue を進める流れ
 
