@@ -1,6 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { decodeUtf8Strict, encodeUtf8, parseHexBytes } from './core/bytes';
-import { evaluatePacketDraft, formatSpacedHex } from './core/inspector';
+import {
+  evaluatePacketDraft,
+  formatSpacedHex,
+  isFieldHighlighted,
+  type HighlightTarget,
+} from './core/inspector';
 import type { Layer, LayerType } from './core/layers/types';
 import { createPresets, type PacketPreset, type PresetId } from './core/presets';
 import { ok, type Result } from './core/result';
@@ -31,6 +36,7 @@ export function App() {
   const [payloadModeSwitchError, setPayloadModeSwitchError] = useState<string | undefined>(
     undefined,
   );
+  const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
 
   const payloadResult: Result<Uint8Array> = useMemo(() => {
     if (payloadMode === 'text') {
@@ -53,6 +59,7 @@ export function App() {
     setPayloadText(preset.payloadText);
     setPayloadHex(formatSpacedHex(preset.payloadBytes));
     setPayloadModeSwitchError(undefined);
+    setHighlight(null);
   };
 
   const handleLayerChange = (index: number, nextLayer: Layer) => {
@@ -68,6 +75,7 @@ export function App() {
       return;
     }
     setActivePresetId(null);
+    setHighlight(null);
     setLayerItems((prev) => {
       const copy = [...prev];
       const [moved] = copy.splice(index, 1);
@@ -78,11 +86,13 @@ export function App() {
 
   const handleRemoveLayer = (index: number) => {
     setActivePresetId(null);
+    setHighlight(null);
     setLayerItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleAddLayer = (type: LayerType) => {
     setActivePresetId(null);
+    setHighlight(null);
     setLayerItems((prev) => [...prev, { id: allocateId(), layer: createLayerByType(type) }]);
   };
 
@@ -96,18 +106,17 @@ export function App() {
       return;
     }
 
-    // Hex -> Text への切替時は、現在の Hex を UTF-8 として厳密に復元できた場合のみ切り替える
     const parsed = parseHexBytes(payloadHex);
     if (!parsed.ok) {
       setPayloadModeSwitchError(
-        `16 進入力にエラーがあるためテキストモードへ切り替えられません（${parsed.error}）`,
+        `Cannot switch to Text mode while hex input is invalid (${parsed.error})`,
       );
       return;
     }
     const decoded = decodeUtf8Strict(parsed.value);
     if (!decoded.ok) {
       setPayloadModeSwitchError(
-        `${decoded.error} テキストモードへ切り替える前に 16 進内容を修正してください。`,
+        `${decoded.error} Edit the hex bytes before switching to Text mode.`,
       );
       return;
     }
@@ -115,6 +124,14 @@ export function App() {
     setPayloadModeSwitchError(undefined);
     setPayloadMode('text');
   };
+
+  const payloadLayerIndex = layers.length;
+  const isPayloadHighlighted = isFieldHighlighted(
+    payloadLayerIndex,
+    'payload',
+    draft.spans,
+    highlight,
+  );
 
   return (
     <div className="app-shell">
@@ -125,12 +142,12 @@ export function App() {
             <span className="brand-sub">packet builder</span>
           </div>
           <p className="brand-desc">
-            Ethernet II / IPv4 / ICMP / UDP / TCP のレイヤーを積み木のように重ねて、パケットのバイト列を組み立てて学べるツールです。
+            Stack Ethernet II, IPv4, ICMP, UDP, and TCP layers like building blocks to inspect and export raw network packets.
           </p>
         </div>
 
-        <nav className="preset-bar" aria-label="プリセット切り替え">
-          <span className="preset-label">プリセット</span>
+        <nav className="preset-bar" aria-label="Packet presets">
+          <span className="preset-label">Presets</span>
           <div className="preset-list">
             {presets.map((preset) => (
               <button
@@ -149,10 +166,10 @@ export function App() {
       </header>
 
       <main className="workbench">
-        <section className="stack-column" aria-label="レイヤー積み木エディタ">
+        <section className="stack-column" aria-label="Layer stack editor">
           <div className="stack-toolbar">
-            <h2 className="section-heading">レイヤー構成（外側から順に）</h2>
-            <div className="add-layer-bar" role="group" aria-label="レイヤーを追加">
+            <h2 className="section-heading">Layer Stack (outer to inner)</h2>
+            <div className="add-layer-bar" role="group" aria-label="Add protocol layer">
               {ADDABLE_LAYER_TYPES.map((type) => (
                 <button
                   key={type}
@@ -169,7 +186,7 @@ export function App() {
           <div className="layer-stack">
             {layerItems.length === 0 && (
               <div className="empty-stack-note">
-                ヘッダレイヤーがありません。上の「+ ETH」「+ IPv4」などからレイヤーを追加できます。
+                No header layers yet. Use &quot;+ ETH&quot;, &quot;+ IPv4&quot;, or another button above to stack layers.
               </div>
             )}
 
@@ -185,9 +202,12 @@ export function App() {
                   index={index}
                   total={layerItems.length}
                   layer={item.layer}
+                  spans={draft.spans}
+                  highlight={highlight}
                   resolvedAutoValues={resolvedAuto}
                   errors={layerErrors}
                   warnings={layerWarnings}
+                  onHighlightChange={setHighlight}
                   onChange={(next) => handleLayerChange(index, next)}
                   onMoveUp={() => handleMoveLayer(index, -1)}
                   onMoveDown={() => handleMoveLayer(index, 1)}
@@ -203,6 +223,11 @@ export function App() {
               byteLength={payloadResult.ok ? payloadResult.value.length : 0}
               error={draft.payloadError}
               modeSwitchError={payloadModeSwitchError}
+              isHighlighted={isPayloadHighlighted}
+              onHoverStart={() =>
+                setHighlight({ kind: 'field', layerIndex: payloadLayerIndex, fieldId: 'payload' })
+              }
+              onHoverEnd={() => setHighlight(null)}
               onModeChange={handlePayloadModeChange}
               onTextChange={(next) => {
                 setActivePresetId(null);
@@ -218,7 +243,12 @@ export function App() {
         </section>
 
         <div className="inspector-column">
-          <HexDumpInspector draft={draft} />
+          <HexDumpInspector
+            layers={layers}
+            draft={draft}
+            highlight={highlight}
+            onHighlightChange={setHighlight}
+          />
         </div>
       </main>
     </div>

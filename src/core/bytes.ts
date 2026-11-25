@@ -6,18 +6,18 @@ const HEX_ONLY_PATTERN = /^[0-9a-fA-F]*$/;
 const HEX_DUMP_BYTES_PER_LINE = 16;
 
 /**
- * `aa:bb:cc:dd:ee:ff` 形式の MAC アドレスを 6 バイトのバイト列に変換する。
- * 大文字・小文字の両方を受け付ける。
+ * Parses a colon-separated MAC address (`aa:bb:cc:dd:ee:ff`, case-insensitive)
+ * into a 6-byte Uint8Array.
  */
 export function parseMac(text: string): Result<Uint8Array> {
   if (text.length === 0) {
-    return err('MAC アドレスが空です。aa:bb:cc:dd:ee:ff の形式で入力してください。');
+    return err('MAC address is empty. Use the format aa:bb:cc:dd:ee:ff.');
   }
 
   const parts = text.split(':');
   if (parts.length !== 6) {
     return err(
-      `MAC アドレスはコロン区切りの 6 バイトで指定してください（現在 ${parts.length} 個）。`,
+      `MAC address must have 6 colon-separated bytes (got ${parts.length}).`,
     );
   }
 
@@ -26,7 +26,7 @@ export function parseMac(text: string): Result<Uint8Array> {
     const part = parts[i];
     if (!MAC_OCTET_PATTERN.test(part)) {
       return err(
-        `MAC アドレスの ${i + 1} バイト目「${part}」が不正です。2 桁の 16 進数（00〜ff）で指定してください。`,
+        `Invalid MAC byte #${i + 1} ("${part}"). Expected 2 hexadecimal digits (00-ff).`,
       );
     }
     bytes[i] = Number.parseInt(part, 16);
@@ -36,18 +36,18 @@ export function parseMac(text: string): Result<Uint8Array> {
 }
 
 /**
- * `192.168.0.1` 形式の IPv4 アドレスを 4 バイトのバイト列に変換する。
- * 各オクテットは 0〜255 の 10 進数とし、先頭ゼロ（例: 01）はエラーとする。
+ * Parses a dotted-quad IPv4 address (`192.168.0.1`) into a 4-byte Uint8Array.
+ * Each octet must be 0-255 with no leading zeros (e.g., `01` is rejected).
  */
 export function parseIPv4(text: string): Result<Uint8Array> {
   if (text.length === 0) {
-    return err('IPv4 アドレスが空です。192.168.0.1 の形式で入力してください。');
+    return err('IPv4 address is empty. Use the format 192.168.0.1.');
   }
 
   const parts = text.split('.');
   if (parts.length !== 4) {
     return err(
-      `IPv4 アドレスはドット区切りの 4 オクテットで指定してください（現在 ${parts.length} 個）。`,
+      `IPv4 address must have 4 dot-separated octets (got ${parts.length}).`,
     );
   }
 
@@ -56,13 +56,13 @@ export function parseIPv4(text: string): Result<Uint8Array> {
     const part = parts[i];
     if (!IPV4_OCTET_PATTERN.test(part)) {
       return err(
-        `IPv4 アドレスの ${i + 1} オクテット目「${part}」が不正です。先頭ゼロなしの 0〜255 の整数で指定してください。`,
+        `Invalid IPv4 octet #${i + 1} ("${part}"). Expected 0-255 without leading zeros.`,
       );
     }
     const value = Number.parseInt(part, 10);
     if (value > 255) {
       return err(
-        `IPv4 アドレスの ${i + 1} オクテット目「${part}」は範囲外です。0〜255 で指定してください。`,
+        `IPv4 octet #${i + 1} ("${part}") is out of range (0-255).`,
       );
     }
     bytes[i] = value;
@@ -72,8 +72,8 @@ export function parseIPv4(text: string): Result<Uint8Array> {
 }
 
 /**
- * 16 進文字列（空白・改行による区切りを許容）をバイト列に変換する。
- * 空文字列および空白のみの文字列は長さ 0 のバイト列を返す。
+ * Parses a hexadecimal string (whitespace allowed as separators) into a byte array.
+ * Empty or whitespace-only input returns an empty Uint8Array.
  */
 export function parseHexBytes(text: string): Result<Uint8Array> {
   const compact = text.replace(/\s+/g, '');
@@ -82,12 +82,12 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   }
 
   if (!HEX_ONLY_PATTERN.test(compact)) {
-    return err('16 進数（0-9, a-f, A-F）と空白以外の文字が含まれています。');
+    return err('Only hexadecimal characters (0-9, a-f, A-F) and whitespace are allowed.');
   }
 
   if (compact.length % 2 !== 0) {
     return err(
-      `16 進文字列の桁数が奇数（${compact.length} 桁）です。1 バイトあたり 2 桁で指定してください。`,
+      `Hex input has an odd number of digits (${compact.length}). Provide 2 hex digits per byte.`,
     );
   }
 
@@ -99,25 +99,25 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
-/** UTF-8 テキストをバイト列に変換する */
+/** Encodes a UTF-8 string into bytes. */
 export function encodeUtf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
 /**
- * バイト列を厳密に UTF-8 文字列へデコードする。
- * 不正な UTF-8 バイト列を含む場合は例外を投げずエラーを返す。
+ * Strictly decodes bytes as UTF-8 while preserving any leading UTF-8 BOM
+ * (`ignoreBOM: true`) so Hex <-> Text round-trips never drop bytes silently.
  */
 export function decodeUtf8Strict(bytes: Uint8Array): Result<string> {
   try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     return ok(text);
   } catch {
-    return err('有効な UTF-8 バイト列ではないため、テキストとして表現できません。');
+    return err('Bytes are not valid UTF-8 and cannot be represented as text.');
   }
 }
 
-/** 複数のバイト列を順に連結した新しい Uint8Array を返す */
+/** Concatenates multiple byte arrays in order. */
 export function concatBytes(...arrays: readonly Uint8Array[]): Uint8Array {
   let totalLength = 0;
   for (const arr of arrays) {
@@ -134,31 +134,25 @@ export function concatBytes(...arrays: readonly Uint8Array[]): Uint8Array {
   return result;
 }
 
-/**
- * 16 ビット符号なし整数をネットワークバイトオーダー（ビッグエンディアン）で書き込む。
- */
+/** Writes an unsigned 16-bit integer in network byte order (big-endian). */
 export function writeUint16BE(target: Uint8Array, offset: number, value: number): void {
   if (!Number.isInteger(offset) || offset < 0 || offset + 2 > target.length) {
-    throw new RangeError(`書き込み位置が範囲外です（offset=${offset}, length=${target.length}）。`);
+    throw new RangeError(`Write offset out of range (offset=${offset}, length=${target.length}).`);
   }
   if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
-    throw new RangeError(`uint16 の範囲外です（value=${value}）。0〜65535 の整数を指定してください。`);
+    throw new RangeError(`Value out of uint16 range (value=${value}). Expected 0-65535.`);
   }
   target[offset] = (value >>> 8) & 0xff;
   target[offset + 1] = value & 0xff;
 }
 
-/**
- * 32 ビット符号なし整数をネットワークバイトオーダー（ビッグエンディアン）で書き込む。
- */
+/** Writes an unsigned 32-bit integer in network byte order (big-endian). */
 export function writeUint32BE(target: Uint8Array, offset: number, value: number): void {
   if (!Number.isInteger(offset) || offset < 0 || offset + 4 > target.length) {
-    throw new RangeError(`書き込み位置が範囲外です（offset=${offset}, length=${target.length}）。`);
+    throw new RangeError(`Write offset out of range (offset=${offset}, length=${target.length}).`);
   }
   if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
-    throw new RangeError(
-      `uint32 の範囲外です（value=${value}）。0〜4294967295 の整数を指定してください。`,
-    );
+    throw new RangeError(`Value out of uint32 range (value=${value}). Expected 0-4294967295.`);
   }
   target[offset] = (value >>> 24) & 0xff;
   target[offset + 1] = (value >>> 16) & 0xff;
@@ -166,7 +160,7 @@ export function writeUint32BE(target: Uint8Array, offset: number, value: number)
   target[offset + 3] = value & 0xff;
 }
 
-/** バイト列を空白なしの小文字 16 進文字列へ変換する */
+/** Formats bytes as a continuous lowercase hexadecimal string without spaces. */
 export function toHexString(bytes: Uint8Array): string {
   let hex = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -176,9 +170,9 @@ export function toHexString(bytes: Uint8Array): string {
 }
 
 /**
- * バイト列を 16 バイトごとに改行し、行頭に 16 進オフセットを付けたダンプ文字列を返す。
- * オフセット桁数は最小 4 桁とし、65537 バイト以上（最終行オフセットが 0x10000 以上）のデータでは最終行の桁数に合わせて全行を揃える。
- * 空のバイト列に対しては空文字列を返す。
+ * Formats bytes as a 16-bytes-per-line hexadecimal dump with hexadecimal offsets.
+ * Offset width is at least 4 digits and expands uniformly for inputs >= 65537 bytes
+ * (last row offset >= 0x10000). Returns an empty string for empty input.
  */
 export function toHexDump(bytes: Uint8Array): string {
   if (bytes.length === 0) {

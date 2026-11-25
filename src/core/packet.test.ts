@@ -205,7 +205,7 @@ describe('buildPacket', () => {
       '1:srcIp',
       '2:srcPort',
     ]);
-    expect(result.warnings.some((w) => w.message.includes('下位に IPv4 レイヤーがない'))).toBe(
+    expect(result.warnings.some((w) => w.message.includes('No underlying IPv4 layer'))).toBe(
       false,
     );
   });

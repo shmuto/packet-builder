@@ -53,7 +53,7 @@ export function validateLayerOrder(layers: readonly Layer[]): PacketError[] {
     if (!isValidTransition(lower, upper)) {
       errors.push({
         layerIndex: i,
-        message: `${LAYER_LABELS[lower]} の上に ${LAYER_LABELS[upper]} を積むことはできません。`,
+        message: `${LAYER_LABELS[upper]} cannot be stacked directly on top of ${LAYER_LABELS[lower]}.`,
       });
     }
   }

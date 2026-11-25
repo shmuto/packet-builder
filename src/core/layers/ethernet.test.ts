@@ -57,7 +57,7 @@ describe('encodeEthernet', () => {
 
     expect(shortFrame.ok).toBe(true);
     if (!shortFrame.ok) return;
-    expect(shortFrame.warnings.some((w) => w.message.includes('60 バイト'))).toBe(true);
+    expect(shortFrame.warnings.some((w) => w.message.includes('60 bytes'))).toBe(true);
 
     const exactMinFrame = encodeEthernet(
       {

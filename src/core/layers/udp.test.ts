@@ -101,10 +101,10 @@ describe('encodeUDP', () => {
     expect(result.bytes.slice(4, 8)).toEqual(new Uint8Array([0x00, 0x04, 0x00, 0x00]));
     expect(result.warnings.map((w) => w.fieldId)).toEqual(['length', 'checksum']);
     const checksumWarning = result.warnings.find((w) => w.fieldId === 'checksum');
-    expect(checksumWarning?.message).toContain('チェックサム未使用');
-    expect(checksumWarning?.message).not.toContain('正しい計算値');
+    expect(checksumWarning?.message).toContain('disabled / unused');
+    expect(checksumWarning?.message).not.toContain('computed value');
 
-    // 0x0000 以外の不正な手動チェックサムには計算値との差異を警告する
+    // Non-zero manual checksum mismatch should report the computed value
     const mismatched = encodeUDP(
       {
         type: 'udp',
@@ -118,7 +118,7 @@ describe('encodeUDP', () => {
     expect(mismatched.ok).toBe(true);
     if (!mismatched.ok) return;
     const mismatchWarning = mismatched.warnings.find((w) => w.fieldId === 'checksum');
-    expect(mismatchWarning?.message).toContain('正しい計算値は');
+    expect(mismatchWarning?.message).toContain('computed value is');
   });
 
   it('下位 IPv4 がない場合は checksum=0x0000 として警告を出す', () => {

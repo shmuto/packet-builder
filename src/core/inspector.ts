@@ -241,3 +241,172 @@ export function evaluatePacketDraft(
     payloadError: undefined,
   };
 }
+
+/** Formats a byte (0-255) as two 4-bit binary nibbles (e.g., 0x45 -> "0100 0101"). */
+export function formatByteBinary(byte: number): string {
+  const bits = (byte & 0xff).toString(2).padStart(8, '0');
+  return `${bits.slice(0, 4)} ${bits.slice(4)}`;
+}
+
+export type HighlightTarget =
+  | { readonly kind: 'field'; readonly layerIndex: number; readonly fieldId: string }
+  | { readonly kind: 'byte'; readonly byteIndex: number };
+
+/** Returns true if the given FieldSpan matches the active hover/focus target. */
+export function doesSpanMatchTarget(
+  span: FieldSpan,
+  target: HighlightTarget | null,
+): boolean {
+  if (!target) {
+    return false;
+  }
+  if (target.kind === 'field') {
+    return span.layerIndex === target.layerIndex && span.fieldId === target.fieldId;
+  }
+  const byteStartBit = target.byteIndex * 8;
+  const byteEndBit = byteStartBit + 8;
+  return span.bitOffset < byteEndBit && span.bitOffset + span.bitLength > byteStartBit;
+}
+
+/**
+ * Returns the set of packet byte indices that should be highlighted for the given target.
+ * Sub-byte fields (e.g., 4-bit IPv4 Version/IHL or 3-bit Flags) highlight every byte
+ * containing at least one bit of that field.
+ */
+export function findHighlightedByteIndices(
+  spans: readonly FieldSpan[],
+  target: HighlightTarget | null,
+): ReadonlySet<number> {
+  const indices = new Set<number>();
+  if (!target) {
+    return indices;
+  }
+  if (target.kind === 'byte') {
+    if (Number.isInteger(target.byteIndex) && target.byteIndex >= 0) {
+      indices.add(target.byteIndex);
+    }
+    return indices;
+  }
+  for (const span of spans) {
+    if (span.layerIndex === target.layerIndex && span.fieldId === target.fieldId) {
+      const startByte = Math.floor(span.bitOffset / 8);
+      const endByte = Math.floor((span.bitOffset + span.bitLength - 1) / 8);
+      for (let b = startByte; b <= endByte; b++) {
+        indices.add(b);
+      }
+    }
+  }
+  return indices;
+}
+
+/** Returns true if the given hex dump byte cell should be highlighted. */
+export function isByteHighlighted(
+  cell: HexByteCell,
+  target: HighlightTarget | null,
+): boolean {
+  if (!target) {
+    return false;
+  }
+  if (target.kind === 'byte') {
+    return cell.byteIndex === target.byteIndex;
+  }
+  return cell.spans.some((s) => doesSpanMatchTarget(s, target));
+}
+
+/** Returns true if the given editor field should be highlighted. */
+export function isFieldHighlighted(
+  layerIndex: number,
+  fieldId: string,
+  spans: readonly FieldSpan[],
+  target: HighlightTarget | null,
+): boolean {
+  if (!target) {
+    return false;
+  }
+  if (target.kind === 'field') {
+    return target.layerIndex === layerIndex && target.fieldId === fieldId;
+  }
+  return spans.some(
+    (s) =>
+      s.layerIndex === layerIndex &&
+      s.fieldId === fieldId &&
+      doesSpanMatchTarget(s, target),
+  );
+}
+
+export interface BitDiagramCell {
+  readonly span: FieldSpan;
+  readonly colStart: number;
+  readonly colSpan: number;
+  readonly bitLengthInRow: number;
+  readonly isContinuation: boolean;
+}
+
+export interface BitDiagramRow {
+  readonly rowIndex: number;
+  readonly bitOffsetInLayer: number;
+  readonly totalBitsInRow: number;
+  readonly cells: readonly BitDiagramCell[];
+}
+
+const BITS_PER_DIAGRAM_ROW = 32;
+
+/**
+ * Splits a single layer's FieldSpan entries into RFC-style 32-bit-wide rows.
+ * Fields spanning a 32-bit boundary (such as 48-bit MAC addresses) are wrapped cleanly
+ * onto consecutive rows with `isContinuation: true`.
+ */
+export function buildBitDiagramRows(
+  spans: readonly FieldSpan[],
+  layerIndex: number,
+): BitDiagramRow[] {
+  const layerSpans = spans.filter((s) => s.section === 'layer' && s.layerIndex === layerIndex);
+  if (layerSpans.length === 0) {
+    return [];
+  }
+
+  const baseBitOffset = layerSpans[0].bitOffset;
+  const rowMap = new Map<number, BitDiagramCell[]>();
+
+  for (const span of layerSpans) {
+    let remaining = span.bitLength;
+    let relCursor = span.bitOffset - baseBitOffset;
+    let firstPart = true;
+
+    while (remaining > 0) {
+      const rowIndex = Math.floor(relCursor / BITS_PER_DIAGRAM_ROW);
+      const colStart = relCursor % BITS_PER_DIAGRAM_ROW;
+      const spaceInRow = BITS_PER_DIAGRAM_ROW - colStart;
+      const take = Math.min(remaining, spaceInRow);
+
+      const cells = rowMap.get(rowIndex) ?? [];
+      cells.push({
+        span,
+        colStart,
+        colSpan: take,
+        bitLengthInRow: take,
+        isContinuation: !firstPart,
+      });
+      rowMap.set(rowIndex, cells);
+
+      relCursor += take;
+      remaining -= take;
+      firstPart = false;
+    }
+  }
+
+  const rows: BitDiagramRow[] = [];
+  const sortedIndices = [...rowMap.keys()].sort((a, b) => a - b);
+  for (const rowIndex of sortedIndices) {
+    const cells = rowMap.get(rowIndex)!;
+    const totalBitsInRow = cells.reduce((acc, c) => acc + c.bitLengthInRow, 0);
+    rows.push({
+      rowIndex,
+      bitOffsetInLayer: rowIndex * BITS_PER_DIAGRAM_ROW,
+      totalBitsInRow,
+      cells,
+    });
+  }
+
+  return rows;
+}

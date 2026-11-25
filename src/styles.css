@@ -837,6 +837,308 @@ body {
   gap: 0.25rem;
 }
 
+/* Bidirectional highlight & fixed-bit chips */
+.field {
+  border-radius: var(--radius-sm);
+  padding: 0.22rem;
+  margin: -0.22rem;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.field.is-highlighted {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.layer-card.is-highlighted-card {
+  border-color: var(--accent);
+}
+
+.fixed-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.fixed-field-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.55rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font-size: 0.76rem;
+  cursor: default;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.fixed-field-chip.is-highlighted,
+.fixed-field-chip:focus-visible {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.fixed-field-name {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.fixed-field-val {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fixed-field-bits {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+/* Export toolbar */
+.export-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.export-btn {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.38rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.export-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.export-btn.is-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.export-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.export-status-error {
+  font-size: 0.76rem;
+  color: var(--status-err-fg);
+}
+
+/* Hover detail strip */
+.hover-detail-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  min-height: 2.1rem;
+  padding: 0.42rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.76rem;
+}
+
+.hover-detail-title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.hover-detail-metrics {
+  color: var(--text-secondary);
+}
+
+.hover-detail-fields {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.hover-detail-placeholder {
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+}
+
+/* Hex dump hover highlight */
+.hex-byte,
+.ascii-char {
+  cursor: pointer;
+  transition: background-color 0.08s ease, color 0.08s ease;
+}
+
+.hex-byte.is-highlighted,
+.ascii-char.is-highlighted {
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: 3px;
+}
+
+/* 32-bit RFC header diagram */
+.bit-diagram-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.bit-diagram-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.bit-diagram-title {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.bit-diagram-sub {
+  margin: 0.1rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.bit-diagram-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.bit-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.24rem 0.55rem;
+  cursor: pointer;
+}
+
+.bit-tab.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.bit-diagram-frame {
+  background: var(--bg-code);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.65rem;
+  overflow-x: auto;
+}
+
+.bit-ruler,
+.bit-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(24rem, 1fr);
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.bit-ruler {
+  margin-bottom: 0.3rem;
+}
+
+.bit-row-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  user-select: none;
+}
+
+.bit-ruler-grid,
+.bit-row-grid {
+  display: grid;
+  grid-template-columns: repeat(32, minmax(0, 1fr));
+}
+
+.bit-ruler-tick {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 0.2rem;
+}
+
+.bit-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bit-cell {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 0.34rem 0.25rem;
+  min-height: 2.1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.08rem;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.bit-cell.is-continuation {
+  border-style: dashed;
+}
+
+.bit-cell-label {
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bit-cell-size {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+.bit-cell.is-highlighted {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.bit-cell.is-highlighted .bit-cell-size {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 /* レスポンシブ */
 @media (max-width: 1040px) {
   .workbench {

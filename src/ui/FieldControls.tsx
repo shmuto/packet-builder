@@ -8,6 +8,9 @@ interface BaseFieldProps {
   readonly hint?: string;
   readonly error?: string;
   readonly warning?: string;
+  readonly isHighlighted?: boolean;
+  readonly onHoverStart?: () => void;
+  readonly onHoverEnd?: () => void;
 }
 
 function getFeedbackId(id: string, error?: string, warning?: string): string | undefined {
@@ -42,6 +45,40 @@ function FieldFeedback({
   return null;
 }
 
+export interface FixedFieldChipProps {
+  readonly label: string;
+  readonly value: string;
+  readonly bits: string;
+  readonly isHighlighted?: boolean;
+  readonly onHoverStart?: () => void;
+  readonly onHoverEnd?: () => void;
+}
+
+/** Read-only fixed header field chip (e.g., IPv4 Version=4, IHL=5, TCP Reserved=0) with hover sync */
+export function FixedFieldChip({
+  label,
+  value,
+  bits,
+  isHighlighted = false,
+  onHoverStart,
+  onHoverEnd,
+}: FixedFieldChipProps) {
+  return (
+    <span
+      tabIndex={0}
+      className={`fixed-field-chip mono${isHighlighted ? ' is-highlighted' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+      onFocus={onHoverStart}
+      onBlur={onHoverEnd}
+    >
+      <span className="fixed-field-name">{label}</span>
+      <span className="fixed-field-val">{value}</span>
+      <span className="fixed-field-bits">{bits}</span>
+    </span>
+  );
+}
+
 export interface TextFieldProps extends BaseFieldProps {
   readonly value: string;
   readonly placeholder?: string;
@@ -54,6 +91,9 @@ export function TextField({
   hint,
   error,
   warning,
+  isHighlighted = false,
+  onHoverStart,
+  onHoverEnd,
   value,
   placeholder,
   onChange,
@@ -61,7 +101,11 @@ export function TextField({
   const feedbackId = getFeedbackId(id, error, warning);
 
   return (
-    <div className="field">
+    <div
+      className={`field${isHighlighted ? ' is-highlighted' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
       <div className="field-label-row">
         <label className="field-label" htmlFor={id}>
           {label}
@@ -76,6 +120,8 @@ export function TextField({
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}
         aria-describedby={feedbackId}
+        onFocus={onHoverStart}
+        onBlur={onHoverEnd}
         onChange={(e) => onChange(e.target.value)}
       />
       <FieldFeedback id={id} error={error} warning={warning} />
@@ -98,16 +144,15 @@ function formatNumberDraft(value: number, hexDigits?: number): string {
   return hexDigits ? formatHex(value, hexDigits) : String(value);
 }
 
-/**
- * 数値入力欄。入力途中の空文字や不正文字でも状態を壊さず保持し、
- * parseUnsignedIntInput の結果（不正時は NaN）を親へ渡して core 側で検証させる。
- */
 export function NumberField({
   id,
   label,
   hint,
   error,
   warning,
+  isHighlighted = false,
+  onHoverStart,
+  onHoverEnd,
   value,
   allowHex = false,
   hexDigits,
@@ -116,7 +161,6 @@ export function NumberField({
 }: NumberFieldProps) {
   const [draft, setDraft] = useState<string>(() => formatNumberDraft(value, hexDigits));
 
-  // プリセット切替など外部から value が更新された場合にドラフトを同期する
   useEffect(() => {
     const parsedDraft = parseUnsignedIntInput(draft, allowHex);
     if (Number.isNaN(value)) {
@@ -130,7 +174,11 @@ export function NumberField({
   const feedbackId = getFeedbackId(id, error, warning);
 
   return (
-    <div className="field">
+    <div
+      className={`field${isHighlighted ? ' is-highlighted' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
       <div className="field-label-row">
         <label className="field-label" htmlFor={id}>
           {label}
@@ -146,6 +194,8 @@ export function NumberField({
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}
         aria-describedby={feedbackId}
+        onFocus={onHoverStart}
+        onBlur={onHoverEnd}
         onChange={(e) => {
           const nextRaw = e.target.value;
           setDraft(nextRaw);
@@ -159,22 +209,21 @@ export function NumberField({
 
 export interface AutoManualFieldProps extends BaseFieldProps {
   readonly value: AutoOrManual<number>;
-  /** core が計算した自動値（エラー時は undefined） */
   readonly resolvedAutoValue?: number;
   readonly allowHex?: boolean;
   readonly hexDigits?: number;
   readonly onChange: (next: AutoOrManual<number>) => void;
 }
 
-/**
- * 「自動（計算値プレビュー）」と「手動（任意値入力）」を切り替えられるフィールド。
- */
 export function AutoManualField({
   id,
   label,
   hint,
   error,
   warning,
+  isHighlighted = false,
+  onHoverStart,
+  onHoverEnd,
   value,
   resolvedAutoValue,
   allowHex = false,
@@ -201,7 +250,7 @@ export function AutoManualField({
 
   const autoDisplayText =
     resolvedAutoValue === undefined
-      ? '計算待ち'
+      ? 'Pending'
       : hexDigits
         ? `${formatHex(resolvedAutoValue, hexDigits)} (${resolvedAutoValue})`
         : String(resolvedAutoValue);
@@ -217,7 +266,11 @@ export function AutoManualField({
   };
 
   return (
-    <div className="field">
+    <div
+      className={`field${isHighlighted ? ' is-highlighted' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
       <div className="field-label-row">
         {isAuto ? (
           <span id={autoLabelId} className="field-label">
@@ -228,14 +281,14 @@ export function AutoManualField({
             {label}
           </label>
         )}
-        <div className="mode-toggle" role="group" aria-label={`${label} の計算モード`}>
+        <div className="mode-toggle" role="group" aria-label={`${label} mode`}>
           <button
             type="button"
             className={`mode-btn${isAuto ? ' is-active' : ''}`}
             aria-pressed={isAuto}
             onClick={() => handleSwitchMode('auto')}
           >
-            自動
+            Auto
           </button>
           <button
             type="button"
@@ -243,7 +296,7 @@ export function AutoManualField({
             aria-pressed={!isAuto}
             onClick={() => handleSwitchMode('manual')}
           >
-            手動
+            Manual
           </button>
         </div>
       </div>
@@ -269,6 +322,8 @@ export function AutoManualField({
           placeholder={hint}
           aria-invalid={error ? true : undefined}
           aria-describedby={feedbackId}
+          onFocus={onHoverStart}
+          onBlur={onHoverEnd}
           onChange={(e) => {
             const nextRaw = e.target.value;
             setDraft(nextRaw);

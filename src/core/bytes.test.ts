@@ -126,7 +126,7 @@ describe('encodeUtf8 / decodeUtf8Strict / concatBytes', () => {
     expect(encodeUtf8('あ')).toEqual(new Uint8Array([0xe3, 0x81, 0x82]));
   });
 
-  it('decodeUtf8Strict は有効な UTF-8 を復元し、不正なバイト列はエラーを返す', () => {
+  it('decodeUtf8Strict preserves valid UTF-8 including leading BOM and rejects invalid sequences', () => {
     expect(decodeUtf8Strict(new Uint8Array(0))).toEqual({ ok: true, value: '' });
     expect(decodeUtf8Strict(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]))).toEqual({
       ok: true,
@@ -137,7 +137,15 @@ describe('encodeUtf8 / decodeUtf8Strict / concatBytes', () => {
       value: 'あ',
     });
 
-    // 不正な UTF-8 シーケンス（de ad be ef、途中切れマルチバイト等）はエラー
+    // Leading UTF-8 BOM (ef bb bf) must be preserved on round-trip
+    const withBom = new Uint8Array([0xef, 0xbb, 0xbf, 0x41]);
+    const decodedBom = decodeUtf8Strict(withBom);
+    expect(decodedBom).toEqual({ ok: true, value: '\uFEFFA' });
+    if (decodedBom.ok) {
+      expect(encodeUtf8(decodedBom.value)).toEqual(withBom);
+    }
+
+    // Invalid UTF-8 byte sequences must fail
     expect(decodeUtf8Strict(new Uint8Array([0xde, 0xad, 0xbe, 0xef])).ok).toBe(false);
     expect(decodeUtf8Strict(new Uint8Array([0xe3, 0x81])).ok).toBe(false);
     expect(decodeUtf8Strict(new Uint8Array([0xff])).ok).toBe(false);

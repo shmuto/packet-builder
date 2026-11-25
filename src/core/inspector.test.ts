@@ -1,17 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { encodeUtf8, parseHexBytes } from './bytes';
 import {
+  buildBitDiagramRows,
   buildHexDumpRows,
+  doesSpanMatchTarget,
   evaluatePacketDraft,
+  findHighlightedByteIndices,
   formatByteAscii,
+  formatByteBinary,
   formatHex,
   formatSpacedHex,
+  isByteHighlighted,
+  isFieldHighlighted,
   parseUnsignedIntInput,
   summarizeLayerSegments,
+  type BitDiagramRow,
 } from './inspector';
 import { buildPacket } from './packet';
 import {
   createDefaultEthernet,
+  createDefaultICMP,
   createDefaultIPv4,
   createDefaultTCP,
   createDefaultUDP,
@@ -161,5 +169,196 @@ describe('evaluatePacketDraft', () => {
     expect(draft.errors.some((e) => e.layerIndex === 0 && e.fieldId === 'dstMac')).toBe(true);
     expect(draft.resolvedAutoValues).toBeUndefined();
     expect(draft.warnings).toEqual([]);
+  });
+});
+
+function expectContiguousBitDiagram(rows: readonly BitDiagramRow[], expectedTotalBits: number) {
+  let totalBits = 0;
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    expect(row.rowIndex).toBe(r);
+    expect(row.bitOffsetInLayer).toBe(r * 32);
+    let colCursor = 0;
+    for (const cell of row.cells) {
+      expect(cell.colStart).toBe(colCursor);
+      expect(cell.colSpan).toBeGreaterThan(0);
+      expect(cell.bitLengthInRow).toBe(cell.colSpan);
+      colCursor += cell.colSpan;
+    }
+    expect(colCursor).toBe(row.totalBitsInRow);
+    expect(colCursor).toBeLessThanOrEqual(32);
+    if (r < rows.length - 1) {
+      expect(colCursor).toBe(32);
+    }
+    totalBits += colCursor;
+  }
+  expect(totalBits).toBe(expectedTotalBits);
+}
+
+describe('formatByteBinary & bidirectional highlight helpers', () => {
+  it('formatByteBinary splits 8 bits into two 4-bit nibbles', () => {
+    expect(formatByteBinary(0x00)).toBe('0000 0000');
+    expect(formatByteBinary(0x45)).toBe('0100 0101');
+    expect(formatByteBinary(0xff)).toBe('1111 1111');
+  });
+
+  it('highlights IPv4 Version/IHL, Flags/FragmentOffset, and TCP DataOffset/Reserved bidirectionally', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      ok(encodeUtf8('ok')),
+    );
+    expect(draft.ok).toBe(true);
+
+    // 1) IPv4 byte 0 (packet byte 14): Version (4b) + IHL (4b)
+    const ipv4FirstByte = draft.rows[0].cells[14];
+    const ethLastByte = draft.rows[0].cells[13];
+    const versionTarget = { kind: 'field' as const, layerIndex: 1, fieldId: 'version' };
+    expect(findHighlightedByteIndices(draft.spans, versionTarget)).toEqual(new Set([14]));
+    expect(isByteHighlighted(ipv4FirstByte, versionTarget)).toBe(true);
+    expect(isByteHighlighted(ethLastByte, versionTarget)).toBe(false);
+
+    const byte14Target = { kind: 'byte' as const, byteIndex: 14 };
+    expect(findHighlightedByteIndices(draft.spans, byte14Target)).toEqual(new Set([14]));
+    expect(isFieldHighlighted(1, 'version', draft.spans, byte14Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'ihl', draft.spans, byte14Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'tos', draft.spans, byte14Target)).toBe(false);
+
+    // 2) IPv4 byte 6..7 (packet bytes 20..21): Flags (3b) + Fragment Offset (13b) (RFC 791)
+    expect(
+      findHighlightedByteIndices(draft.spans, { kind: 'field', layerIndex: 1, fieldId: 'flags' }),
+    ).toEqual(new Set([20]));
+    expect(
+      findHighlightedByteIndices(draft.spans, {
+        kind: 'field',
+        layerIndex: 1,
+        fieldId: 'fragmentOffset',
+      }),
+    ).toEqual(new Set([20, 21]));
+    const byte20Target = { kind: 'byte' as const, byteIndex: 20 };
+    expect(isFieldHighlighted(1, 'flags', draft.spans, byte20Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'fragmentOffset', draft.spans, byte20Target)).toBe(true);
+    expect(isFieldHighlighted(1, 'identification', draft.spans, byte20Target)).toBe(false);
+    // Byte 21 belongs only to Fragment Offset (not Flags)
+    const byte21Target = { kind: 'byte' as const, byteIndex: 21 };
+    expect(isFieldHighlighted(1, 'flags', draft.spans, byte21Target)).toBe(false);
+    expect(isFieldHighlighted(1, 'fragmentOffset', draft.spans, byte21Target)).toBe(true);
+
+    // 3) TCP byte 12 (packet byte 46): Data Offset (4b) + Reserved (4b) (RFC 9293 Section 3.1)
+    expect(
+      findHighlightedByteIndices(draft.spans, {
+        kind: 'field',
+        layerIndex: 2,
+        fieldId: 'dataOffset',
+      }),
+    ).toEqual(new Set([46]));
+    expect(
+      findHighlightedByteIndices(draft.spans, {
+        kind: 'field',
+        layerIndex: 2,
+        fieldId: 'reserved',
+      }),
+    ).toEqual(new Set([46]));
+    const byte46Target = { kind: 'byte' as const, byteIndex: 46 };
+    expect(isFieldHighlighted(2, 'dataOffset', draft.spans, byte46Target)).toBe(true);
+    expect(isFieldHighlighted(2, 'reserved', draft.spans, byte46Target)).toBe(true);
+    expect(isFieldHighlighted(2, 'flags', draft.spans, byte46Target)).toBe(false);
+
+    // doesSpanMatchTarget direct checks + null target
+    const versionSpan = draft.spans.find((s) => s.layerIndex === 1 && s.fieldId === 'version')!;
+    expect(doesSpanMatchTarget(versionSpan, byte14Target)).toBe(true);
+    expect(doesSpanMatchTarget(versionSpan, { kind: 'byte', byteIndex: 15 })).toBe(false);
+    expect(doesSpanMatchTarget(versionSpan, null)).toBe(false);
+    expect(findHighlightedByteIndices(draft.spans, null)).toEqual(new Set());
+  });
+});
+
+describe('buildBitDiagramRows', () => {
+  it('covers Ethernet II, IPv4, TCP, UDP, and ICMP cleanly without gaps or overlaps', () => {
+    const tcpDraft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(tcpDraft.ok).toBe(true);
+
+    // Ethernet II (112 bits = 32 + 32 + 32 + 16)
+    const ethRows = buildBitDiagramRows(tcpDraft.spans, 0);
+    expect(ethRows).toHaveLength(4);
+    expectContiguousBitDiagram(ethRows, 112);
+    expect(ethRows[0].cells[0]).toMatchObject({ colStart: 0, colSpan: 32, isContinuation: false });
+    expect(
+      ethRows[1].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['dstMac', 0, 16, true],
+      ['srcMac', 16, 16, false],
+    ]);
+    expect(ethRows[2].cells[0]).toMatchObject({ colStart: 0, colSpan: 32, isContinuation: true });
+    expect(ethRows[3].cells[0]).toMatchObject({ colStart: 0, colSpan: 16, isContinuation: false });
+
+    // IPv4 (160 bits = 5 rows of 32 bits, RFC 791)
+    const ipv4Rows = buildBitDiagramRows(tcpDraft.spans, 1);
+    expect(ipv4Rows).toHaveLength(5);
+    expectContiguousBitDiagram(ipv4Rows, 160);
+    expect(ipv4Rows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['version', 4],
+      ['ihl', 4],
+      ['tos', 8],
+      ['totalLength', 16],
+    ]);
+    expect(ipv4Rows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['identification', 16],
+      ['flags', 3],
+      ['fragmentOffset', 13],
+    ]);
+
+    // TCP (160 bits = 5 rows of 32 bits, RFC 9293 Section 3.1)
+    const tcpRows = buildBitDiagramRows(tcpDraft.spans, 2);
+    expect(tcpRows).toHaveLength(5);
+    expectContiguousBitDiagram(tcpRows, 160);
+    expect(tcpRows[3].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['dataOffset', 4],
+      ['reserved', 4],
+      ['flags', 8],
+      ['windowSize', 16],
+    ]);
+
+    // UDP (64 bits = 2 rows of 32 bits, RFC 768)
+    const udpDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), createDefaultUDP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(udpDraft.ok).toBe(true);
+    const udpRows = buildBitDiagramRows(udpDraft.spans, 1);
+    expect(udpRows).toHaveLength(2);
+    expectContiguousBitDiagram(udpRows, 64);
+    expect(udpRows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['srcPort', 16],
+      ['dstPort', 16],
+    ]);
+    expect(udpRows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['length', 16],
+      ['checksum', 16],
+    ]);
+
+    // ICMP (64 bits = 2 rows of 32 bits, RFC 792)
+    const icmpDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), createDefaultICMP()],
+      ok(new Uint8Array(0)),
+    );
+    expect(icmpDraft.ok).toBe(true);
+    const icmpRows = buildBitDiagramRows(icmpDraft.spans, 1);
+    expect(icmpRows).toHaveLength(2);
+    expectContiguousBitDiagram(icmpRows, 64);
+    expect(icmpRows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['icmpType', 8],
+      ['code', 8],
+      ['checksum', 16],
+    ]);
+    expect(icmpRows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['identifier', 16],
+      ['sequenceNumber', 16],
+    ]);
+
+    // Missing layer index returns empty array
+    expect(buildBitDiagramRows(tcpDraft.spans, 99)).toEqual([]);
   });
 });

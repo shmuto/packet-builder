@@ -10,13 +10,13 @@ import type {
 } from './types';
 import { validateUintRange } from './types';
 
-/** UDP ヘッダ長（8 バイト、RFC 768） */
+/** UDP header length (8 bytes, RFC 768) */
 export const UDP_HEADER_LENGTH = 8;
 export const UDP_MAX_LENGTH = 0xffff;
 
 export const UDP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
-  { fieldId: 'srcPort', label: '送信元ポート', bitOffset: 0, bitLength: 16 },
-  { fieldId: 'dstPort', label: '宛先ポート', bitOffset: 16, bitLength: 16 },
+  { fieldId: 'srcPort', label: 'Source Port', bitOffset: 0, bitLength: 16 },
+  { fieldId: 'dstPort', label: 'Destination Port', bitOffset: 16, bitLength: 16 },
   { fieldId: 'length', label: 'Length', bitOffset: 32, bitLength: 16 },
   { fieldId: 'checksum', label: 'Checksum', bitOffset: 48, bitLength: 16 },
 ];
@@ -29,24 +29,24 @@ export type IPv4PseudoContext =
 export interface EncodeUDPContext {
   readonly layerIndex: number;
   readonly upperBytes: Uint8Array;
-  /** 下位 IPv4 レイヤーの状態（擬似ヘッダ計算用） */
+  /** Underlying IPv4 layer state used for pseudo-header checksum calculation */
   readonly ipv4: IPv4PseudoContext;
 }
 
 /**
- * UDP ヘッダ（8 バイト）をエンコードする（RFC 768）。
- * チェックサム計算結果が 0x0000 になる場合は RFC 768 に従い 0xffff を格納する。
+ * Encodes an 8-byte UDP header (RFC 768).
+ * Converts a computed checksum of 0x0000 to 0xffff per RFC 768.
  */
 export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeResult {
   const errors: PacketError[] = [];
   const warnings: PacketWarning[] = [];
 
-  const srcPortErr = validateUintRange(layer.srcPort, 0xffff, '送信元ポート');
+  const srcPortErr = validateUintRange(layer.srcPort, 0xffff, 'Source Port');
   if (srcPortErr !== null) {
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'srcPort', message: srcPortErr });
   }
 
-  const dstPortErr = validateUintRange(layer.dstPort, 0xffff, '宛先ポート');
+  const dstPortErr = validateUintRange(layer.dstPort, 0xffff, 'Destination Port');
   if (dstPortErr !== null) {
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'dstPort', message: dstPortErr });
   }
@@ -56,7 +56,7 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
     errors.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'length',
-      message: `UDP の長さが上限 65535 バイトを超えています（現在 ${actualLength} バイト）。`,
+      message: `UDP length exceeds the 65535-byte limit (got ${actualLength} bytes, RFC 768).`,
     });
   }
 
@@ -71,13 +71,13 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'length',
-          message: `UDP Length（${lengthValue}）が最小値 8 バイト未満です（RFC 768）。`,
+          message: `Manual UDP Length (${lengthValue}) is smaller than the 8-byte minimum (RFC 768).`,
         });
       } else if (actualLength <= UDP_MAX_LENGTH && lengthValue !== actualLength) {
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'length',
-          message: `UDP Length に手動値 ${lengthValue} を使用しています（実際の長さは ${actualLength} バイト）。`,
+          message: `Using manual UDP Length ${lengthValue} (actual length is ${actualLength} bytes).`,
         });
       }
     }
@@ -114,13 +114,13 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
       errors.push({ layerIndex: ctx.layerIndex, fieldId: 'checksum', message: csumResult.error });
       return { ok: false, errors, warnings };
     }
-    // RFC 768: 計算結果がすべて 0 のときは、チェックサム未使用（0x0000）と区別するため 0xffff を送出する
+    // RFC 768: transmit all-ones (0xffff) when computed checksum is zero
     autoChecksum = csumResult.value === 0 ? 0xffff : csumResult.value;
   } else if (ctx.ipv4.status === 'absent' && layer.checksum.mode === 'auto') {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: '下位に IPv4 レイヤーがないため擬似ヘッダを作成できず、UDP Checksum を 0x0000（未使用）に設定しました。',
+      message: 'No underlying IPv4 layer for pseudo-header; setting UDP Checksum to 0x0000 (unused).',
     });
   }
 
@@ -132,13 +132,13 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
       warnings.push({
         layerIndex: ctx.layerIndex,
         fieldId: 'checksum',
-        message: 'UDP Checksum を 0x0000（チェックサム未使用、RFC 768）に設定しています。',
+        message: 'UDP Checksum is set to 0x0000 (checksum disabled / unused per RFC 768).',
       });
     } else if (checksumValue !== autoChecksum) {
       warnings.push({
         layerIndex: ctx.layerIndex,
         fieldId: 'checksum',
-        message: `UDP Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
+        message: `Using manual UDP Checksum 0x${checksumValue.toString(16).padStart(4, '0')} (computed value is 0x${autoChecksum.toString(16).padStart(4, '0')}).`,
       });
     }
   }

@@ -9,7 +9,7 @@ import type {
 } from './types';
 import { validateUintRange } from './types';
 
-/** ICMP 基本ヘッダ長（8 バイト、RFC 792） */
+/** ICMP base header length (8 bytes, RFC 792) */
 export const ICMP_HEADER_LENGTH = 8;
 
 export const ICMP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
@@ -26,7 +26,7 @@ export interface EncodeICMPContext {
 }
 
 /**
- * ICMP ヘッダ（8 バイト、Echo Request / Reply 等に対応）をエンコードする（RFC 792）。
+ * Encodes an 8-byte ICMP header (RFC 792, e.g., Echo Request / Reply).
  */
 export function encodeICMP(layer: ICMPLayer, ctx: EncodeICMPContext): LayerEncodeResult {
   const errors: PacketError[] = [];
@@ -71,7 +71,7 @@ export function encodeICMP(layer: ICMPLayer, ctx: EncodeICMPContext): LayerEncod
   writeUint16BE(header, 4, layer.identifier);
   writeUint16BE(header, 6, layer.sequenceNumber);
 
-  // RFC 792: ICMP メッセージ全体（ヘッダ 8B + ペイロード）に対してチェックサムを計算する
+  // RFC 792: checksum covers the entire ICMP header + payload
   const message = concatBytes(header, ctx.upperBytes);
   const autoChecksum = internetChecksum(message);
   const checksumValue = layer.checksum.mode === 'manual' ? layer.checksum.value : autoChecksum;
@@ -81,7 +81,7 @@ export function encodeICMP(layer: ICMPLayer, ctx: EncodeICMPContext): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: `ICMP Checksum に手動値 0x${checksumValue.toString(16).padStart(4, '0')} を使用しています（正しい計算値は 0x${autoChecksum.toString(16).padStart(4, '0')}）。`,
+      message: `Using manual ICMP Checksum 0x${checksumValue.toString(16).padStart(4, '0')} (computed value is 0x${autoChecksum.toString(16).padStart(4, '0')}).`,
     });
   }
 

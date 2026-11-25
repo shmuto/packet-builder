@@ -98,8 +98,8 @@ export function createPresets(): readonly PacketPreset[] {
   return [
     {
       id: 'udp',
-      name: 'UDP パケット',
-      description: 'Ethernet II + IPv4 + UDP の基本構成',
+      name: 'UDP Packet',
+      description: 'Standard Ethernet II + IPv4 + UDP frame with payload',
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
       payloadText: udpText,
       payloadBytes: encodeUtf8(udpText),
@@ -107,15 +107,15 @@ export function createPresets(): readonly PacketPreset[] {
     {
       id: 'tcp-syn',
       name: 'TCP SYN',
-      description: '3-way ハンドシェイク最初の SYN パケット',
+      description: 'Initial TCP SYN packet of a 3-way handshake',
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
       payloadText: '',
       payloadBytes: new Uint8Array(0),
     },
     {
       id: 'icmp-echo',
-      name: 'ICMP Ping (Echo Request)',
-      description: 'ping で送信される ICMP Echo Request パケット',
+      name: 'ICMP Ping',
+      description: 'ICMP Echo Request packet (Type 8, Code 0)',
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultICMP()],
       payloadText: icmpText,
       payloadBytes: encodeUtf8(icmpText),
