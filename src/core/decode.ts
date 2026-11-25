@@ -162,7 +162,7 @@ function decodeTCPAt(
   }
   if (reserved !== 0) {
     notes.push(
-      `TCP Reserved bits were non-zero (0x${reserved.toString(16)}); the encoder resets Reserved to 0 per RFC 9293.`,
+      `TCP Reserved bits were non-zero (0x${reserved.toString(16)}); the encoder resets Reserved to 0 per RFC 9293, so re-encoded bytes and checksum will differ from the original input.`,
     );
   }
 
@@ -207,6 +207,13 @@ function decodeTCPAt(
   };
 }
 
+function isAllZero(bytes: Uint8Array): boolean {
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0) return false;
+  }
+  return true;
+}
+
 function decodeIPv4Chain(
   bytes: Uint8Array,
   offset: number,
@@ -217,6 +224,7 @@ function decodeIPv4Chain(
   const totalLength = readUint16BE(bytes, offset + 2);
   const identification = readUint16BE(bytes, offset + 4);
   const flagsAndFrag = readUint16BE(bytes, offset + 6);
+  const fragmentOffset = flagsAndFrag & 0x1fff;
   const ttl = bytes[offset + 8];
   const protocol = bytes[offset + 9];
   const headerChecksum = readUint16BE(bytes, offset + 10);
@@ -224,33 +232,52 @@ function decodeIPv4Chain(
   const dstIpBytes = bytes.subarray(offset + 16, offset + 20);
 
   const actualTotalLength = bytes.length - offset;
-  if (totalLength < actualTotalLength) {
-    notes.push(
-      `IPv4 Total Length (${totalLength}) is smaller than remaining bytes (${actualTotalLength}); trailing bytes (e.g., Ethernet padding) are preserved in Payload.`,
-    );
+  let scopedBytes = bytes;
+  let effectiveTotalLength = actualTotalLength;
+
+  if (totalLength >= IPV4_HEADER_LENGTH && totalLength < actualTotalLength) {
+    const trailing = bytes.subarray(offset + totalLength);
+    if (isAllZero(trailing)) {
+      // Standard IEEE 802.3 Ethernet zero-padding: scope upper-layer decoding & checksums
+      // strictly to IPv4 Total Length per RFC 768 / RFC 9293 §3.1
+      scopedBytes = bytes.subarray(0, offset + totalLength);
+      effectiveTotalLength = totalLength;
+      notes.push(
+        `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv4 Total Length (${totalLength}).`,
+      );
+    } else {
+      notes.push(
+        `IPv4 Total Length (${totalLength}) is smaller than remaining bytes (${actualTotalLength}) with non-zero trailing data; trailing bytes are preserved in Payload.`,
+      );
+    }
   }
 
-  const headerCopy = new Uint8Array(bytes.subarray(offset, offset + IPV4_HEADER_LENGTH));
+  const headerCopy = new Uint8Array(scopedBytes.subarray(offset, offset + IPV4_HEADER_LENGTH));
   headerCopy[10] = 0;
   headerCopy[11] = 0;
   const computedHeaderChecksum = internetChecksum(headerCopy);
 
   const upperOffset = offset + IPV4_HEADER_LENGTH;
-  const upperRemaining = bytes.length - upperOffset;
+  const upperRemaining = scopedBytes.length - upperOffset;
 
   let decodedUpperLayer: Layer | null = null;
-  let payload: Uint8Array = bytes.slice(upperOffset);
+  let payload: Uint8Array = scopedBytes.slice(upperOffset);
 
-  if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
-    const res = decodeICMPAt(bytes, upperOffset);
+  if (fragmentOffset !== 0) {
+    // RFC 791: non-initial fragments carry continuation payload rather than an L4 header
+    notes.push(
+      `Non-initial IPv4 fragment (Fragment Offset = ${fragmentOffset}); upper-layer header is not decoded per RFC 791 and remaining bytes are kept as Payload.`,
+    );
+  } else if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
+    const res = decodeICMPAt(scopedBytes, upperOffset);
     decodedUpperLayer = res.layer;
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
-    const res = decodeUDPAt(bytes, upperOffset, srcIpBytes, dstIpBytes);
+    const res = decodeUDPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes);
     decodedUpperLayer = res.layer;
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
-    const res = decodeTCPAt(bytes, upperOffset, srcIpBytes, dstIpBytes, notes);
+    const res = decodeTCPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes, notes);
     decodedUpperLayer = res.layer;
     payload = res.payload;
   } else if (
@@ -270,14 +297,14 @@ function decodeIPv4Chain(
   const ipv4Layer: IPv4Layer = {
     type: 'ipv4',
     tos,
-    totalLength: totalLength === actualTotalLength ? autoValue() : manualValue(totalLength),
+    totalLength: totalLength === effectiveTotalLength ? autoValue() : manualValue(totalLength),
     identification,
     flags: {
       reserved: (flagsAndFrag & 0x8000) !== 0,
       df: (flagsAndFrag & 0x4000) !== 0,
       mf: (flagsAndFrag & 0x2000) !== 0,
     },
-    fragmentOffset: flagsAndFrag & 0x1fff,
+    fragmentOffset,
     ttl,
     protocol: decodedUpperLayer !== null ? autoValue() : manualValue(protocol),
     headerChecksum:
@@ -309,6 +336,8 @@ export function decodePacket(
   const notes: string[] = [];
 
   if (startLayer === 'ipv4') {
+    // In Raw IPv4 mode the outermost layer itself must be a supported IHL=5 IPv4 header;
+    // in Ethernet mode, Ethernet II still decodes validly and keeps unsupported IPv4 options as Payload.
     if (bytes.length < IPV4_HEADER_LENGTH) {
       return err(
         `Packet is too short for an IPv4 header (need at least ${IPV4_HEADER_LENGTH} bytes, got ${bytes.length}).`,

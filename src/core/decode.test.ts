@@ -164,6 +164,107 @@ describe('decodePacket', () => {
     withOptions[0] = 0x46;
     expect(decodePacket(withOptions, 'ipv4').ok).toBe(false);
   });
+
+  it('strips Ethernet zero-padding on 60-byte TCP SYN and UDP frames and keeps checksums auto', () => {
+    // 1) TCP SYN (54 bytes) + 6 bytes of 0x00 Ethernet padding = 60-byte wire frame
+    const tcpBuilt = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      new Uint8Array(0),
+    );
+    expect(tcpBuilt.ok).toBe(true);
+    if (!tcpBuilt.ok) return;
+
+    const paddedTcp = new Uint8Array(60);
+    paddedTcp.set(tcpBuilt.bytes, 0);
+
+    const decTcp = decodePacket(paddedTcp, 'ethernet');
+    expect(decTcp.ok).toBe(true);
+    if (!decTcp.ok) return;
+    expect(decTcp.value.payload).toHaveLength(0);
+    expect(decTcp.value.notes.some((n) => n.includes('6 trailing zero byte(s)'))).toBe(true);
+    const tcpIp = decTcp.value.layers[1];
+    const tcpL4 = decTcp.value.layers[2];
+    expect(tcpIp.type === 'ipv4' && tcpIp.totalLength).toEqual(autoValue());
+    expect(tcpL4.type === 'tcp' && tcpL4.checksum).toEqual(autoValue());
+
+    const rebuiltTcp = buildPacket(decTcp.value.layers, decTcp.value.payload);
+    expect(rebuiltTcp.ok && rebuiltTcp.bytes).toEqual(tcpBuilt.bytes);
+
+    // 2) Short UDP frame (14 + 20 + 8 + 4 = 46 bytes) + 14 bytes of 0x00 padding = 60-byte wire frame
+    const udpBuilt = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      encodeUtf8('ping'),
+    );
+    expect(udpBuilt.ok).toBe(true);
+    if (!udpBuilt.ok) return;
+
+    const paddedUdp = new Uint8Array(60);
+    paddedUdp.set(udpBuilt.bytes, 0);
+
+    const decUdp = decodePacket(paddedUdp, 'ethernet');
+    expect(decUdp.ok).toBe(true);
+    if (!decUdp.ok) return;
+    expect(decUdp.value.payload).toEqual(encodeUtf8('ping'));
+    expect(decUdp.value.notes.some((n) => n.includes('14 trailing zero byte(s)'))).toBe(true);
+    const udpIp = decUdp.value.layers[1];
+    const udpL4 = decUdp.value.layers[2];
+    expect(udpIp.type === 'ipv4' && udpIp.totalLength).toEqual(autoValue());
+    expect(udpL4.type === 'udp' && udpL4.length).toEqual(autoValue());
+    expect(udpL4.type === 'udp' && udpL4.checksum).toEqual(autoValue());
+  });
+
+  it('does not decode upper-layer headers for non-initial IPv4 fragments (Fragment Offset > 0)', () => {
+    const fragBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), fragmentOffset: 185, protocol: manualValue(17) },
+      ],
+      new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04]),
+    );
+    expect(fragBuilt.ok).toBe(true);
+    if (!fragBuilt.ok) return;
+
+    const decoded = decodePacket(fragBuilt.bytes, 'ethernet');
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4']);
+    expect(decoded.value.payload).toEqual(
+      new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04]),
+    );
+    expect(decoded.value.notes.some((n) => n.includes('Non-initial IPv4 fragment'))).toBe(true);
+
+    const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+    expect(rebuilt.ok && rebuilt.bytes).toEqual(fragBuilt.bytes);
+  });
+
+  it('emits an explicit note when TCP Reserved bits are non-zero', () => {
+    const built = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      new Uint8Array(0),
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    // Set TCP Reserved LSB (byte 12 of TCP header = packet byte 46: 0x50 -> 0x51)
+    const modified = new Uint8Array(built.bytes);
+    modified[46] = 0x51;
+
+    const decoded = decodePacket(modified, 'ethernet');
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(
+      decoded.value.notes.some(
+        (n) => n.includes('TCP Reserved bits') && n.includes('will differ'),
+      ),
+    ).toBe(true);
+
+    const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+    expect(rebuilt.ok).toBe(true);
+    if (rebuilt.ok) {
+      // Encoder resets Reserved to 0 (0x50), so re-encoded byte 46 differs from 0x51
+      expect(rebuilt.bytes[46]).toBe(0x50);
+    }
+  });
 });
 
 describe('detectPrintableUtf8', () => {

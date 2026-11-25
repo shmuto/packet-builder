@@ -99,18 +99,30 @@ export function parseHexBytes(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
-const HEX_DUMP_LINE_OFFSET_PATTERN = /^\s*[0-9a-fA-F]{4,}:\s*/;
+// Matches either `0000: ...` (toHexDump) or `0000  ...` (Wireshark "Copy as Hex Dump")
+const HEX_DUMP_OFFSET_LINE_PATTERN = /^\s*[0-9a-fA-F]{4,}(?::\s*|\s{2,})(.*)$/;
+// Extracts up to 16 hex bytes (with single/double space separators) followed by optional 2+ space ASCII column
+const HEX_DUMP_BYTES_WITH_ASCII_PATTERN =
+  /^([0-9a-fA-F]{2}(?:\s{1,2}[0-9a-fA-F]{2}){0,15})(?:\s{2,}.*|\s*)$/;
 
 /**
- * Parses either raw hex text (continuous/whitespace-separated) or an offset-prefixed
- * hex dump (such as `0000: 00 11 22 ...` output by `toHexDump`).
+ * Parses raw hex streams (continuous or whitespace-separated), `toHexDump` output
+ * (`0000: 00 11 ...`), or Wireshark "Copy as Hex Dump" output (`0000  00 11 ...  ASCII`).
  */
 export function parseHexOrDump(text: string): Result<Uint8Array> {
-  const stripped = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(HEX_DUMP_LINE_OFFSET_PATTERN, ''))
-    .join(' ');
-  return parseHexBytes(stripped);
+  const cleanedLines = text.split(/\r?\n/).map((line) => {
+    const offsetMatch = HEX_DUMP_OFFSET_LINE_PATTERN.exec(line);
+    if (!offsetMatch) {
+      return line;
+    }
+    const rest = offsetMatch[1].trimStart();
+    if (rest.length === 0) {
+      return '';
+    }
+    const bytesMatch = HEX_DUMP_BYTES_WITH_ASCII_PATTERN.exec(rest);
+    return bytesMatch ? bytesMatch[1] : rest;
+  });
+  return parseHexBytes(cleanedLines.join(' '));
 }
 
 /** Encodes a UTF-8 string into bytes. */

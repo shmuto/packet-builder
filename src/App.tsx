@@ -88,6 +88,7 @@ export function App() {
 
   const handleLayerChange = (index: number, nextLayer: Layer) => {
     setActivePresetId(null);
+    setImportNotes([]);
     setLayerItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, layer: nextLayer } : item)),
     );
@@ -99,6 +100,7 @@ export function App() {
       return;
     }
     setActivePresetId(null);
+    setImportNotes([]);
     setHighlight(null);
     setLayerItems((prev) => {
       const copy = [...prev];
@@ -110,12 +112,14 @@ export function App() {
 
   const handleRemoveLayer = (index: number) => {
     setActivePresetId(null);
+    setImportNotes([]);
     setHighlight(null);
     setLayerItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleAddLayer = (type: LayerType) => {
     setActivePresetId(null);
+    setImportNotes([]);
     setHighlight(null);
     setLayerItems((prev) => [...prev, { id: allocateId(), layer: createLayerByType(type) }]);
   };

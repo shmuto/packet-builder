@@ -242,16 +242,33 @@ describe('toHexString / toHexDump', () => {
 });
 
 describe('parseHexOrDump / readUintBE / formatMac / formatIPv4', () => {
-  it('parseHexOrDump accepts both compact hex and offset-prefixed hex dumps', () => {
+  it('parseHexOrDump accepts compact hex, toHexDump, and Wireshark Copy as Hex Dump formats', () => {
     const dump = ['0000: 00 11 22 33', '0010: aa bb cc'].join('\n');
     expect(parseHexOrDump(dump)).toEqual({
       ok: true,
       value: new Uint8Array([0x00, 0x11, 0x22, 0x33, 0xaa, 0xbb, 0xcc]),
     });
+
+    // Wireshark "Copy as Hex Dump" (offset + 2+ spaces + hex bytes + 2+ spaces + ASCII column)
+    const wiresharkDump = [
+      '0000   00 11 22 33 44 55 66 77  88 99 aa bb 08 00 45 00   .."3DUfw......E.',
+      '0010   48 65 6c                                          Hel',
+    ].join('\n');
+    expect(parseHexOrDump(wiresharkDump)).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0x08, 0x00, 0x45, 0x00,
+        0x48, 0x65, 0x6c,
+      ]),
+    });
+
     expect(parseHexOrDump('deadbeef')).toEqual({
       ok: true,
       value: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
     });
+    // Invalid hex byte after offset still fails
+    expect(parseHexOrDump('0000: 00 zz').ok).toBe(false);
     // Colon-separated MAC-style text (2-digit prefix) is rejected rather than misread as an offset
     expect(parseHexOrDump('aa:bb:cc').ok).toBe(false);
   });
