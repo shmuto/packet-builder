@@ -24,6 +24,7 @@ export type LayerType =
   | 'ipv6'
   | 'icmp'
   | 'icmpv6'
+  | 'gre'
   | 'udp'
   | 'tcp'
   | 'bgp';
@@ -254,6 +255,26 @@ export interface BGPLayer {
   readonly errorSubcode: number;
 }
 
+export interface GRELayer {
+  readonly type: 'gre';
+  /** C bit (bit 0): Checksum Present — appends 16-bit Checksum + 16-bit Reserved1 (RFC 2784 §2.2) */
+  readonly checksumPresent: boolean;
+  /** K bit (bit 2): Key Present — appends 32-bit Key (RFC 2890 §2.1) */
+  readonly keyPresent: boolean;
+  /** S bit (bit 3): Sequence Number Present — appends 32-bit Sequence Number (RFC 2890 §2.2) */
+  readonly sequencePresent: boolean;
+  /** GRE Version (3-bit, 0-7; auto = 0 per RFC 2784 §2.3.1) */
+  readonly version: AutoOrManual<number>;
+  /** Encapsulated Protocol Type (16-bit EtherType; auto = 0x0800 IPv4 / 0x86dd IPv6 / 0x6558 TEB / 0x0806 ARP / 0x8100 VLAN, RFC 2784 §2.4) */
+  readonly protocolType: AutoOrManual<number>;
+  /** Optional 16-bit Checksum when C=1 (auto = RFC 1071 over GRE header + payload, RFC 2784 §2.5) */
+  readonly checksum: AutoOrManual<number>;
+  /** Optional 32-bit Key when K=1 (0-4294967295, RFC 2890 §2.1) */
+  readonly key: number;
+  /** Optional 32-bit Sequence Number when S=1 (0-4294967295, RFC 2890 §2.2) */
+  readonly sequenceNumber: number;
+}
+
 export type Layer =
   | EthernetLayer
   | VLANLayer
@@ -262,6 +283,7 @@ export type Layer =
   | IPv6Layer
   | ICMPLayer
   | ICMPv6Layer
+  | GRELayer
   | UDPLayer
   | TCPLayer
   | BGPLayer;

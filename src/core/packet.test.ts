@@ -940,4 +940,174 @@ describe('buildPacket', () => {
       expect(largeTagged.warnings).toHaveLength(0);
     }
   });
+
+  it('matches known Ethernet + IPv4 (Proto 47) + GRE (C=1, K=1) + IPv4 + ICMP packet byte-for-byte', () => {
+    // Hand-verified checksums:
+    // 1) Inner ICMP Echo Request (type=8, code=0, id=1, seq=1, payload="hi" [0x68, 0x69]):
+    //    0x0800 + 0x0000 + 0x0001 + 0x0001 + 0x6869 = 0x706b -> ~0x706b = 0x8f94
+    // 2) Inner IPv4 (10.0.1.1 -> 10.0.2.1, id=0x5678, DF, ttl=64, proto=1, totalLen=30=0x001e):
+    //    4500 + 001e + 5678 + 4000 + 4001 = 11b97 -> fold 1b98
+    //    1b98 + 0a00 + 0101 + 0a00 + 0201 = 329a -> ~0x329a = 0xcd65
+    // 3) GRE (RFC 2784 §2.5, C=1, K=1, S=0, Ver=0, Proto=0x0800, Key=0x11223344):
+    //    Because the valid inner IPv4 header sums to 0xffff and valid inner ICMP+payload sums to 0xffff,
+    //    the 1's-complement sum over GRE header + inner packet reduces to the GRE header words:
+    //    0xa000 + 0x0800 + 0x0000 + 0x0000 + 0x1122 + 0x3344 = 0xec66 -> ~0xec66 = 0x1399
+    // 4) Outer IPv4 (198.51.100.1 -> 198.51.100.2, id=0x1234, DF, ttl=64, proto=47=0x2f, totalLen=62=0x003e):
+    //    4500 + 003e + 1234 + 4000 + 402f = d7a1
+    //    d7a1 + c633 = 19dd4 -> 9dd5; 9dd5 + 6401 = 101d6 -> 01d7
+    //    01d7 + c633 = c80a; c80a + 6402 = 12c0c -> 2c0d -> ~0x2c0d = 0xd3f2
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      {
+        ...createDefaultIPv4(),
+        srcIp: '198.51.100.1',
+        dstIp: '198.51.100.2',
+      },
+      {
+        type: 'gre',
+        checksumPresent: true,
+        keyPresent: true,
+        sequencePresent: false,
+        version: autoValue(),
+        protocolType: autoValue(),
+        checksum: autoValue(),
+        key: 0x11223344,
+        sequenceNumber: 0,
+      },
+      {
+        ...createDefaultIPv4(),
+        identification: 0x5678,
+        srcIp: '10.0.1.1',
+        dstIp: '10.0.2.1',
+      },
+      createDefaultICMP(),
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('hi'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Outer Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // Outer IPv4 (20B): TotalLen=62(0x003e), Proto=47(0x2f), Checksum=0xd3f2
+      0x45, 0x00, 0x00, 0x3e,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x2f, 0xd3, 0xf2,
+      0xc6, 0x33, 0x64, 0x01,
+      0xc6, 0x33, 0x64, 0x02,
+      // GRE (12B): C=1, K=1, Ver=0, Proto=0x0800, Checksum=0x1399, Res1=0, Key=0x11223344
+      0xa0, 0x00, 0x08, 0x00,
+      0x13, 0x99, 0x00, 0x00,
+      0x11, 0x22, 0x33, 0x44,
+      // Inner IPv4 (20B): TotalLen=30(0x001e), Proto=1, Checksum=0xcd65
+      0x45, 0x00, 0x00, 0x1e,
+      0x56, 0x78, 0x40, 0x00,
+      0x40, 0x01, 0xcd, 0x65,
+      0x0a, 0x00, 0x01, 0x01,
+      0x0a, 0x00, 0x02, 0x01,
+      // Inner ICMP Echo Request (8B): Checksum=0x8f94
+      0x08, 0x00, 0x8f, 0x94,
+      0x00, 0x01, 0x00, 0x01,
+      // Payload ("hi")
+      0x68, 0x69,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known GRETAP frame (Ethernet + IPv4 + GRE 0x6558 + Ethernet + ARP) and IPv6 + GRE byte-for-byte', () => {
+    // Outer IPv4 (198.51.100.1 -> 198.51.100.2, id=0x1234, DF, ttl=64, proto=47, totalLen=66=0x0042):
+    //   20(IPv4) + 4(GRE) + 14(Inner Eth) + 28(Inner ARP) = 66 = 0x0042
+    //   4500 + 0042 + 1234 + 4000 + 402f = d7a5
+    //   d7a5 + c633 = 19dd8 -> 9dd9; 9dd9 + 6401 = 101da -> 01db
+    //   01db + c633 = c80e; c80e + 6402 = 12c10 -> 2c11 -> ~0x2c11 = 0xd3ee
+    const gretapLayers: Layer[] = [
+      createDefaultEthernet(),
+      {
+        ...createDefaultIPv4(),
+        srcIp: '198.51.100.1',
+        dstIp: '198.51.100.2',
+      },
+      {
+        type: 'gre',
+        checksumPresent: false,
+        keyPresent: false,
+        sequencePresent: false,
+        version: autoValue(),
+        protocolType: autoValue(),
+        checksum: autoValue(),
+        key: 0,
+        sequenceNumber: 0,
+      },
+      { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+      createDefaultARP(),
+    ];
+
+    const gretap = buildPacket(gretapLayers, new Uint8Array(0));
+    expect(gretap.ok).toBe(true);
+    if (!gretap.ok) return;
+
+    const expected = new Uint8Array([
+      // Outer Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // Outer IPv4 (20B): TotalLen=66(0x0042), Proto=47(0x2f), Checksum=0xd3ee
+      0x45, 0x00, 0x00, 0x42,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x2f, 0xd3, 0xee,
+      0xc6, 0x33, 0x64, 0x01,
+      0xc6, 0x33, 0x64, 0x02,
+      // GRE (4B): Protocol Type = 0x6558 (Transparent Ethernet Bridging)
+      0x00, 0x00, 0x65, 0x58,
+      // Inner Ethernet II (14B): broadcast -> EtherType 0x0806 (ARP)
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x06,
+      // Inner ARP Request (28B): HTYPE=1, PTYPE=0x0800, HLEN=6, PLEN=4, Oper=1
+      0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0xc0, 0xa8, 0x00, 0x01,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xc0, 0xa8, 0x00, 0x02,
+    ]);
+
+    expect(gretap.bytes).toEqual(expected);
+    expectExactBitCoverage(gretap.spans, expected.length);
+
+    // IPv6 Next Header auto-sets to 47 (GRE) and GRE Protocol Type auto-sets to 0x86dd (IPv6)
+    const ipv6Gre = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv6(),
+        {
+          type: 'gre',
+          checksumPresent: false,
+          keyPresent: false,
+          sequencePresent: false,
+          version: autoValue(),
+          protocolType: autoValue(),
+          checksum: autoValue(),
+          key: 0,
+          sequenceNumber: 0,
+        },
+        createDefaultIPv6(),
+        createDefaultUDP(),
+      ],
+      encodeUtf8('v6'),
+    );
+    expect(ipv6Gre.ok).toBe(true);
+    if (ipv6Gre.ok) {
+      // Outer IPv6 Next Header at offset 14 + 6 = 20 -> 47 (GRE)
+      expect(ipv6Gre.bytes[20]).toBe(47);
+      // GRE header at offset 54..57 -> 00 00 86 dd
+      expect(ipv6Gre.bytes.slice(54, 58)).toEqual(new Uint8Array([0x00, 0x00, 0x86, 0xdd]));
+      expect(ipv6Gre.warnings).toHaveLength(0);
+    }
+  });
 });

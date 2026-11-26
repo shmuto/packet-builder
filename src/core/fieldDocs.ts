@@ -145,7 +145,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     protocol: {
       summary:
-        '8-bit IANA number identifying the next encapsulated protocol in the IPv4 payload. Common values are 1 (ICMP), 4 (IP-in-IP), 6 (TCP), 17 (UDP), and 41 (IPv6).',
+        '8-bit IANA number identifying the next encapsulated protocol in the IPv4 payload. Common values are 1 (ICMP), 4 (IP-in-IP), 6 (TCP), 17 (UDP), 41 (IPv6), and 47 (GRE).',
       reference: 'RFC 791 §3.1',
     },
     headerChecksum: {
@@ -188,7 +188,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     nextHeader: {
       summary:
-        '8-bit IANA protocol number identifying the header immediately following the IPv6 header. Common values are 6 (TCP), 17 (UDP), 4 (IPv4), 41 (IPv6), and 58 (ICMPv6).',
+        '8-bit IANA protocol number identifying the header immediately following the IPv6 header. Common values are 6 (TCP), 17 (UDP), 4 (IPv4), 41 (IPv6), 47 (GRE), and 58 (ICMPv6).',
       reference: 'RFC 8200 §3',
     },
     hopLimit: {
@@ -266,6 +266,59 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
       summary:
         '32-bit type-specific header field: carries the next-hop link MTU for Packet Too Big (Type 2), the byte offset Pointer for Parameter Problem (Type 4), or Unused zero bits for other messages.',
       reference: 'RFC 4443 §2.1 / §3.2 / §3.4',
+    },
+  },
+
+  gre: {
+    checksumPresent: {
+      summary:
+        '1-bit Checksum Present flag (C, bit 0). When set to 1, appends the 16-bit Checksum and 16-bit Reserved1 fields (+4 bytes) immediately after Protocol Type.',
+      reference: 'RFC 2784 §2.2',
+    },
+    keyPresent: {
+      summary:
+        '1-bit Key Present flag (K, bit 2). When set to 1, appends a 32-bit Key field (+4 bytes) to identify an individual traffic flow or tunnel instance.',
+      reference: 'RFC 2890 §2.1',
+    },
+    sequencePresent: {
+      summary:
+        '1-bit Sequence Number Present flag (S, bit 3). When set to 1, appends a 32-bit Sequence Number field (+4 bytes) for packet ordering detection.',
+      reference: 'RFC 2890 §2.2',
+    },
+    reserved0: {
+      summary:
+        'Reserved header bits (bit 1 and bits 4-12, 10 bits total) that must be transmitted as 0 in standard GRE.',
+      reference: 'RFC 2784 §2.3 / RFC 2890 §2',
+    },
+    version: {
+      summary:
+        '3-bit GRE Version Number (bits 13-15). Must be 0 for standard RFC 2784 GRE (Version 1 is PPTP enhanced GRE).',
+      reference: 'RFC 2784 §2.3.1',
+    },
+    protocolType: {
+      summary:
+        '16-bit EtherType declaring the encapsulated payload protocol: 0x0800 (IPv4), 0x86dd (IPv6), 0x6558 (Transparent Ethernet Bridging / GRETAP), 0x0806 (ARP), or 0x8100 (802.1Q VLAN).',
+      reference: 'RFC 2784 §2.4',
+    },
+    checksum: {
+      summary:
+        'Optional 16-bit RFC 1071 one\'s-complement checksum (present when C=1) computed over the entire GRE header (with Checksum=0) and encapsulated payload packet.',
+      reference: 'RFC 2784 §2.5',
+    },
+    reserved1: {
+      summary:
+        'Optional 16-bit Reserved1 field (present when C=1) that follows Checksum and must be set to 0.',
+      reference: 'RFC 2784 §2.6',
+    },
+    key: {
+      summary:
+        'Optional 32-bit tunnel key (present when K=1) assigned by the encapsulator to multiplex or authenticate individual flows within a GRE tunnel.',
+      reference: 'RFC 2890 §2.1',
+    },
+    sequenceNumber: {
+      summary:
+        'Optional 32-bit unsigned sequence counter (present when S=1) incremented for each GRE packet to detect reordering or loss.',
+      reference: 'RFC 2890 §2.2',
     },
   },
 

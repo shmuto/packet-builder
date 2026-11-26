@@ -23,6 +23,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultICMP,
   createDefaultICMPv6,
   createDefaultIPv4,
@@ -898,5 +899,67 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     expect(isFieldHighlighted(1, 'dei', draft.spans, pktByte14)).toBe(true);
     expect(isFieldHighlighted(1, 'vid', draft.spans, pktByte14)).toBe(true);
     expect(isFieldHighlighted(1, 'etherType', draft.spans, pktByte14)).toBe(false);
+  });
+
+  it('covers 4-byte base GRE and 16-byte full GRE (C=1, K=1, S=1) in per-layer and unified bit diagrams', () => {
+    // 1. 4-byte base GRE (C=0, K=0, S=0)
+    const baseDraft = evaluatePacketDraft(
+      [createDefaultIPv4(), createDefaultGRE(), createDefaultIPv4()],
+      ok(new Uint8Array(0)),
+    );
+    expect(baseDraft.ok).toBe(true);
+
+    const baseGreRows = buildBitDiagramRows(baseDraft.spans, 1);
+    expect(baseGreRows).toHaveLength(1);
+    expectContiguousBitDiagram(baseGreRows, 32);
+    expect(baseGreRows[0].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['checksumPresent', 0, 1],
+      ['reserved0', 1, 1],
+      ['keyPresent', 2, 1],
+      ['sequencePresent', 3, 1],
+      ['reserved0', 4, 9],
+      ['version', 13, 3],
+      ['protocolType', 16, 16],
+    ]);
+
+    // 2. 16-byte full GRE (C=1, K=1, S=1)
+    const fullDraft = evaluatePacketDraft(
+      [
+        createDefaultIPv4(),
+        {
+          ...createDefaultGRE(),
+          checksumPresent: true,
+          keyPresent: true,
+          sequencePresent: true,
+          key: 0x11223344,
+          sequenceNumber: 1,
+        },
+        createDefaultIPv4(),
+      ],
+      ok(new Uint8Array(0)),
+    );
+    expect(fullDraft.ok).toBe(true);
+
+    const fullGreRows = buildBitDiagramRows(fullDraft.spans, 1);
+    expect(fullGreRows).toHaveLength(4);
+    expectContiguousBitDiagram(fullGreRows, 128);
+    expect(fullGreRows[1].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['checksum', 0, 16],
+      ['reserved1', 16, 16],
+    ]);
+    expect(fullGreRows[2].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['key', 0, 32],
+    ]);
+    expect(fullGreRows[3].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['sequenceNumber', 0, 32],
+    ]);
+
+    // Unified diagram: Outer IPv4 (5 rows) + 16B GRE (4 rows) + Inner IPv4 (5 rows) = 14 rows
+    const unified = buildUnifiedBitDiagramRows(fullDraft.spans);
+    expect(unified).toHaveLength(14);
+    expect(unified[5].cells[0]).toMatchObject({ isLayerStart: true, isLayerEnd: false });
+    expect(unified[5].cells[0].span.layerType).toBe('gre');
+    expect(unified[8].cells[0]).toMatchObject({ isLayerStart: false, isLayerEnd: true });
+    expect(unified[8].cells[0].span.fieldId).toBe('sequenceNumber');
   });
 });

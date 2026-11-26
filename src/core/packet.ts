@@ -6,6 +6,7 @@ import {
   type BGPUnderlyingTCPContext,
 } from './layers/bgp';
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
+import { encodeGRE, getGREHeaderLength } from './layers/gre';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { ICMPV6_HEADER_LENGTH, encodeICMPv6 } from './layers/icmpv6';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
@@ -40,6 +41,8 @@ function getLayerHeaderLength(layer: Layer): number {
       return ICMP_HEADER_LENGTH;
     case 'icmpv6':
       return ICMPV6_HEADER_LENGTH;
+    case 'gre':
+      return getGREHeaderLength(layer);
     case 'udp':
       return UDP_HEADER_LENGTH;
     case 'tcp':
@@ -166,6 +169,13 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
           layerIndex: i,
           upperBytes: currentUpperBytes,
           ip: resolveIPContextBefore(layers, i),
+        });
+        break;
+      case 'gre':
+        result = encodeGRE(layer, {
+          layerIndex: i,
+          upperLayerType,
+          upperBytes: currentUpperBytes,
         });
         break;
       case 'udp':

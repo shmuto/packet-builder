@@ -686,7 +686,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-protocol`}
                 label="Protocol"
-                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP / 41=IPv6"
+                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP / 41=IPv6 / 47=GRE"
                 doc={fieldDoc('protocol')}
                 value={layer.protocol}
                 resolvedAutoValue={resolvedAutoValues?.protocol}
@@ -819,7 +819,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-nextHeader`}
                 label="Next Header"
-                hint="6=TCP / 17=UDP / 58=ICMPv6 / 4=IPv4 / 41=IPv6"
+                hint="6=TCP / 17=UDP / 47=GRE / 58=ICMPv6 / 4=IPv4 / 41=IPv6"
                 doc={fieldDoc('nextHeader')}
                 value={layer.nextHeader}
                 resolvedAutoValue={resolvedAutoValues?.nextHeader}
@@ -1143,6 +1143,202 @@ export function LayerCard({
                   onHoverEnd={hoverEnd}
                   onChange={(checksum) => onChange({ ...layer, checksum })}
                 />
+              </div>
+            );
+          })()}
+
+          {layer.type === 'gre' && (() => {
+            const cDoc = fieldDoc('checksumPresent');
+            const kDoc = fieldDoc('keyPresent');
+            const sDoc = fieldDoc('sequencePresent');
+            const flagDefs: ReadonlyArray<{
+              readonly fieldId: 'checksumPresent' | 'keyPresent' | 'sequencePresent';
+              readonly label: string;
+              readonly checked: boolean;
+              readonly doc: ReturnType<typeof fieldDoc>;
+            }> = [
+              {
+                fieldId: 'checksumPresent',
+                label: 'C: Checksum (+4B)',
+                checked: layer.checksumPresent,
+                doc: cDoc,
+              },
+              {
+                fieldId: 'keyPresent',
+                label: 'K: Key (+4B)',
+                checked: layer.keyPresent,
+                doc: kDoc,
+              },
+              {
+                fieldId: 'sequencePresent',
+                label: 'S: Sequence (+4B)',
+                checked: layer.sequencePresent,
+                doc: sDoc,
+              },
+            ];
+
+            return (
+              <div className="field-grid">
+                <div className="fixed-field-row field-span-full">
+                  <FixedFieldChip
+                    id={`${id}-reserved0`}
+                    label="Reserved0"
+                    value="0"
+                    bits="1b + 9b"
+                    doc={fieldDoc('reserved0')}
+                    isHighlighted={isHighlighted('reserved0')}
+                    onHoverStart={hoverStart('reserved0')}
+                    onHoverEnd={hoverEnd}
+                  />
+                  {layer.checksumPresent && (
+                    <FixedFieldChip
+                      id={`${id}-reserved1`}
+                      label="Reserved1"
+                      value="0x0000"
+                      bits="16b"
+                      doc={fieldDoc('reserved1')}
+                      isHighlighted={isHighlighted('reserved1')}
+                      onHoverStart={hoverStart('reserved1')}
+                      onHoverEnd={hoverEnd}
+                    />
+                  )}
+                </div>
+
+                <div className="field field-span-full">
+                  <div className="field-label-row">
+                    <span className="field-label">Optional Header Extensions</span>
+                    <span className="field-hint">RFC 2784 / 2890 (4-16 bytes)</span>
+                  </div>
+                  <div className="flag-chip-row" role="group" aria-label="GRE Optional Flags">
+                    {flagDefs.map((flag) => (
+                      <div
+                        key={flag.fieldId}
+                        className={`fixed-field-item${isCustomDocOpen(flag.fieldId) ? ' is-expanded' : ''}`}
+                        onMouseEnter={hoverStart(flag.fieldId)}
+                        onMouseLeave={hoverEnd}
+                      >
+                        <div className="field-label-main">
+                          <label
+                            className={`flag-chip${flag.checked ? ' is-checked' : ''}${isHighlighted(flag.fieldId) ? ' is-highlighted' : ''}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={flag.checked}
+                              aria-describedby={
+                                isCustomDocOpen(flag.fieldId)
+                                  ? `${id}-${flag.fieldId}-doc`
+                                  : undefined
+                              }
+                              onFocus={hoverStart(flag.fieldId)}
+                              onBlur={hoverEnd}
+                              onChange={(e) =>
+                                onChange({ ...layer, [flag.fieldId]: e.target.checked })
+                              }
+                            />
+                            <span>{flag.label}</span>
+                          </label>
+                          {flag.doc && (
+                            <FieldInfoButton
+                              label={flag.label}
+                              docId={`${id}-${flag.fieldId}-doc`}
+                              open={isCustomDocOpen(flag.fieldId)}
+                              onToggle={() => toggleCustomDoc(flag.fieldId)}
+                              onClose={() => closeCustomDoc(flag.fieldId)}
+                              onFocus={hoverStart(flag.fieldId)}
+                              onBlur={hoverEnd}
+                            />
+                          )}
+                        </div>
+                        {flag.doc && isCustomDocOpen(flag.fieldId) && (
+                          <FieldDocBox id={`${id}-${flag.fieldId}-doc`} doc={flag.doc} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <AutoManualField
+                  id={`${id}-protocolType`}
+                  label="Protocol Type"
+                  hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x6558=TEB / 0x0806=ARP / 0x8100=VLAN"
+                  doc={fieldDoc('protocolType')}
+                  allowHex
+                  hexDigits={4}
+                  value={layer.protocolType}
+                  resolvedAutoValue={resolvedAutoValues?.protocolType}
+                  error={fieldError('protocolType')}
+                  warning={fieldWarning('protocolType')}
+                  isHighlighted={isHighlighted('protocolType')}
+                  onHoverStart={hoverStart('protocolType')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(protocolType) => onChange({ ...layer, protocolType })}
+                />
+                <AutoManualField
+                  id={`${id}-version`}
+                  label="Version"
+                  hint="0 = standard GRE (0-7)"
+                  doc={fieldDoc('version')}
+                  value={layer.version}
+                  resolvedAutoValue={resolvedAutoValues?.version}
+                  error={fieldError('version')}
+                  warning={fieldWarning('version')}
+                  isHighlighted={isHighlighted('version')}
+                  onHoverStart={hoverStart('version')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(version) => onChange({ ...layer, version })}
+                />
+
+                {layer.checksumPresent && (
+                  <AutoManualField
+                    id={`${id}-checksum`}
+                    label="Checksum"
+                    hint="RFC 1071 (GRE hdr + payload)"
+                    doc={fieldDoc('checksum')}
+                    allowHex
+                    hexDigits={4}
+                    value={layer.checksum}
+                    resolvedAutoValue={resolvedAutoValues?.checksum}
+                    error={fieldError('checksum')}
+                    warning={fieldWarning('checksum')}
+                    isHighlighted={isHighlighted('checksum')}
+                    onHoverStart={hoverStart('checksum')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(checksum) => onChange({ ...layer, checksum })}
+                  />
+                )}
+
+                {layer.keyPresent && (
+                  <NumberField
+                    id={`${id}-key`}
+                    label="Key"
+                    hint="0-4294967295 (32 bit, hex ok)"
+                    doc={fieldDoc('key')}
+                    allowHex
+                    value={layer.key}
+                    error={fieldError('key')}
+                    warning={fieldWarning('key')}
+                    isHighlighted={isHighlighted('key')}
+                    onHoverStart={hoverStart('key')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(key) => onChange({ ...layer, key })}
+                  />
+                )}
+
+                {layer.sequencePresent && (
+                  <NumberField
+                    id={`${id}-sequenceNumber`}
+                    label="Sequence Number"
+                    hint="0-4294967295 (32 bit)"
+                    doc={fieldDoc('sequenceNumber')}
+                    value={layer.sequenceNumber}
+                    error={fieldError('sequenceNumber')}
+                    warning={fieldWarning('sequenceNumber')}
+                    isHighlighted={isHighlighted('sequenceNumber')}
+                    onHoverStart={hoverStart('sequenceNumber')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(sequenceNumber) => onChange({ ...layer, sequenceNumber })}
+                  />
+                )}
               </div>
             );
           })()}

@@ -3,6 +3,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultICMP,
   createDefaultICMPv6,
   createDefaultIPv4,
@@ -70,6 +71,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     rfc: 'RFC 4443',
     osiLabel: 'L3',
   },
+  gre: {
+    type: 'gre',
+    name: 'GRE',
+    shortName: 'GRE',
+    rfc: 'RFC 2784 / 2890',
+    osiLabel: 'L3',
+  },
   udp: {
     type: 'udp',
     name: 'UDP',
@@ -101,6 +109,7 @@ export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'ipv6',
   'icmp',
   'icmpv6',
+  'gre',
   'udp',
   'tcp',
   'bgp',
@@ -122,6 +131,8 @@ export function createLayerByType(type: LayerType): Layer {
       return createDefaultICMP();
     case 'icmpv6':
       return createDefaultICMPv6();
+    case 'gre':
+      return createDefaultGRE();
     case 'udp':
       return createDefaultUDP();
     case 'tcp':

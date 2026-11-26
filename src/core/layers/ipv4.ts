@@ -16,12 +16,13 @@ export const IPV4_VERSION = 4;
 export const IPV4_IHL = 5;
 export const IPV4_MAX_TOTAL_LENGTH = 0xffff;
 
-/** IP protocol numbers (IANA / RFC 792, 2003, 9293, 768, 4213) */
+/** IP protocol numbers (IANA / RFC 792, 2003, 9293, 768, 4213, 2784) */
 export const IP_PROTOCOL_ICMP = 1;
 export const IP_PROTOCOL_IPIP = 4;
 export const IP_PROTOCOL_TCP = 6;
 export const IP_PROTOCOL_UDP = 17;
 export const IP_PROTOCOL_IPV6 = 41;
+export const IP_PROTOCOL_GRE = 47;
 
 export const IPV4_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'version', label: 'Version (4)', bitOffset: 0, bitLength: 4 },
@@ -56,6 +57,8 @@ function protocolNumberForUpperLayer(upperLayerType: LayerType | null): number |
       return IP_PROTOCOL_UDP;
     case 'ipv6':
       return IP_PROTOCOL_IPV6;
+    case 'gre':
+      return IP_PROTOCOL_GRE;
     default:
       return null;
   }
@@ -152,7 +155,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'protocol',
-      message: 'No ICMP / IPv4 / IPv6 / TCP / UDP upper layer found; defaulting Protocol to 0.',
+      message: 'No ICMP / IPv4 / IPv6 / GRE / TCP / UDP upper layer found; defaulting Protocol to 0.',
     });
   }
 

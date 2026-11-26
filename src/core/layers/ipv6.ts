@@ -1,6 +1,7 @@
 import { parseIPv6, writeUint16BE, writeUint32BE } from '../bytes';
 import { IP_PROTOCOL_ICMPV6 } from './icmpv6';
 import {
+  IP_PROTOCOL_GRE,
   IP_PROTOCOL_IPIP,
   IP_PROTOCOL_IPV6,
   IP_PROTOCOL_TCP,
@@ -51,6 +52,8 @@ function nextHeaderForUpperLayer(upperLayerType: LayerType | null): number | nul
       return IP_PROTOCOL_IPIP;
     case 'ipv6':
       return IP_PROTOCOL_IPV6;
+    case 'gre':
+      return IP_PROTOCOL_GRE;
     default:
       return null;
   }
@@ -150,7 +153,7 @@ export function encodeIPv6(layer: IPv6Layer, ctx: EncodeIPv6Context): LayerEncod
       layerIndex: ctx.layerIndex,
       fieldId: 'nextHeader',
       message:
-        'No TCP / UDP / ICMPv6 / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
+        'No TCP / UDP / ICMPv6 / GRE / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
     });
   }
 

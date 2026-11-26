@@ -7,6 +7,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultICMP,
   createDefaultICMPv6,
   createDefaultIPv4,
@@ -1244,6 +1245,269 @@ describe('decodePacket', () => {
         }
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(taggedUdp.bytes);
+      }
+    }
+  });
+
+  it('losslessly round-trips GRE across all 8 C/K/S combinations, corrupted GRE checksum, GRETAP (0x6558), IPv6+GRE, and GRE+VLAN', () => {
+    // 1. All 8 combinations of C / K / S over Ethernet + IPv4 + GRE + IPv4 + ICMP
+    for (const c of [false, true]) {
+      for (const k of [false, true]) {
+        for (const s of [false, true]) {
+          const built = buildPacket(
+            [
+              createDefaultEthernet(),
+              { ...createDefaultIPv4(), srcIp: '198.51.100.1', dstIp: '198.51.100.2' },
+              {
+                ...createDefaultGRE(),
+                checksumPresent: c,
+                keyPresent: k,
+                sequencePresent: s,
+                key: k ? 0x11223344 : 0,
+                sequenceNumber: s ? 42 : 0,
+              },
+              { ...createDefaultIPv4(), srcIp: '10.0.1.1', dstIp: '10.0.2.1' },
+              createDefaultICMP(),
+            ],
+            encodeUtf8('gre'),
+          );
+          expect(built.ok).toBe(true);
+          if (!built.ok) continue;
+
+          const dec = decodePacket(built.bytes, 'ethernet');
+          expect(dec.ok).toBe(true);
+          if (!dec.ok) continue;
+
+          expect(dec.value.notes).toEqual([]);
+          expect(dec.value.layers.map((l) => l.type)).toEqual([
+            'ethernet',
+            'ipv4',
+            'gre',
+            'ipv4',
+            'icmp',
+          ]);
+          const gre = dec.value.layers[2];
+          if (gre.type === 'gre') {
+            expect(gre.checksumPresent).toBe(c);
+            expect(gre.keyPresent).toBe(k);
+            expect(gre.sequencePresent).toBe(s);
+            expect(gre.version).toEqual(autoValue());
+            expect(gre.protocolType).toEqual(autoValue());
+            expect(gre.checksum).toEqual(autoValue());
+            expect(gre.key).toBe(k ? 0x11223344 : 0);
+            expect(gre.sequenceNumber).toBe(s ? 42 : 0);
+          }
+
+          const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+          expect(rebuilt.ok && rebuilt.bytes).toEqual(built.bytes);
+        }
+      }
+    }
+
+    // 2. Manually corrupted GRE checksum is preserved as manualValue and round-trips identically
+    const badCsum = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        {
+          ...createDefaultGRE(),
+          checksumPresent: true,
+          keyPresent: true,
+          key: 0xabcdef01,
+          checksum: manualValue(0xdead),
+        },
+        createDefaultIPv4(),
+        createDefaultICMP(),
+      ],
+      encodeUtf8('bad'),
+    );
+    expect(badCsum.ok).toBe(true);
+    if (badCsum.ok) {
+      const dec = decodePacket(badCsum.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        const gre = dec.value.layers[2];
+        expect(gre.type).toBe('gre');
+        if (gre.type === 'gre') {
+          expect(gre.checksum).toEqual(manualValue(0xdead));
+          expect(gre.key).toBe(0xabcdef01);
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(badCsum.bytes);
+      }
+    }
+
+    // 3. GRETAP (Ethernet + IPv4 + GRE 0x6558 + Ethernet + ARP)
+    const gretap = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '198.51.100.1', dstIp: '198.51.100.2' },
+        createDefaultGRE(),
+        { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+        createDefaultARP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(gretap.ok).toBe(true);
+    if (gretap.ok) {
+      const dec = decodePacket(gretap.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv4',
+          'gre',
+          'ethernet',
+          'arp',
+        ]);
+        const gre = dec.value.layers[2];
+        if (gre.type === 'gre') {
+          expect(gre.protocolType).toEqual(autoValue());
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(gretap.bytes);
+      }
+    }
+
+    // 4. IPv6 + GRE (S=1) + IPv6 + ICMPv6 and GRE + VLAN + IPv4
+    const v6Gre = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv6(),
+        { ...createDefaultGRE(), sequencePresent: true, sequenceNumber: 99 },
+        createDefaultIPv6(),
+        createDefaultICMPv6(),
+      ],
+      encodeUtf8('v6gre'),
+    );
+    expect(v6Gre.ok).toBe(true);
+    if (v6Gre.ok) {
+      const dec = decodePacket(v6Gre.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv6',
+          'gre',
+          'ipv6',
+          'icmpv6',
+        ]);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(v6Gre.bytes);
+      }
+    }
+
+    const greVlan = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        createDefaultGRE(),
+        createDefaultVLAN(),
+        createDefaultIPv4(),
+        createDefaultUDP(),
+      ],
+      encodeUtf8('gv'),
+    );
+    expect(greVlan.ok).toBe(true);
+    if (greVlan.ok) {
+      const dec = decodePacket(greVlan.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv4',
+          'gre',
+          'vlan',
+          'ipv4',
+          'udp',
+        ]);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(greVlan.bytes);
+      }
+    }
+  });
+
+  it('keeps GRE Version 1 (PPTP), truncated optional fields, non-zero reserved bits, and overly deep GRE tunnels in Payload safely', () => {
+    // 1. GRE Version 1 (PPTP enhanced GRE) -> stays in Payload with note and round-trips identically
+    const greV1 = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        {
+          ...createDefaultGRE(),
+          version: manualValue(1),
+          protocolType: manualValue(0x880b), // PPP
+        },
+      ],
+      new Uint8Array([0x01, 0x02, 0x03, 0x04]),
+    );
+    expect(greV1.ok).toBe(true);
+    if (greV1.ok) {
+      const dec = decodePacket(greV1.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4']);
+        expect(dec.value.payload).toEqual(
+          new Uint8Array([0x00, 0x01, 0x88, 0x0b, 0x01, 0x02, 0x03, 0x04]),
+        );
+        expect(dec.value.notes.some((n) => n.includes('Version=1'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(greV1.bytes);
+      }
+    }
+
+    // 2. Truncated optional GRE fields (C=1 requires 8 bytes, only 6 bytes present)
+    const truncGre = buildPacket(
+      [createDefaultEthernet(), { ...createDefaultIPv4(), protocol: manualValue(47) }],
+      new Uint8Array([0x80, 0x00, 0x08, 0x00, 0x12, 0x34]),
+    );
+    expect(truncGre.ok).toBe(true);
+    if (truncGre.ok) {
+      const dec = decodePacket(truncGre.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4']);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x80, 0x00, 0x08, 0x00, 0x12, 0x34]));
+        expect(dec.value.notes.some((n) => n.includes('GRE header is truncated'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(truncGre.bytes);
+      }
+    }
+
+    // 3. Non-zero Reserved0 bit (0x4000, RFC 1701 Routing Present) kept in Payload losslessly
+    const resBitGre = buildPacket(
+      [createDefaultEthernet(), { ...createDefaultIPv4(), protocol: manualValue(47) }],
+      new Uint8Array([0x40, 0x00, 0x08, 0x00, 0xde, 0xad]),
+    );
+    expect(resBitGre.ok).toBe(true);
+    if (resBitGre.ok) {
+      const dec = decodePacket(resBitGre.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4']);
+        expect(dec.value.notes.some((n) => n.includes('non-zero Reserved0'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(resBitGre.bytes);
+      }
+    }
+
+    // 4. Depth guard on nested IPv4 + GRE tunnels (> MAX_IP_LAYERS = 16)
+    const deepStack: Layer[] = [createDefaultEthernet()];
+    for (let i = 0; i < 17; i++) {
+      deepStack.push(createDefaultIPv4(), createDefaultGRE());
+    }
+    const deepBuilt = buildPacket(deepStack, encodeUtf8('deep'));
+    expect(deepBuilt.ok).toBe(true);
+    if (deepBuilt.ok) {
+      const dec = decodePacket(deepBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes.some((n) => n.includes('GRE tunnel depth limit'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(deepBuilt.bytes);
       }
     }
   });

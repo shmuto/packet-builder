@@ -16,6 +16,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultICMP,
   createDefaultICMPv6,
   createDefaultIPv4,
@@ -156,7 +157,7 @@ describe('permalink', () => {
     }
   });
 
-  it('round-trips all 10 layer types including VLAN, ARP, IPv6, ICMP, and ICMPv6 (Echo & Raw)', () => {
+  it('round-trips all 11 layer types including VLAN, ARP, IPv6, ICMP, ICMPv6 (Echo & Raw), and GRE', () => {
     const state: PermalinkState = {
       layers: [
         createDefaultEthernet(),
@@ -170,6 +171,17 @@ describe('permalink', () => {
           operation: 2,
         },
         createDefaultIPv4(),
+        {
+          ...createDefaultGRE(),
+          checksumPresent: true,
+          keyPresent: true,
+          sequencePresent: true,
+          version: manualValue(0),
+          protocolType: manualValue(0x86dd),
+          checksum: manualValue(0x1234),
+          key: 0x11223344,
+          sequenceNumber: 77,
+        },
         {
           ...createDefaultIPv6(),
           trafficClass: 0x2e,
