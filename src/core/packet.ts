@@ -11,7 +11,7 @@ import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { ICMPV6_HEADER_LENGTH, encodeICMPv6 } from './layers/icmpv6';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
 import { IPV6_HEADER_LENGTH, encodeIPv6 } from './layers/ipv6';
-import { TCP_HEADER_LENGTH, encodeTCP } from './layers/tcp';
+import { encodeTCP, getTCPHeaderLength } from './layers/tcp';
 import type {
   BuildPacketResult,
   FieldSpan,
@@ -51,7 +51,7 @@ function getLayerHeaderLength(layer: Layer): number {
     case 'udp':
       return UDP_HEADER_LENGTH;
     case 'tcp':
-      return TCP_HEADER_LENGTH;
+      return getTCPHeaderLength(layer);
     case 'vxlan':
       return VXLAN_HEADER_LENGTH;
     case 'bgp':

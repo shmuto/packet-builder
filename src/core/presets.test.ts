@@ -167,4 +167,31 @@ describe('presets', () => {
       new Uint8Array([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00]),
     );
   });
+
+  it('TCP SYN preset builds a 74-byte Linux-style SYN frame with 20B TCP options, Data Offset 0xa, and zero warnings', () => {
+    const tcpSynPreset = createPresets().find((p) => p.id === 'tcp-syn');
+    expect(tcpSynPreset).toBeDefined();
+    if (!tcpSynPreset) return;
+
+    const result = buildPacket(tcpSynPreset.layers, tcpSynPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Eth) + 20(IPv4) + 40(TCP: 20 base + 20 options) = 74 bytes
+    expect(result.bytes.length).toBe(74);
+    expect(result.warnings).toHaveLength(0);
+    // TCP starts at offset 34: Data Offset = 0xa at offset 46, Checksum = 0xaa88 at offset 50..51
+    expect(result.bytes[46] >>> 4).toBe(0xa);
+    expect(result.bytes.slice(50, 52)).toEqual(new Uint8Array([0xaa, 0x88]));
+    // Options at offset 54..73: MSS 1460, SACK-Permitted, Timestamps(1000000, 0), NOP, WScale 7
+    expect(result.bytes.slice(54, 74)).toEqual(
+      new Uint8Array([
+        0x02, 0x04, 0x05, 0xb4,
+        0x04, 0x02,
+        0x08, 0x0a, 0x00, 0x0f, 0x42, 0x40, 0x00, 0x00, 0x00, 0x00,
+        0x01,
+        0x03, 0x03, 0x07,
+      ]),
+    );
+  });
 });

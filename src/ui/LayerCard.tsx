@@ -32,6 +32,7 @@ import {
   TextField,
 } from './FieldControls';
 import { LAYER_META } from './layerMeta';
+import { TCPOptionsEditor } from './TCPOptionsEditor';
 
 export interface LayerCardProps {
   readonly id: string;
@@ -1543,7 +1544,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-dataOffset`}
                 label="Data Offset"
-                hint="4 bit (base=5)"
+                hint="4 bit (5-15 words)"
                 doc={fieldDoc('dataOffset')}
                 value={layer.dataOffset}
                 resolvedAutoValue={resolvedAutoValues?.dataOffset}
@@ -1583,6 +1584,19 @@ export function LayerCard({
                   onHoverEnd={hoverEnd}
                 />
               </div>
+
+              <TCPOptionsEditor
+                cardId={id}
+                options={layer.options}
+                resolvedAutoValues={resolvedAutoValues}
+                fieldError={fieldError}
+                fieldWarning={fieldWarning}
+                fieldDoc={fieldDoc}
+                isHighlighted={isHighlighted}
+                hoverStart={hoverStart}
+                hoverEnd={hoverEnd}
+                onChange={(options) => onChange({ ...layer, options })}
+              />
             </div>
           )}
 

@@ -133,6 +133,7 @@ export function createDefaultTCP(): TCPLayer {
     windowSize: 65535,
     checksum: autoValue(),
     urgentPointer: 0,
+    options: [],
   };
 }
 
@@ -235,8 +236,22 @@ export function createPresets(): readonly PacketPreset[] {
     {
       id: 'tcp-syn',
       name: 'TCP SYN',
-      description: 'Initial TCP SYN packet of a 3-way handshake',
-      layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultTCP()],
+      description:
+        'Initial TCP SYN packet with Linux-style options (MSS 1460, SACK-Permitted, Timestamps, NOP, Window Scale 7)',
+      layers: [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        {
+          ...createDefaultTCP(),
+          options: [
+            { kind: 'mss', mss: 1460 },
+            { kind: 'sackPermitted' },
+            { kind: 'timestamps', tsVal: 1000000, tsEcr: 0 },
+            { kind: 'nop' },
+            { kind: 'windowScale', shiftCount: 7 },
+          ],
+        },
+      ],
       payloadText: '',
       payloadBytes: new Uint8Array(0),
     },

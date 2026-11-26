@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FIELD_DOCS, getFieldDoc } from './fieldDocs';
-import type { Layer, LayerType } from './layers/types';
+import { FIELD_DOCS, getFieldDoc, normalizeFieldDocId } from './fieldDocs';
+import { autoValue, type Layer, type LayerType } from './layers/types';
 import { buildPacket } from './packet';
 import {
   createDefaultARP,
@@ -36,7 +36,7 @@ describe('FIELD_DOCS coverage and quality', () => {
           set = new Set<string>();
           emittedByLayer.set(span.layerType, set);
         }
-        set.add(span.fieldId);
+        set.add(normalizeFieldDocId(span.fieldId));
 
         const doc = getFieldDoc(span.layerType, span.fieldId);
         expect(
@@ -57,7 +57,7 @@ describe('FIELD_DOCS coverage and quality', () => {
     //    - IPv6 fixed header
     //    - ICMPv6 Echo and Raw (Packet Too Big) variants
     //    - GRE with all optional fields enabled (C=1, K=1, S=1)
-    //    - TCP with all 8 control bits toggled
+    //    - TCP with all 8 control bits toggled and every TCP option kind + padding
     //    - BGP OPEN (1), UPDATE (2), NOTIFICATION (3), and KEEPALIVE (4)
     collectSpans([
       createDefaultEthernet(),
@@ -96,6 +96,27 @@ describe('FIELD_DOCS coverage and quality', () => {
           syn: true,
           fin: true,
         },
+        options: [
+          { kind: 'mss', mss: 1460 },
+          { kind: 'windowScale', shiftCount: 7 },
+          { kind: 'sackPermitted' },
+          { kind: 'timestamps', tsVal: 123, tsEcr: 456 },
+          { kind: 'nop' },
+          { kind: 'raw', optionKind: 30, length: autoValue(), dataHex: 'aa bb' },
+          { kind: 'eol' },
+        ],
+      },
+      {
+        ...createDefaultTCP(),
+        options: [
+          {
+            kind: 'sack',
+            blocks: [
+              { left: 100, right: 200 },
+              { left: 300, right: 400 },
+            ],
+          },
+        ],
       },
       createDefaultVXLAN(),
       { ...createDefaultBGP(), bgpType: 1 },
