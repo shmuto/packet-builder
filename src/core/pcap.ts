@@ -22,6 +22,17 @@ export interface BuildPcapOptions {
   readonly timestampMs?: number;
 }
 
+export interface PcapPacketRecord {
+  readonly bytes: Uint8Array;
+  /** Capture timestamp in milliseconds since Unix epoch */
+  readonly timestampMs: number;
+}
+
+export interface BuildMultiPcapOptions {
+  /** Link-layer header type (e.g., LINKTYPE_ETHERNET=1, LINKTYPE_RAW=101) */
+  readonly linkType?: number;
+}
+
 /**
  * Selects the most appropriate libpcap link-layer header type from the outermost layer.
  * - Ethernet II -> LINKTYPE_ETHERNET (1)
@@ -43,20 +54,24 @@ export function selectPcapLinkType(layers: readonly Layer[]): number {
 }
 
 /**
- * Encodes a single packet into classic libpcap format (little-endian, v2.4)
- * compatible with Wireshark and tcpdump.
+ * Encodes one or more packets with per-packet timestamps into classic libpcap
+ * format (little-endian, v2.4) compatible with Wireshark and tcpdump.
  */
-export function buildPcap(packetBytes: Uint8Array, options: BuildPcapOptions = {}): Uint8Array {
+export function buildMultiPcap(
+  packets: readonly PcapPacketRecord[],
+  options: BuildMultiPcapOptions = {},
+): Uint8Array {
   const linkType = options.linkType ?? LINKTYPE_ETHERNET;
-  const rawMs = options.timestampMs ?? 0;
-  const safeMs = Number.isFinite(rawMs) && rawMs > 0 ? rawMs : 0;
+  let snaplen = PCAP_DEFAULT_SNAPLEN;
+  let totalLength = PCAP_GLOBAL_HEADER_LENGTH;
 
-  const tsSec = Math.min(0xffffffff, Math.floor(safeMs / 1000));
-  const tsUsec = Math.min(999999, Math.floor((safeMs % 1000) * 1000));
-  const snaplen = Math.max(PCAP_DEFAULT_SNAPLEN, packetBytes.length);
+  for (const packet of packets) {
+    if (packet.bytes.length > snaplen) {
+      snaplen = packet.bytes.length;
+    }
+    totalLength += PCAP_PACKET_HEADER_LENGTH + packet.bytes.length;
+  }
 
-  const totalLength =
-    PCAP_GLOBAL_HEADER_LENGTH + PCAP_PACKET_HEADER_LENGTH + packetBytes.length;
   const buffer = new Uint8Array(totalLength);
   const view = new DataView(buffer.buffer);
 
@@ -69,14 +84,34 @@ export function buildPcap(packetBytes: Uint8Array, options: BuildPcapOptions = {
   view.setUint32(16, snaplen, true);
   view.setUint32(20, linkType >>> 0, true);
 
-  // Packet Record Header (16 bytes, little-endian)
-  view.setUint32(24, tsSec, true);
-  view.setUint32(28, tsUsec, true);
-  view.setUint32(32, packetBytes.length, true); // incl_len
-  view.setUint32(36, packetBytes.length, true); // orig_len
+  let offset = PCAP_GLOBAL_HEADER_LENGTH;
+  for (const packet of packets) {
+    const rawMs = packet.timestampMs;
+    const safeMs = Number.isFinite(rawMs) && rawMs > 0 ? rawMs : 0;
+    const tsSec = Math.min(0xffffffff, Math.floor(safeMs / 1000));
+    const tsUsec = Math.min(999999, Math.floor((safeMs % 1000) * 1000));
 
-  // Packet Data
-  buffer.set(packetBytes, PCAP_GLOBAL_HEADER_LENGTH + PCAP_PACKET_HEADER_LENGTH);
+    // Packet Record Header (16 bytes, little-endian)
+    view.setUint32(offset, tsSec, true);
+    view.setUint32(offset + 4, tsUsec, true);
+    view.setUint32(offset + 8, packet.bytes.length, true); // incl_len
+    view.setUint32(offset + 12, packet.bytes.length, true); // orig_len
+    offset += PCAP_PACKET_HEADER_LENGTH;
+
+    buffer.set(packet.bytes, offset);
+    offset += packet.bytes.length;
+  }
 
   return buffer;
+}
+
+/**
+ * Encodes a single packet into classic libpcap format (little-endian, v2.4)
+ * compatible with Wireshark and tcpdump.
+ */
+export function buildPcap(packetBytes: Uint8Array, options: BuildPcapOptions = {}): Uint8Array {
+  return buildMultiPcap(
+    [{ bytes: packetBytes, timestampMs: options.timestampMs ?? 0 }],
+    { linkType: options.linkType },
+  );
 }
