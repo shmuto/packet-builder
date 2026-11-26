@@ -21,6 +21,10 @@ export interface HexDumpInspectorProps {
 
 type CopyStatus = 'idle' | 'hex-ok' | 'dump-ok' | 'error';
 
+const HEX_COL_HEADERS: readonly string[] = Array.from({ length: 16 }, (_, i) =>
+  i.toString(16).padStart(2, '0'),
+);
+
 function segmentShortLabel(type: LayerType | 'payload'): string {
   return type === 'payload' ? 'DATA' : LAYER_META[type].shortName;
 }
@@ -351,32 +355,41 @@ export function HexDumpInspector({
             aria-label="Hexadecimal dump"
             onMouseLeave={() => onHighlightChange(null)}
           >
-            <div className="hexdump-head" aria-hidden="true">
-              <span className="hexdump-offset-col">OFFSET</span>
-              <span className="hexdump-bytes-col">
-                00 01 02 03 04 05 06 07 &nbsp;08 09 0a 0b 0c 0d 0e 0f
-              </span>
-              <span className="hexdump-ascii-col">ASCII</span>
-            </div>
-            <div className="hexdump-rows">
-              {rows.map((row) => {
-                let mask = 0;
-                if (highlightedByteSet.size > 0) {
-                  for (let idx = 0; idx < row.cells.length; idx++) {
-                    if (highlightedByteSet.has(row.cells[idx].byteIndex)) {
-                      mask |= 1 << idx;
+            <div className="hexdump-grid">
+              <div className="hexdump-head" aria-hidden="true">
+                <span className="hexdump-offset-col">OFFSET</span>
+                <span className="hexdump-bytes-col">
+                  {HEX_COL_HEADERS.map((col, idx) => (
+                    <span
+                      key={col}
+                      className={`hex-byte-head${idx === 7 ? ' is-mid-gap' : ''}`}
+                    >
+                      {col}
+                    </span>
+                  ))}
+                </span>
+                <span className="hexdump-ascii-col">ASCII</span>
+              </div>
+              <div className="hexdump-rows">
+                {rows.map((row) => {
+                  let mask = 0;
+                  if (highlightedByteSet.size > 0) {
+                    for (let idx = 0; idx < row.cells.length; idx++) {
+                      if (highlightedByteSet.has(row.cells[idx].byteIndex)) {
+                        mask |= 1 << idx;
+                      }
                     }
                   }
-                }
-                return (
-                  <HexDumpRowView
-                    key={row.offset}
-                    row={row}
-                    highlightMask={mask}
-                    onHoverByte={handleHoverByte}
-                  />
-                );
-              })}
+                  return (
+                    <HexDumpRowView
+                      key={row.offset}
+                      row={row}
+                      highlightMask={mask}
+                      onHoverByte={handleHoverByte}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </div>
 
