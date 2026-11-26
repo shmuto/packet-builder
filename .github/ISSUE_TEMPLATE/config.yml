@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Try tsumiki live
+    url: https://shmuto.github.io/packet-builder/
+    about: Open the interactive packet builder in your browser (no install required).

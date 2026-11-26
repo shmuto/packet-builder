@@ -11,6 +11,34 @@ test.describe('Responsive layout', () => {
     expect(res.status()).toBe(200);
   });
 
+  test('exposes Open Graph / Twitter tags, serves og.png (200 OK), and renders the footer issue link', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const meta = async (selector: string) => page.locator(selector).getAttribute('content');
+    expect(await meta('meta[property="og:title"]')).toBeTruthy();
+    expect(await meta('meta[property="og:description"]')).toBeTruthy();
+    expect(await meta('meta[property="og:type"]')).toBe('website');
+    expect(await meta('meta[property="og:url"]')).toBe('https://shmuto.github.io/packet-builder/');
+    const ogImage = await meta('meta[property="og:image"]');
+    expect(ogImage).toBe('https://shmuto.github.io/packet-builder/og.png');
+    expect(await meta('meta[name="twitter:card"]')).toBe('summary_large_image');
+    expect(await meta('meta[name="theme-color"]')).toBeTruthy();
+
+    const ogFilename = new URL(ogImage!).pathname.split('/').pop();
+    const res = await page.request.get(new URL(ogFilename!, page.url()).toString());
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('image/png');
+
+    const issueLink = page.getByRole('link', { name: 'Report an issue' });
+    await expect(issueLink).toBeVisible();
+    await expect(issueLink).toHaveAttribute(
+      'href',
+      'https://github.com/shmuto/packet-builder/issues/new/choose',
+    );
+  });
+
   test('every preset has zero page horizontal overflow across all widths and zero hex-dump scroll at 1100px and 1280px', async ({
     page,
   }) => {

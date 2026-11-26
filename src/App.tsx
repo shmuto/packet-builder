@@ -577,6 +577,18 @@ export function App() {
           />
         </div>
       </main>
+
+      <footer className="app-footer">
+        <span>tsumiki — client-side packet builder</span>
+        <a
+          className="footer-link"
+          href="https://github.com/shmuto/packet-builder/issues/new/choose"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Report an issue
+        </a>
+      </footer>
     </div>
   );
 }

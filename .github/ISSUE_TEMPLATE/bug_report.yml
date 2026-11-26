@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a wrong byte, broken UI, or unexpected decoding/validation behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: Steps to reproduce the issue (which preset, layers, or fields you changed).
+      placeholder: |
+        1. Selected the TCP SYN preset
+        2. Switched Checksum to Manual and entered ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs. actual behavior
+      description: What did you expect to see (e.g., RFC-compliant bytes or UI state), and what happened instead?
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      description: Browser name/version and operating system.
+      placeholder: "e.g., Chrome 131 on macOS 15"
+    validations:
+      required: true
+
+  - type: input
+    id: permalink
+    attributes:
+      label: Packet permalink (optional)
+      description: Paste your Copy Link URL so we can reproduce the exact packet stack and overrides.
+      placeholder: "https://shmuto.github.io/packet-builder/#p1=..."
+    validations:
+      required: false

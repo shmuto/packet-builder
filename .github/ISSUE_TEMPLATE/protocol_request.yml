@@ -1,0 +1,36 @@
+name: Protocol request
+description: Propose a new protocol layer (reviewed against the curriculum & scenario policy)
+labels: ["enhancement", "protocol"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        tsumiki prioritizes depth of learning over broad protocol coverage. To keep the tool focused, a new protocol needs to:
+        1. Appear in common introductory networking curricula, and
+        2. Be used by a planned scenario or learning challenge.
+
+  - type: input
+    id: protocol
+    attributes:
+      label: Protocol name and RFC / standard
+      placeholder: "e.g., DNS (RFC 1035) or DHCP (RFC 2131)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: curriculum
+    attributes:
+      label: Curriculum or course coverage
+      description: Which networking curriculum, textbook, certification, or university course covers this protocol?
+      placeholder: "e.g., Computer Networking: A Top-Down Approach, CCNA, university intro networking lab..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Learning scenario or challenge
+      description: Which hands-on scenario or "fix the packet" challenge would use this protocol, and what would the learner inspect or break?
+      placeholder: "e.g., DNS query/response exchange where learners inspect the Transaction ID, QR flag, and QNAME length prefixes."
+    validations:
+      required: true

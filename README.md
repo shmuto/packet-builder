@@ -1,24 +1,21 @@
 # tsumiki (packet-builder)
 
-**An interactive, client-side educational packet builder for stacking Ethernet II, VLAN (802.1Q / 802.1ad QinQ), ARP, IPv4, IPv6, ICMP, ICMPv6, GRE, UDP, TCP, VXLAN, and BGP-4 layers like building blocks.**
+**See what every bit of a packet header means — and what happens when you change it — right in your browser.**
+
+**Try it live:** https://shmuto.github.io/packet-builder/
+
+![tsumiki interactive packet builder screenshot](docs/screenshot.png)
 
 Everything runs purely in the browser (no backend required) and deploys as a static site on GitHub Pages.
 
 ## Features
 
-- **Building-Block Layer Stack**
-  - Stack, reorder, add, or remove Ethernet II, VLAN (802.1Q / 802.1ad QinQ), ARP, IPv4, IPv6, ICMP, ICMPv6, GRE (RFC 2784 / RFC 2890), UDP, TCP, VXLAN (RFC 7348), and BGP-4 headers in any order (supporting tunneling/encapsulation such as QinQ double-tagging, IP-in-IP, 6in4, 4in6, GRE tunnels, GRETAP Transparent Ethernet Bridging, VXLAN L2-over-UDP overlays, ICMP-quoted headers, or experimental stacks) alongside UTF-8 text or hexadecimal payloads.
-  - Switch between built-in presets (**UDP Packet**, **IPv6 UDP**, **TCP SYN**, **ICMP Ping**, **IPv6 Ping**, **ARP Request**, **VLAN UDP**, **GRE Tunnel**, **VXLAN Overlay**, **BGP OPEN**, **IGMPv2 (Router Alert)**) to inspect real, valid packets immediately.
-- **Auto Calculation + Manual Overrides**
-  - EtherType / TPID (`0x0800` for IPv4, `0x86dd` for IPv6, `0x0806` for ARP, `0x8100` for 802.1Q C-tag, `0x88a8` for 802.1ad QinQ S-tag), ARP hardware/protocol metadata, IPv4 IHL (`5`–`15`) / Total Length / Protocol (`47` for GRE) / Header Checksum, IPv6 Payload Length / Next Header (`47` for GRE), ICMP Checksum, ICMPv6 Checksum (with IPv6 pseudo-header), GRE Version / Protocol Type (`0x0800` IPv4, `0x86dd` IPv6, `0x6558` GRETAP, `0x0806` ARP, `0x8100` VLAN) / optional Checksum (C=1), UDP Length / Checksum (IPv4 or IPv6 pseudo-header), TCP Data Offset (`5`–`15`) / Checksum (IPv4 or IPv6 pseudo-header), VXLAN Flags (`0x08` I-flag), and BGP-4 Marker / Length / Version / Optional Parameters Length are automatically calculated per RFC / IEEE specifications.
-  - Toggle any auto-calculated field to **Manual** mode to intentionally craft malformed checksums, lengths, or flags and observe how the raw bytes change.
-- **Errors vs. Learning Warnings**
-  - Impossible inputs (invalid MAC/IPv4/IPv6 addresses, out-of-range integers such as PCP > 7, VID > 4095, GRE Version > 7, or VXLAN VNI > 16777215, >40-byte IPv4/TCP options, >65535-byte IPv4/IPv6/UDP/TCP/BGP lengths, >255-byte BGP OPEN Optional Parameters) are reported inline per field without breaking the UI.
-  - Protocol edge cases (Ethernet frames under IEEE 802.3's 60-byte minimum, VLAN VID `0` priority-tagged or VID `4095` reserved per IEEE 802.1Q, IPv4 Reserved bit set, IPv4 source routing LSRR/SSRR per RFC 7126, Router Alert != 0 per RFC 2113, ICMPv4 directly above IPv6, ICMPv6 directly above IPv4, GRE Version != 0 per RFC 2784 §2.3.1, UDP checksum `0x0000` disabled over IPv4 per RFC 768 or invalid over IPv6 per RFC 8200 §8.1, TCP SYN-only options without SYN / Window Scale > 14 / SACK block limits, VXLAN I-flag = 0 / non-zero reserved bits / missing UDP or non-4789 destination port per RFC 7348 §5, BGP Hold Time `1` or `2` seconds, BGP KEEPALIVE with payload, BGP without an underlying TCP layer per RFC 4271, BGP over non-179 TCP ports) surface as non-blocking warnings.
-- **Bit-Accurate Inspection & Export**
-  - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), layer segment summaries, and a **unified, color-coded 32-bit header bit diagram** showing all stacked headers continuously in wire order with header-range emphasis—including sub-byte fields such as VLAN PCP (3b) / DEI (1b) / VID (12b), IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), IPv4 option type copied (1b) / class (2b) / number (5b), IPv6 Version (4b) / Traffic Class (8b) / Flow Label (20b), GRE C / K / S flags & Version (3b), and TCP Data Offset (4b) / Reserved (4b).
-  - **One-click export & shareable permalinks**: copy continuous hex strings (**Copy Hex**), formatted hex dumps (**Copy Dump**), download Wireshark-compatible `.pcap` files (**Download .pcap**), or copy a shareable URL (**Copy Link**). Permalinks use a versioned URL fragment (`#p1=<base64url(UTF-8 JSON)>`) that works under GitHub Pages sub-paths and restores the exact layer stack, auto/manual overrides, and payload—including intentionally broken packets.
-  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames including 802.1Q / 802.1ad / legacy `0x9100` VLAN tags, Raw IPv4 packets with or without options, or Raw IPv6 packets, including ICMPv6, 6in4/4in6 tunnels, GRE / GRETAP tunnels with optional Checksum / Key / Sequence Number, VXLAN overlays over UDP port 4789, TCP options, and BGP-4 over TCP port 179) to decode them back into editable layers while preserving auto vs. manual checksum/length/TPID states. Because raw bytes only carry standard encapsulations (Ethernet II, Raw IPv4, or Raw IPv6 outermost headers and recognized protocol numbers/ports), custom or non-standard stacks cannot always be reconstructed from exported bytes alone—the inspector flags these mismatches automatically and recommends **Copy Link** to preserve the exact stack.
+- **Building-block layer stack**: Stack, reorder, add, or remove protocol headers in any order—including tunneling, double-tagging, and experimental stacks—or start from built-in presets.
+- **Auto calculation with manual overrides**: Checksums, lengths, EtherTypes, IP protocols, IHL, Data Offset, and flags are calculated automatically per RFC / IEEE specifications, and any field can be toggled to **Manual** mode to intentionally break a packet and observe the raw bytes change.
+- **Errors vs. learning warnings**: Invalid inputs are reported inline per field without breaking the UI, while protocol edge cases and RFC violations surface as non-blocking learning warnings.
+- **Bit-accurate bidirectional inspection**: Hovering or focusing a field, hex byte, layer segment, or 32-bit header bit-diagram cell highlights the exact matching bits across the packet with inline RFC / IEEE section references.
+- **Import & decode raw hex**: Paste raw hex streams or offset-prefixed hex dumps to decode them back into editable layer stacks while preserving auto vs. manual states.
+- **One-click export & shareable permalinks**: Copy continuous hex strings or formatted hex dumps, download Wireshark-compatible `.pcap` files, or share exact packet states (including broken overrides) via `#p1=...` URL fragments.
 
 ## Supported Protocols & Specifications
 
