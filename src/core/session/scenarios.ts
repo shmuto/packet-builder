@@ -57,8 +57,8 @@ export const EBGP_IPV4_BASIC_SCENARIO: SessionScenario = {
   },
   events: [
     { type: 'establish' },
-    { type: 'advertise', router: 'A', routeIds: ['r1-v4'] },
-    { type: 'advertise', router: 'B', routeIds: ['r2-v4'] },
+    { type: 'advertise', router: 'A' },
+    { type: 'advertise', router: 'B' },
     { type: 'withdraw', router: 'A', routeIds: ['r1-v4'] },
   ],
 };

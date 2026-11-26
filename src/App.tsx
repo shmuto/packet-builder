@@ -1,582 +1,319 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { decodeUtf8Strict, encodeUtf8, parseHexBytes } from './core/bytes';
-import { detectPrintableUtf8, type DecodedPacket } from './core/decode';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  evaluatePacketDraft,
-  formatSpacedHex,
-  isFieldHighlighted,
-  type HighlightTarget,
-} from './core/inspector';
-import type { Layer, LayerType } from './core/layers/types';
-import {
-  buildPermalinkUrl,
-  decodePermalink,
-  encodePermalink,
-  hasOnlyFiniteNumbers,
-  type PermalinkState,
-} from './core/permalink';
-import { createPresets, type PacketPreset, type PresetId } from './core/presets';
-import { ok, type Result } from './core/result';
-import { analyzeBuiltBytesRoundTrip, type RoundTripReport } from './core/roundtrip';
-import { HexDumpInspector } from './ui/HexDumpInspector';
-import { ImportHexPanel } from './ui/ImportHexPanel';
-import { LayerCard } from './ui/LayerCard';
-import {
-  ADDABLE_LAYER_TYPES,
-  createLayerByType,
-  formatSupportedLayersList,
-  LAYER_META,
-} from './ui/layerMeta';
-import { PayloadCard, type PayloadMode } from './ui/PayloadCard';
+  buildLegacyPermalinkUrl,
+  buildSession,
+  buildSessionPermalinkUrl,
+  decodeSessionPermalink,
+  EBGP_IPV4_BASIC_SCENARIO,
+  encodeSessionPermalink,
+  exportSessionPcap,
+  getBuiltinScenario,
+  isLegacyPermalinkHash,
+  type SessionConfig,
+  type SessionEvent,
+  type SessionTrace,
+} from './core/session';
+import { BgpMessageInspector } from './ui/bgp/BgpMessageInspector';
+import { ConfigPanel } from './ui/bgp/ConfigPanel';
+import { DecodeBgpHexPanel } from './ui/bgp/DecodeBgpHexPanel';
+import { NegotiatedStatePanel } from './ui/bgp/NegotiatedStatePanel';
+import { SessionLadder } from './ui/bgp/SessionLadder';
 
-interface LayerItem {
-  readonly id: string;
-  readonly layer: Layer;
-}
-
-interface EditorFields {
-  readonly activePresetId: PresetId | null;
-  readonly layers: readonly Layer[];
-  readonly payloadMode: PayloadMode;
-  readonly payloadText: string;
-  readonly payloadHex: string;
-}
-
-interface InitialEditorState extends EditorFields {
+interface InitialAppState {
+  readonly scenarioId: string;
+  readonly config: SessionConfig;
+  readonly events: readonly SessionEvent[];
   readonly permalinkError: string | null;
-  readonly initialSyncedFragment: string | null;
-  readonly suppressInitialSync: boolean;
+  readonly legacyLinkHref: string | null;
 }
 
-const HASH_SYNC_DEBOUNCE_MS = 250;
-
-function fieldsFromPreset(preset: PacketPreset): EditorFields {
-  return {
-    activePresetId: preset.id,
-    layers: preset.layers,
-    payloadMode: preset.payloadMode ?? 'text',
-    payloadText: preset.payloadText,
-    payloadHex: formatSpacedHex(preset.payloadBytes),
-  };
-}
-
-function fieldsFromPermalink(state: PermalinkState): EditorFields {
-  const { layers, payload } = state;
-  return {
-    activePresetId: null,
-    layers,
-    payloadMode: payload.mode,
-    payloadText: payload.mode === 'text' ? payload.text : '',
-    payloadHex:
-      payload.mode === 'hex' ? payload.hex : formatSpacedHex(encodeUtf8(payload.text)),
-  };
-}
-
-function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState {
-  const fallback = (permalinkError: string | null): InitialEditorState => ({
-    ...fieldsFromPreset(defaultPreset),
+function readInitialAppState(): InitialAppState {
+  const fallback = (
+    permalinkError: string | null,
+    legacyLinkHref: string | null,
+  ): InitialAppState => ({
+    scenarioId: EBGP_IPV4_BASIC_SCENARIO.id,
+    config: EBGP_IPV4_BASIC_SCENARIO.config,
+    events: EBGP_IPV4_BASIC_SCENARIO.events,
     permalinkError,
-    initialSyncedFragment: null,
-    suppressInitialSync: true,
+    legacyLinkHref,
   });
 
   if (typeof window === 'undefined') {
-    return fallback(null);
+    return fallback(null, null);
   }
 
   const hash = window.location.hash;
   if (hash.length === 0 || hash === '#') {
-    return fallback(null);
+    return fallback(null, null);
   }
 
-  const decoded = decodePermalink(hash);
+  if (isLegacyPermalinkHash(hash)) {
+    return fallback(null, buildLegacyPermalinkUrl(hash));
+  }
+
+  const decoded = decodeSessionPermalink(hash);
   if (!decoded.ok) {
-    return fallback(`Could not load packet from URL: ${decoded.error}`);
+    return fallback(`Invalid session link: ${decoded.error}`, null);
   }
 
   return {
-    ...fieldsFromPermalink(decoded.value),
+    scenarioId: decoded.value.scenarioId,
+    config: decoded.value.config,
+    events: decoded.value.events,
     permalinkError: null,
-    initialSyncedFragment: encodePermalink(decoded.value),
-    suppressInitialSync: false,
+    legacyLinkHref: null,
   };
 }
 
+function defaultSelectedStepIndex(trace: SessionTrace): number {
+  const firstBgp = trace.steps.find((s) => s.kind === 'bgp');
+  return firstBgp ? firstBgp.index : 0;
+}
+
 export function App() {
-  const presets = useMemo(() => createPresets(), []);
-  const nextIdRef = useRef(1);
-  const allocateId = useCallback(() => `layer-${nextIdRef.current++}`, []);
-
-  const initialStateRef = useRef<InitialEditorState | null>(null);
-  if (initialStateRef.current === null) {
-    initialStateRef.current = readInitialEditorState(presets[0]);
+  const initialRef = useRef<InitialAppState | null>(null);
+  if (initialRef.current === null) {
+    initialRef.current = readInitialAppState();
   }
-  const initialState = initialStateRef.current;
+  const initial = initialRef.current;
 
-  const [activePresetId, setActivePresetId] = useState<PresetId | null>(
-    initialState.activePresetId,
-  );
-  const [layerItems, setLayerItems] = useState<LayerItem[]>(() =>
-    initialState.layers.map((layer) => ({ id: allocateId(), layer })),
-  );
-  const [payloadMode, setPayloadMode] = useState<PayloadMode>(initialState.payloadMode);
-  const [payloadText, setPayloadText] = useState<string>(initialState.payloadText);
-  const [payloadHex, setPayloadHex] = useState<string>(initialState.payloadHex);
-  const [payloadModeSwitchError, setPayloadModeSwitchError] = useState<string | undefined>(
-    undefined,
-  );
-  const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
-  const [showImportPanel, setShowImportPanel] = useState(false);
-  const [importNotes, setImportNotes] = useState<readonly string[]>([]);
-  const [permalinkError, setPermalinkError] = useState<string | null>(
-    initialState.permalinkError,
-  );
+  const [scenarioId, setScenarioId] = useState(initial.scenarioId);
+  const [config, setConfig] = useState<SessionConfig>(initial.config);
+  const [events, setEvents] = useState<readonly SessionEvent[]>(initial.events);
+  const [showTcpSteps, setShowTcpSteps] = useState(true);
+  const [showHexDecoder, setShowHexDecoder] = useState(false);
+  const [permalinkError, setPermalinkError] = useState<string | null>(initial.permalinkError);
+  const [legacyLinkHref, setLegacyLinkHref] = useState<string | null>(initial.legacyLinkHref);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const copyTimerRef = useRef<number | null>(null);
 
-  const lastSyncedFragmentRef = useRef<string | null>(initialState.initialSyncedFragment);
-  const suppressSyncRef = useRef<boolean>(initialState.suppressInitialSync);
-  const pendingFragmentRef = useRef<string | null>(null);
-  const hashSyncTimerRef = useRef<number | null>(null);
+  const lastValidTraceRef = useRef<SessionTrace | null>(null);
 
-  const payloadResult: Result<Uint8Array> = useMemo(() => {
-    if (payloadMode === 'text') {
-      return ok(encodeUtf8(payloadText));
+  const buildResult = useMemo(() => {
+    try {
+      const trace = buildSession(config, events);
+      return { ok: true as const, trace, error: null };
+    } catch (error) {
+      return {
+        ok: false as const,
+        trace: lastValidTraceRef.current,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
-    return parseHexBytes(payloadHex);
-  }, [payloadMode, payloadText, payloadHex]);
+  }, [config, events]);
 
-  const layers = useMemo(() => layerItems.map((item) => item.layer), [layerItems]);
+  if (buildResult.ok) {
+    lastValidTraceRef.current = buildResult.trace;
+  }
 
-  const draft = useMemo(
-    () => evaluatePacketDraft(layers, payloadResult),
-    [layers, payloadResult],
-  );
+  const trace: SessionTrace =
+    buildResult.trace ??
+    buildSession(EBGP_IPV4_BASIC_SCENARIO.config, EBGP_IPV4_BASIC_SCENARIO.events);
 
-  const roundTripReport: RoundTripReport = useMemo(() => {
-    if (!draft.ok || !draft.bytes || !payloadResult.ok) {
-      return { kind: 'not-built' };
-    }
-    return analyzeBuiltBytesRoundTrip(layers, payloadResult.value.length, draft.bytes);
-  }, [layers, payloadResult, draft.ok, draft.bytes]);
-
-  const permalinkState: PermalinkState = useMemo(
-    () => ({
-      layers,
-      payload:
-        payloadMode === 'text'
-          ? { mode: 'text', text: payloadText }
-          : { mode: 'hex', hex: payloadHex },
-    }),
-    [layers, payloadMode, payloadText, payloadHex],
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number>(() =>
+    defaultSelectedStepIndex(trace),
   );
 
-  const permalinkFragment: string | null = useMemo(() => {
-    if (!hasOnlyFiniteNumbers(layers)) {
-      return null;
-    }
-    return encodePermalink(permalinkState);
-  }, [layers, permalinkState]);
+  // Keep selected step valid if config edits shorten the trace
+  const safeSelectedIndex =
+    selectedStepIndex >= 0 && selectedStepIndex < trace.steps.length
+      ? selectedStepIndex
+      : defaultSelectedStepIndex(trace);
+  const selectedStep = trace.steps[safeSelectedIndex] ?? trace.steps[0];
 
-  const permalinkUrl: string | null = useMemo(() => {
-    if (permalinkFragment === null || typeof window === 'undefined') {
-      return null;
-    }
-    return buildPermalinkUrl(
-      window.location.origin,
-      window.location.pathname,
-      permalinkFragment,
-    );
-  }, [permalinkFragment]);
-
-  const flushPendingHashSync = useCallback(() => {
-    if (hashSyncTimerRef.current !== null) {
-      window.clearTimeout(hashSyncTimerRef.current);
-      hashSyncTimerRef.current = null;
-    }
-    const pending = pendingFragmentRef.current;
-    pendingFragmentRef.current = null;
-    if (pending !== null && pending !== lastSyncedFragmentRef.current) {
-      window.history.replaceState(null, '', `#${pending}`);
-      lastSyncedFragmentRef.current = pending;
-    }
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
   }, []);
 
-  // Keep URL hash in sync with editor state using debounced history.replaceState
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (suppressSyncRef.current || permalinkFragment === null) {
-      pendingFragmentRef.current = null;
-      return;
-    }
-    if (permalinkFragment === lastSyncedFragmentRef.current) {
-      pendingFragmentRef.current = null;
-      return;
-    }
-
-    pendingFragmentRef.current = permalinkFragment;
-    if (hashSyncTimerRef.current !== null) {
-      window.clearTimeout(hashSyncTimerRef.current);
-    }
-
-    hashSyncTimerRef.current = window.setTimeout(flushPendingHashSync, HASH_SYNC_DEBOUNCE_MS);
-
-    return () => {
-      if (hashSyncTimerRef.current !== null) {
-        window.clearTimeout(hashSyncTimerRef.current);
-        hashSyncTimerRef.current = null;
-      }
-    };
-  }, [permalinkFragment, flushPendingHashSync]);
-
-  // Flush any pending debounced hash update before reload/navigation so recent edits are never lost
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.addEventListener('pagehide', flushPendingHashSync);
-    window.addEventListener('beforeunload', flushPendingHashSync);
-    return () => {
-      window.removeEventListener('pagehide', flushPendingHashSync);
-      window.removeEventListener('beforeunload', flushPendingHashSync);
-    };
-  }, [flushPendingHashSync]);
-
-  const applyEditorFields = useCallback(
-    (fields: EditorFields, error: string | null) => {
-      setActivePresetId(fields.activePresetId);
-      setLayerItems(fields.layers.map((layer) => ({ id: allocateId(), layer })));
-      setPayloadMode(fields.payloadMode);
-      setPayloadText(fields.payloadText);
-      setPayloadHex(fields.payloadHex);
-      setPayloadModeSwitchError(undefined);
-      setImportNotes([]);
-      setPermalinkError(error);
-      setHighlight(null);
-    },
-    [allocateId],
-  );
-
-  // Listen for hashchange events (e.g., user edits URL fragment or navigates history)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const resetToDefaultPreset = (error: string | null) => {
-      suppressSyncRef.current = true;
-      lastSyncedFragmentRef.current = null;
-      applyEditorFields(fieldsFromPreset(presets[0]), error);
-    };
-
-    const handleHashChange = () => {
-      pendingFragmentRef.current = null;
-      if (hashSyncTimerRef.current !== null) {
-        window.clearTimeout(hashSyncTimerRef.current);
-        hashSyncTimerRef.current = null;
-      }
-
-      const hash = window.location.hash;
-      if (hash.length === 0 || hash === '#') {
-        resetToDefaultPreset(null);
-        return;
-      }
-
-      const decoded = decodePermalink(hash);
-      if (!decoded.ok) {
-        resetToDefaultPreset(`Could not load packet from URL: ${decoded.error}`);
-        return;
-      }
-
-      suppressSyncRef.current = false;
-      lastSyncedFragmentRef.current = encodePermalink(decoded.value);
-      applyEditorFields(fieldsFromPermalink(decoded.value), null);
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [applyEditorFields, presets]);
-
-  const markUserEdited = () => {
-    suppressSyncRef.current = false;
+  const handleSelectScenario = (id: string) => {
+    const found = getBuiltinScenario(id) ?? EBGP_IPV4_BASIC_SCENARIO;
+    setScenarioId(found.id);
+    setConfig(found.config);
+    setEvents(found.events);
     setPermalinkError(null);
+    setLegacyLinkHref(null);
+    const nextTrace = buildSession(found.config, found.events);
+    setSelectedStepIndex(defaultSelectedStepIndex(nextTrace));
   };
 
-  const applyPreset = (preset: PacketPreset) => {
-    markUserEdited();
-    applyEditorFields(fieldsFromPreset(preset), null);
+  const handleResetScenario = () => {
+    handleSelectScenario(scenarioId);
   };
 
-  const handleImportDecoded = (decoded: DecodedPacket) => {
-    markUserEdited();
-    setActivePresetId(null);
-    setLayerItems(decoded.layers.map((layer) => ({ id: allocateId(), layer })));
-    const textCheck = detectPrintableUtf8(decoded.payload);
-    if (textCheck.printable) {
-      setPayloadMode('text');
-      setPayloadText(textCheck.text);
-      setPayloadHex(formatSpacedHex(decoded.payload));
-    } else {
-      setPayloadMode('hex');
-      setPayloadText('');
-      setPayloadHex(formatSpacedHex(decoded.payload));
-    }
-    setPayloadModeSwitchError(undefined);
-    setImportNotes(decoded.notes);
-    setHighlight(null);
-    setShowImportPanel(false);
+  const handleDownloadPcap = () => {
+    const pcapBytes = exportSessionPcap(trace);
+    const blob = new Blob([pcapBytes.slice()], { type: 'application/vnd.tcpdump.pcap' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `tsumiki-${scenarioId}.pcap`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  const handleLayerChange = (index: number, nextLayer: Layer) => {
-    markUserEdited();
-    setActivePresetId(null);
-    setImportNotes([]);
-    setLayerItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, layer: nextLayer } : item)),
+  const handleCopyLink = async () => {
+    const fragment = encodeSessionPermalink({ scenarioId, config, events });
+    const fullUrl = buildSessionPermalinkUrl(
+      window.location.origin,
+      window.location.pathname,
+      fragment,
     );
-  };
-
-  const handleMoveLayer = (index: number, delta: -1 | 1) => {
-    const targetIndex = index + delta;
-    if (targetIndex < 0 || targetIndex >= layerItems.length) {
-      return;
+    window.history.replaceState(null, '', `#${fragment}`);
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
     }
-    markUserEdited();
-    setActivePresetId(null);
-    setImportNotes([]);
-    setHighlight(null);
-    setLayerItems((prev) => {
-      const copy = [...prev];
-      const [moved] = copy.splice(index, 1);
-      copy.splice(targetIndex, 0, moved);
-      return copy;
-    });
-  };
-
-  const handleRemoveLayer = (index: number) => {
-    markUserEdited();
-    setActivePresetId(null);
-    setImportNotes([]);
-    setHighlight(null);
-    setLayerItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleAddLayer = (type: LayerType) => {
-    markUserEdited();
-    setActivePresetId(null);
-    setImportNotes([]);
-    setHighlight(null);
-    setLayerItems((prev) => [...prev, { id: allocateId(), layer: createLayerByType(type) }]);
-  };
-
-  const handlePayloadModeChange = (nextMode: PayloadMode) => {
-    if (nextMode === payloadMode) return;
-
-    if (nextMode === 'hex') {
-      markUserEdited();
-      setPayloadHex(formatSpacedHex(encodeUtf8(payloadText)));
-      setPayloadModeSwitchError(undefined);
-      setPayloadMode('hex');
-      return;
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
     }
-
-    const parsed = parseHexBytes(payloadHex);
-    if (!parsed.ok) {
-      setPayloadModeSwitchError(
-        `Cannot switch to Text mode while hex input is invalid (${parsed.error})`,
-      );
-      return;
-    }
-    const decoded = decodeUtf8Strict(parsed.value);
-    if (!decoded.ok) {
-      setPayloadModeSwitchError(
-        `${decoded.error} Edit the hex bytes before switching to Text mode.`,
-      );
-      return;
-    }
-    markUserEdited();
-    setPayloadText(decoded.value);
-    setPayloadModeSwitchError(undefined);
-    setPayloadMode('text');
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopyStatus('idle');
+      copyTimerRef.current = null;
+    }, 2000);
   };
 
-  const payloadLayerIndex = layers.length;
-  const isPayloadHighlighted = isFieldHighlighted(
-    payloadLayerIndex,
-    'payload',
-    draft.spans,
-    highlight,
-  );
+  const selectedBgpBytes =
+    selectedStep && selectedStep.kind === 'bgp' && selectedStep.bgpOffset !== undefined
+      ? selectedStep.frameBytes.slice(selectedStep.bgpOffset)
+      : undefined;
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div className="brand-block">
-          <div className="brand-title-row">
-            <h1 className="brand-title">tsumiki</h1>
-            <span className="brand-sub">packet builder</span>
-          </div>
-          <p className="brand-desc">
-            Stack {formatSupportedLayersList()} layers like building blocks to inspect, decode, and export raw network packets.
+    <div className="bgp-app">
+      <header className="bgp-topbar">
+        <div className="bgp-brand">
+          <h1 className="bgp-title">tsumiki</h1>
+          <p className="bgp-subtitle">
+            Learn what&apos;s inside BGP messages before you open a capture.
           </p>
         </div>
 
-        <nav className="preset-bar" aria-label="Packet presets and import">
-          <span className="preset-label">Presets</span>
-          <div className="preset-list">
-            {presets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={`preset-btn${activePresetId === preset.id ? ' is-active' : ''}`}
-                title={preset.description}
-                aria-pressed={activePresetId === preset.id}
-                onClick={() => applyPreset(preset)}
-              >
-                {preset.name}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`preset-btn is-import${showImportPanel ? ' is-active' : ''}`}
-              aria-expanded={showImportPanel}
-              onClick={() => setShowImportPanel((open) => !open)}
-            >
-              Import Hex
-            </button>
-          </div>
-        </nav>
+        <div className="bgp-actions" role="toolbar" aria-label="Session Actions">
+          <button type="button" className="bgp-action-btn is-primary" onClick={handleDownloadPcap}>
+            Download .pcap
+          </button>
+          <button type="button" className="bgp-action-btn" onClick={handleCopyLink}>
+            {copyStatus === 'copied'
+              ? 'Copied Link!'
+              : copyStatus === 'error'
+                ? 'Link Updated in URL'
+                : 'Copy Link'}
+          </button>
+          <button
+            type="button"
+            className={`bgp-action-btn${showHexDecoder ? ' is-active' : ''}`}
+            aria-pressed={showHexDecoder}
+            onClick={() => setShowHexDecoder((prev) => !prev)}
+          >
+            Decode BGP hex
+          </button>
+          <a className="bgp-legacy-link" href="./legacy/">
+            Legacy Packet Builder
+          </a>
+        </div>
       </header>
 
+      {legacyLinkHref && (
+        <div className="bgp-banner is-info" role="status">
+          <span>
+            This link uses the legacy general-purpose packet builder format (<code>#p1=</code>).{' '}
+          </span>
+          <a href={legacyLinkHref} className="bgp-banner-link">
+            Open in Legacy Packet Builder →
+          </a>
+        </div>
+      )}
+
       {permalinkError && (
-        <div className="permalink-error-banner" role="alert">
-          <div className="import-notes-body">
-            <strong>Invalid Permalink</strong>
-            <span>{permalinkError} Loaded the default preset instead.</span>
-          </div>
+        <div className="bgp-banner is-error" role="alert">
+          <span>{permalinkError} Loaded the default scenario instead.</span>
           <button
             type="button"
-            className="icon-btn"
-            aria-label="Dismiss permalink error"
+            className="bgp-mini-btn"
             onClick={() => setPermalinkError(null)}
           >
-            ✕
+            Dismiss
           </button>
         </div>
       )}
 
-      {showImportPanel && (
-        <ImportHexPanel
-          onImport={handleImportDecoded}
-          onClose={() => setShowImportPanel(false)}
-        />
-      )}
-
-      {importNotes.length > 0 && (
-        <div className="import-notes-banner" role="status">
-          <div className="import-notes-body">
-            <strong>Import Notes:</strong>
-            <ul className="inspector-msg-list">
-              {importNotes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Dismiss import notes"
-            onClick={() => setImportNotes([])}
-          >
-            ✕
-          </button>
+      {buildResult.error && (
+        <div className="bgp-banner is-error" role="alert">
+          <span>Configuration issue: {buildResult.error}</span>
         </div>
       )}
 
-      <main className="workbench">
-        <section className="stack-column" aria-label="Layer stack editor">
-          <div className="stack-toolbar">
-            <h2 className="section-heading">Layer Stack (outer to inner)</h2>
-            <div className="add-layer-bar" role="group" aria-label="Add protocol layer">
-              {ADDABLE_LAYER_TYPES.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  className={`add-layer-btn layer-chip-${type}`}
-                  onClick={() => handleAddLayer(type)}
-                >
-                  + {LAYER_META[type].shortName}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="layer-stack">
-            {layerItems.length === 0 && (
-              <div className="empty-stack-note">
-                No header layers yet. Use &quot;+ ETH&quot;, &quot;+ IPv4&quot;, or another button above to stack layers.
-              </div>
-            )}
-
-            {layerItems.map((item, index) => {
-              const layerErrors = draft.errors.filter((e) => e.layerIndex === index);
-              const layerWarnings = draft.warnings.filter((w) => w.layerIndex === index);
-              const resolvedAuto = draft.resolvedAutoValues?.[index];
-
-              return (
-                <LayerCard
-                  key={item.id}
-                  id={item.id}
-                  index={index}
-                  total={layerItems.length}
-                  layer={item.layer}
-                  spans={draft.spans}
-                  highlight={highlight}
-                  resolvedAutoValues={resolvedAuto}
-                  errors={layerErrors}
-                  warnings={layerWarnings}
-                  onHighlightChange={setHighlight}
-                  onChange={(next) => handleLayerChange(index, next)}
-                  onMoveUp={() => handleMoveLayer(index, -1)}
-                  onMoveDown={() => handleMoveLayer(index, 1)}
-                  onRemove={() => handleRemoveLayer(index)}
-                />
-              );
-            })}
-
-            <PayloadCard
-              mode={payloadMode}
-              textValue={payloadText}
-              hexValue={payloadHex}
-              byteLength={payloadResult.ok ? payloadResult.value.length : 0}
-              error={draft.payloadError}
-              modeSwitchError={payloadModeSwitchError}
-              isHighlighted={isPayloadHighlighted}
-              onHoverStart={() =>
-                setHighlight({ kind: 'field', layerIndex: payloadLayerIndex, fieldId: 'payload' })
-              }
-              onHoverEnd={() => setHighlight(null)}
-              onModeChange={handlePayloadModeChange}
-              onTextChange={(next) => {
-                markUserEdited();
-                setActivePresetId(null);
-                setPayloadText(next);
+      {showHexDecoder ? (
+        <main className="bgp-decoder-main">
+          <DecodeBgpHexPanel onClose={() => setShowHexDecoder(false)} />
+        </main>
+      ) : (
+        <main className="bgp-workspace">
+          <div className="bgp-col-config">
+            <ConfigPanel
+              scenarioId={scenarioId}
+              config={config}
+              events={events}
+              onSelectScenario={handleSelectScenario}
+              onResetScenario={handleResetScenario}
+              onConfigChange={(next) => {
+                setConfig(next);
+                setPermalinkError(null);
               }}
-              onHexChange={(next) => {
-                markUserEdited();
-                setActivePresetId(null);
-                setPayloadModeSwitchError(undefined);
-                setPayloadHex(next);
+              onEventsChange={(next) => {
+                setEvents(next);
+                setPermalinkError(null);
               }}
             />
           </div>
-        </section>
 
-        <div className="inspector-column">
-          <HexDumpInspector
-            layers={layers}
-            draft={draft}
-            highlight={highlight}
-            permalinkUrl={permalinkUrl}
-            roundTripReport={roundTripReport}
-            onHighlightChange={setHighlight}
-          />
-        </div>
-      </main>
+          <div className="bgp-col-ladder">
+            <SessionLadder
+              routerA={trace.config.routerA}
+              routerB={trace.config.routerB}
+              steps={trace.steps}
+              omissions={trace.omissions}
+              selectedStepIndex={safeSelectedIndex}
+              showTcpSteps={showTcpSteps}
+              onToggleTcpSteps={setShowTcpSteps}
+              onSelectStep={setSelectedStepIndex}
+            />
+          </div>
+
+          <div className="bgp-col-inspector">
+            {selectedStep && (
+              <BgpMessageInspector
+                title={selectedStep.summary}
+                subtitle={`${selectedStep.from === 'A' ? trace.config.routerA.name : trace.config.routerB.name} → ${selectedStep.to === 'A' ? trace.config.routerA.name : trace.config.routerB.name} · t = ${selectedStep.t}ms · Frame ${selectedStep.frameBytes.length} bytes`}
+                bgpBytes={selectedBgpBytes}
+                tree={selectedStep.tree}
+                explanations={selectedStep.explanations}
+                tcpOnlyNote={
+                  selectedStep.kind === 'tcp'
+                    ? 'TCP transport frame (no BGP payload). Select a BGP arrow on the ladder to inspect its BGP dissection tree.'
+                    : undefined
+                }
+              />
+            )}
+          </div>
+
+          <div className="bgp-col-state">
+            <NegotiatedStatePanel
+              routerAName={trace.config.routerA.name}
+              routerBName={trace.config.routerB.name}
+              state={selectedStep?.state ?? trace.finalState}
+            />
+          </div>
+        </main>
+      )}
     </div>
   );
 }
