@@ -16,6 +16,7 @@ export interface ParsedCidr {
   readonly prefixLength: number;
   readonly encodedOctets: Uint8Array;
   readonly canonical: string;
+  readonly hadNonZeroHostBits: boolean;
 }
 
 export function prefixOctetCount(prefixLength: number): number {
@@ -54,10 +55,20 @@ export function parseCidrPrefix(
   for (let i = 0; i < octets; i++) {
     masked[i] = addrResult.value[i];
   }
+  let hadNonZeroHostBits = false;
   const remBits = prefixLength % 8;
   if (remBits !== 0 && octets > 0) {
     const mask = (0xff << (8 - remBits)) & 0xff;
+    if ((masked[octets - 1] & ~mask) !== 0) {
+      hadNonZeroHostBits = true;
+    }
     masked[octets - 1] &= mask;
+  }
+  for (let i = octets; i < fullLen; i++) {
+    if (addrResult.value[i] !== 0) {
+      hadNonZeroHostBits = true;
+      break;
+    }
   }
 
   const canonicalAddr = afi === BGP_AFI.IPV4 ? formatIPv4(masked) : formatIPv6(masked);
@@ -67,12 +78,14 @@ export function parseCidrPrefix(
     prefixLength,
     encodedOctets: masked.slice(0, octets),
     canonical: `${canonicalAddr}/${prefixLength}`,
+    hadNonZeroHostBits,
   });
 }
 
 export interface EncodedPrefixList {
   readonly bytes: Uint8Array;
   readonly nodes: readonly DissectionNode[];
+  readonly warnings: readonly string[];
 }
 
 export function encodePrefixList(
@@ -85,6 +98,7 @@ export function encodePrefixList(
 ): Result<EncodedPrefixList> {
   const chunks: Uint8Array[] = [];
   const nodes: DissectionNode[] = [];
+  const warnings: string[] = [];
   let cursor = baseOffset;
 
   for (let i = 0; i < prefixes.length; i++) {
@@ -94,7 +108,12 @@ export function encodePrefixList(
       return err(`Prefix #${i + 1}: ${parsed.error}`);
     }
 
-    const { prefixLength, encodedOctets, canonical } = parsed.value;
+    const { prefixLength, encodedOctets, canonical, hadNonZeroHostBits } = parsed.value;
+    if (hadNonZeroHostBits) {
+      warnings.push(
+        `Prefix "${entry.prefix}" has non-zero host bits after /${prefixLength}; masked to ${canonical} per RFC 4271 §4.3.`,
+      );
+    }
     const pathId = entry.pathId ?? 0;
     if (addPath && (!Number.isInteger(pathId) || pathId < 0 || pathId > 0xffffffff)) {
       return err(`Prefix #${i + 1}: ADD-PATH Path Identifier must be a 32-bit unsigned integer (got ${pathId}).`);
@@ -170,7 +189,7 @@ export function encodePrefixList(
     out.set(chunk, writePos);
     writePos += chunk.length;
   }
-  return ok({ bytes: out, nodes });
+  return ok({ bytes: out, nodes, warnings });
 }
 
 export interface DecodedPrefixList {

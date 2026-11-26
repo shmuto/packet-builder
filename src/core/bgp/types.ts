@@ -213,6 +213,19 @@ export interface BgpRawOptionalParameter {
   readonly lengthOverride?: number;
 }
 
+export type BgpOptionalParameter =
+  | {
+      readonly kind: 'capabilities';
+      readonly capabilities: readonly BgpCapability[];
+      readonly lengthOverride?: number;
+    }
+  | {
+      readonly kind: 'raw';
+      readonly type: number;
+      readonly dataHex: string;
+      readonly lengthOverride?: number;
+    };
+
 // ---------------------------------------------------------------------------
 // Prefixes & Path Attributes
 // ---------------------------------------------------------------------------
@@ -378,6 +391,12 @@ export interface BgpOpenMessage extends BgpMessageBase {
   readonly holdTime: number;
   readonly bgpIdentifier: string;
   readonly capabilities: readonly BgpCapability[];
+  /**
+   * Optional explicit Optional Parameter sequence preserving per-parameter grouping and ordering
+   * (e.g., multiple Type 2 Capabilities parameters or interleaved non-Type-2 parameters).
+   * When present, the encoder emits these parameters in exact order instead of regrouping `capabilities`.
+   */
+  readonly optionalParameters?: readonly BgpOptionalParameter[];
   /** Optional non-Capabilities (type != 2) optional parameters preserved on decode/encode. */
   readonly extraOptionalParameters?: readonly BgpRawOptionalParameter[];
   /** Optional manual override for the 8-bit Optional Parameters Length field. */

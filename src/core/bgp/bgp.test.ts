@@ -292,7 +292,7 @@ describe('BGP core codec and dissection tree', () => {
     const ceaseBytes = assertLosslessRoundTrip(adminShutdown, { fourOctetAs: true });
     expect(toHexString(ceaseBytes)).toBe(hex(`${MARKER_HEX} 00 15 03 06 02`));
 
-    // Cease with diagnostic Data bytes (21 + 2 = 23B = 0x0017)
+    // ROUTE-REFRESH Message Error / Invalid Message Length (7/1) with Data (21 + 2 = 23B = 0x0017)
     const withData: BgpNotificationMessage = {
       type: 'notification',
       errorCode: 7,
@@ -445,7 +445,10 @@ describe('BGP core codec and dissection tree', () => {
       addPath: new Set([afiSafiKey(BGP_AFI.IPV4, BGP_SAFI.UNICAST)]),
     };
     const encodedRich = assertLosslessRoundTrip(richUpdate, addPathCtx);
-    // Verify Extended Length bit (0x10) was automatically set on the 260-byte raw attribute
+    // Directly assert Extended Length wire header on the 260-byte raw attribute:
+    // Flags = Optional(0x80)|Transitive(0x40)|Partial(0x20)|Extended(0x10) = 0xf0, Type = 200 (0xc8), Len = 260 (0x0104)
+    expect(toHexString(encodedRich)).toContain(`f0c80104${bigRawData}`);
+
     const decodedRich = decodeBgpMessages(encodedRich, addPathCtx);
     const rawAttr =
       decodedRich.messages[0].message.type === 'update'
@@ -455,6 +458,30 @@ describe('BGP core codec and dissection tree', () => {
     if (rawAttr?.kind === 'raw') {
       expect(rawAttr.dataHex).toBe(bigRawData);
       expect(rawAttr.flags?.partial).toBe(true);
+    }
+
+    // Extended Length threshold boundary: 255 bytes -> 1-byte length (no 0x10 flag); 256 bytes -> 2-byte length (0x10 flag set)
+    const attr255 = encodeBgpMessage({
+      type: 'update',
+      withdrawnRoutes: [],
+      pathAttributes: [{ kind: 'raw', typeCode: 201, dataHex: 'aa'.repeat(255) }],
+      nlri: [],
+    });
+    expect(attr255.ok).toBe(true);
+    if (attr255.ok) {
+      // Flags 0xc0 (Optional+Transitive, Extended=0), Type 0xc9 (201), 1-byte Len 0xff (255)
+      expect(toHexString(attr255.value.bytes)).toContain(`c0c9ff${'aa'.repeat(255)}`);
+    }
+    const attr256 = encodeBgpMessage({
+      type: 'update',
+      withdrawnRoutes: [],
+      pathAttributes: [{ kind: 'raw', typeCode: 201, dataHex: 'bb'.repeat(256) }],
+      nlri: [],
+    });
+    expect(attr256.ok).toBe(true);
+    if (attr256.ok) {
+      // Flags 0xd0 (Optional+Transitive+Extended), Type 0xc9 (201), 2-byte Len 0x0100 (256)
+      expect(toHexString(attr256.value.bytes)).toContain(`d0c90100${'bb'.repeat(256)}`);
     }
 
     // Well-known community display names
@@ -481,7 +508,12 @@ describe('BGP core codec and dissection tree', () => {
     assertLosslessRoundTrip(rrBorr, { fourOctetAs: true });
   });
 
-  it('round-trips several concatenated BGP messages back to back and supports hex dump input', () => {
+  it('round-trips several concatenated BGP messages losslessly with exact offsets and supports hex dump input', () => {
+    // Byte length arithmetic:
+    //   [0] OPEN: 19 (header) + 10 (fixed) + 2 (opt param hdr) + 6 (cap 65) = 37 bytes -> next offset 37
+    //   [1] KEEPALIVE: 19 bytes -> next offset 56
+    //   [2] IPv4 End-of-RIB UPDATE: 23 bytes -> next offset 79
+    //   [3] NOTIFICATION (6/2): 21 bytes -> total 100 bytes
     const stream: readonly BgpMessage[] = [
       {
         type: 'open',
@@ -499,6 +531,7 @@ describe('BGP core codec and dissection tree', () => {
     const encoded = encodeBgpMessages(stream, { fourOctetAs: true });
     expect(encoded.ok).toBe(true);
     if (!encoded.ok) return;
+    expect(encoded.value.length).toBe(100);
 
     const decoded = decodeBgpMessages(encoded.value, { fourOctetAs: true });
     expect(decoded.messages).toHaveLength(4);
@@ -510,14 +543,121 @@ describe('BGP core codec and dissection tree', () => {
       'update',
       'notification',
     ]);
+    expect(decoded.messages.map((m) => m.offset)).toEqual([0, 37, 56, 79]);
 
     for (const item of decoded.messages) {
       assertValidDissectionTree(item.tree, item.bytes.length);
     }
 
+    // Lossless re-encoding of the entire decoded stream
+    const reEncoded = encodeBgpMessages(
+      decoded.messages.map((m) => m.message),
+      { fourOctetAs: true },
+    );
+    expect(reEncoded.ok).toBe(true);
+    if (reEncoded.ok) {
+      expect(toHexString(reEncoded.value)).toBe(toHexString(encoded.value));
+    }
+
     const viaHex = decodeBgpHex(toHexString(encoded.value), { fourOctetAs: true });
     expect(viaHex.messages).toHaveLength(4);
     expect(viaHex.unparsedBytes.length).toBe(0);
+  });
+
+  it('supports manual length and flag overrides and emits host-bit masking warnings', () => {
+    const manualOpen = encodeBgpMessage({
+      type: 'open',
+      version: 4,
+      asn: 65001,
+      holdTime: 90,
+      bgpIdentifier: '192.0.2.1',
+      lengthOverride: 99,
+      optParamLengthOverride: 12,
+      capParamLengthOverride: 8,
+      capabilities: [{ kind: 'routeRefresh' }],
+    });
+    expect(manualOpen.ok).toBe(true);
+    if (manualOpen.ok) {
+      // Wire length = 99 (0x0063), Opt Parm Len = 12 (0x0c), Cap Param Len = 8 (0x08)
+      expect(manualOpen.value.bytes[16]).toBe(0x00);
+      expect(manualOpen.value.bytes[17]).toBe(99);
+      expect(manualOpen.value.bytes[28]).toBe(12);
+      expect(manualOpen.value.bytes[30]).toBe(8);
+      const headerLen = manualOpen.value.tree.children?.[0]?.children?.[1];
+      expect(headerLen?.value).toContain('manual override; actual 33 bytes');
+      const optLenNode = manualOpen.value.tree.children?.find((n) => n.id === 'open.optParamLength');
+      expect(optLenNode?.value).toContain('manual override; actual 4 bytes');
+    }
+
+    const manualUpdate = encodeBgpMessage({
+      type: 'update',
+      withdrawnRoutes: [],
+      withdrawnRoutesLengthOverride: 10,
+      totalPathAttributeLengthOverride: 20,
+      pathAttributes: [
+        {
+          kind: 'origin',
+          origin: 0,
+          flags: { extendedLength: true, partial: true },
+          lengthOverride: 5,
+        },
+      ],
+      nlri: [{ prefix: '10.0.0.1/8' }],
+    });
+    expect(manualUpdate.ok).toBe(true);
+    if (manualUpdate.ok) {
+      // Withdrawn Len = 10 (00 0a), Total Path Attr Len = 20 (00 14)
+      expect(manualUpdate.value.bytes[19]).toBe(0x00);
+      expect(manualUpdate.value.bytes[20]).toBe(10);
+      expect(manualUpdate.value.bytes[21]).toBe(0x00);
+      expect(manualUpdate.value.bytes[22]).toBe(20);
+      // ORIGIN attr: Flags = Transitive(0x40)|Partial(0x20)|Extended(0x10) = 0x70, Type = 0x01, Len = 0x0005
+      expect(manualUpdate.value.bytes.slice(23, 27)).toEqual(
+        new Uint8Array([0x70, 0x01, 0x00, 0x05]),
+      );
+      const wNode = manualUpdate.value.tree.children?.find((n) => n.id === 'update.withdrawnLength');
+      const aNode = manualUpdate.value.tree.children?.find((n) => n.id === 'update.pathAttrLength');
+      expect(wNode?.value).toContain('manual override; actual 0 bytes');
+      expect(aNode?.value).toContain('manual override; actual 5 bytes');
+      expect(manualUpdate.value.warnings.some((w) => w.includes('non-zero host bits'))).toBe(true);
+    }
+  });
+
+  it('preserves multi-Optional-Parameter OPEN grouping (1 capability per Type 2 parameter) losslessly', () => {
+    // Cisco/Juniper-style OPEN with separate Optional Parameter Type 2 per capability:
+    //   Param 1: 02 06 01 04 00 01 00 01 (MP IPv4 Unicast, 8B)
+    //   Param 2: 02 02 02 00             (Route Refresh, 4B)
+    //   Param 3: 02 06 41 04 00 00 fd e9 (4-octet AS 65001, 8B)
+    // Total opt params = 20B (0x14), Total OPEN length = 19 + 10 + 20 = 49B (0x0031)
+    const perCapOpenHex = hex(`
+      ${MARKER_HEX} 00 31 01
+      04 fd e9 00 5a c0 00 02 01 14
+      02 06 01 04 00 01 00 01
+      02 02 02 00
+      02 06 41 04 00 00 fd e9
+    `);
+    const decoded = decodeBgpHex(perCapOpenHex);
+    expect(decoded.messages).toHaveLength(1);
+    expect(decoded.notes).toEqual([]);
+    const reEncoded = encodeBgpMessage(decoded.messages[0].message);
+    expect(reEncoded.ok).toBe(true);
+    if (reEncoded.ok) {
+      expect(toHexString(reEncoded.value.bytes)).toBe(perCapOpenHex);
+      assertValidDissectionTree(reEncoded.value.tree, reEncoded.value.bytes.length);
+    }
+  });
+
+  it('keeps dedicated KEEPALIVE tree label and Unexpected Body node when KEEPALIVE has trailing bytes', () => {
+    const kaWithBody = parseHexBytes(`${MARKER_HEX} 00 15 04 aa bb`);
+    expect(kaWithBody.ok).toBe(true);
+    if (!kaWithBody.ok) return;
+
+    const res = decodeBgpMessages(kaWithBody.value);
+    expect(res.messages).toHaveLength(1);
+    expect(res.notes.some((n) => n.includes('unexpected body'))).toBe(true);
+    expect(res.messages[0].tree.label).toContain('KEEPALIVE');
+    expect(res.messages[0].tree.children?.some((c) => c.label === 'Unexpected Body')).toBe(true);
+    assertValidDissectionTree(res.messages[0].tree, kaWithBody.value.length);
   });
 
   it('never throws on malformed or truncated input and preserves partial results + unparsed bytes', () => {
@@ -570,8 +710,12 @@ describe('BGP core codec and dissection tree', () => {
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const src = readFileSync(join(THIS_DIR, file), 'utf8');
-      expect(src, `${file} must not import from layers/`).not.toMatch(/from\s+['"][^'"]*layers/);
-      expect(src, `${file} must not import from ui/`).not.toMatch(/from\s+['"][^'"]*ui/);
+      expect(src, `${file} must not import from layers/`).not.toMatch(
+        /from\s+['"][^'"]*(?:^|\/)layers(?:\/|['"])/,
+      );
+      expect(src, `${file} must not import from ui/`).not.toMatch(
+        /from\s+['"][^'"]*(?:^|\/)ui(?:\/|['"])/,
+      );
     }
   });
 });

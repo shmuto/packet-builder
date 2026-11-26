@@ -8,11 +8,11 @@ import {
 import { err, ok, type Result } from '../result';
 import { encodePathAttribute } from './attributes';
 import { encodeCapability } from './capabilities';
+import { buildCommonHeaderNode, isUint16, isUint32, isUint8 } from './common';
 import { encodePrefixList } from './prefix';
 import {
   formatAfiSafi,
   getAfiName,
-  getMessageTypeName,
   getNotificationErrorInfo,
   getNotificationSubcodeInfo,
   getRouteRefreshSubtypeInfo,
@@ -32,22 +32,11 @@ import {
   type BgpCodecContext,
   type BgpMessage,
   type BgpOpenMessage,
+  type BgpOptionalParameter,
   type BgpUpdateMessage,
   type DissectionNode,
   type EncodedBgpMessage,
 } from './types';
-
-function isUint8(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xff;
-}
-
-function isUint16(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xffff;
-}
-
-function isUint32(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
-}
 
 export function resolveOpenMyAs(msg: BgpOpenMessage): number {
   if (msg.myAsOverride !== undefined) {
@@ -101,58 +90,6 @@ export function isEndOfRib(msg: BgpMessage): AfiSafi | null {
     }
   }
   return null;
-}
-
-function buildHeaderNode(
-  markerBytes: Uint8Array,
-  wireLength: number,
-  actualLength: number,
-  typeCode: number,
-  lengthOverridden: boolean,
-): DissectionNode {
-  const allOnes = markerBytes.every((b) => b === 0xff);
-  const typeName = getMessageTypeName(typeCode);
-
-  return {
-    id: 'header',
-    label: 'BGP Common Header',
-    value: `${typeName}, Length ${wireLength} bytes`,
-    explanation:
-      'Every BGP message begins with a fixed 19-byte header: a 16-byte all-ones Marker, a 2-byte Length, and a 1-byte Type.',
-    reference: 'RFC 4271 §4.1',
-    byteRange: { start: 0, end: BGP_HEADER_LENGTH },
-    children: [
-      {
-        id: 'header.marker',
-        label: 'Marker',
-        value: allOnes ? 'ff:ff:...:ff (16 bytes of 0xff)' : `0x${toHexString(markerBytes)} (non-standard)`,
-        explanation:
-          '16-octet synchronization marker set to all ones (0xff) for BGP-4 compatibility.',
-        reference: 'RFC 4271 §4.1',
-        byteRange: { start: 0, end: BGP_MARKER_LENGTH },
-      },
-      {
-        id: 'header.length',
-        label: 'Length',
-        value: lengthOverridden
-          ? `${wireLength} bytes (manual override; actual ${actualLength} bytes)`
-          : `${wireLength} bytes`,
-        explanation:
-          'Total length of the BGP message in octets, including this 19-byte header (valid range 19–4096 bytes per RFC 4271).',
-        reference: 'RFC 4271 §4.1',
-        byteRange: { start: 16, end: 18 },
-      },
-      {
-        id: 'header.type',
-        label: 'Type',
-        value: `${typeCode} (${typeName})`,
-        explanation:
-          'Identifies the BGP message kind: 1=OPEN, 2=UPDATE, 3=NOTIFICATION, 4=KEEPALIVE, 5=ROUTE-REFRESH.',
-        reference: typeCode === BGP_MESSAGE_TYPE.ROUTE_REFRESH ? 'RFC 2918 §3' : 'RFC 4271 §4.1',
-        byteRange: { start: 18, end: 19 },
-      },
-    ],
-  };
 }
 
 export function encodeBgpMessage(
@@ -220,43 +157,62 @@ export function encodeBgpMessage(
       const optParamNodes: DissectionNode[] = [];
       let optCursor = BGP_HEADER_LENGTH + 10; // byte 29
 
-      if (msg.capabilities.length > 0) {
-        // Pack capabilities into one (or more, if > 255B) Optional Parameter Type 2 containers (RFC 5492 §4)
-        type CapEncoded = { readonly bytes: Uint8Array; readonly capIndex: number };
-        const encodedCaps: CapEncoded[] = [];
-        for (let i = 0; i < msg.capabilities.length; i++) {
-          const probe = encodeCapability(msg.capabilities[i], 0, `optParams.cap[${i}]`);
-          if (!probe.ok) return probe;
-          encodedCaps.push({ bytes: probe.value.bytes, capIndex: i });
-        }
-
-        const groups: CapEncoded[][] = [];
-        let currentGroup: CapEncoded[] = [];
-        let currentLen = 0;
-        for (const item of encodedCaps) {
-          if (currentGroup.length > 0 && currentLen + item.bytes.length > 255) {
-            groups.push(currentGroup);
-            currentGroup = [];
-            currentLen = 0;
+      const effectiveOptParams: BgpOptionalParameter[] = [];
+      if (msg.optionalParameters !== undefined) {
+        effectiveOptParams.push(...msg.optionalParameters);
+      } else {
+        if (msg.capabilities.length > 0) {
+          // Pack capabilities into one (or more, if > 255B) Optional Parameter Type 2 containers (RFC 5492 §4)
+          let currentGroup: typeof msg.capabilities[number][] = [];
+          let currentLen = 0;
+          for (let i = 0; i < msg.capabilities.length; i++) {
+            const cap = msg.capabilities[i];
+            const probe = encodeCapability(cap, 0, `optParams.cap[${i}]`);
+            if (!probe.ok) return probe;
+            if (currentGroup.length > 0 && currentLen + probe.value.bytes.length > 255) {
+              effectiveOptParams.push({ kind: 'capabilities', capabilities: currentGroup });
+              currentGroup = [];
+              currentLen = 0;
+            }
+            currentGroup.push(cap);
+            currentLen += probe.value.bytes.length;
           }
-          currentGroup.push(item);
-          currentLen += item.bytes.length;
+          if (currentGroup.length > 0) {
+            effectiveOptParams.push({
+              kind: 'capabilities',
+              capabilities: currentGroup,
+              ...(msg.capParamLengthOverride !== undefined && effectiveOptParams.length === 0
+                ? { lengthOverride: msg.capParamLengthOverride }
+                : {}),
+            });
+          }
         }
-        if (currentGroup.length > 0) groups.push(currentGroup);
+        if (msg.extraOptionalParameters) {
+          for (const extra of msg.extraOptionalParameters) {
+            effectiveOptParams.push({
+              kind: 'raw',
+              type: extra.type,
+              dataHex: extra.dataHex,
+              ...(extra.lengthOverride !== undefined ? { lengthOverride: extra.lengthOverride } : {}),
+            });
+          }
+        }
+      }
 
-        for (let gIdx = 0; gIdx < groups.length; gIdx++) {
-          const group = groups[gIdx];
-          const groupStart = optCursor;
-          const capValStart = groupStart + 2;
-          let capCursor = capValStart;
+      for (let pIdx = 0; pIdx < effectiveOptParams.length; pIdx++) {
+        const param = effectiveOptParams[pIdx];
+        const pStart = optCursor;
+
+        if (param.kind === 'capabilities') {
+          let capCursor = pStart + 2;
           const capNodes: DissectionNode[] = [];
           const capByteParts: Uint8Array[] = [];
 
-          for (const item of group) {
+          for (let cIdx = 0; cIdx < param.capabilities.length; cIdx++) {
             const encoded = encodeCapability(
-              msg.capabilities[item.capIndex],
+              param.capabilities[cIdx],
               capCursor,
-              `open.optParams[${optParamNodes.length}].cap[${item.capIndex}]`,
+              `open.optParams[${pIdx}].cap[${cIdx}]`,
             );
             if (!encoded.ok) return encoded;
             capNodes.push(encoded.value.node);
@@ -265,12 +221,11 @@ export function encodeBgpMessage(
           }
 
           const capsBytes = concatBytes(...capByteParts);
-          const wireCapParamLen =
-            gIdx === 0 && msg.capParamLengthOverride !== undefined
-              ? msg.capParamLengthOverride
-              : capsBytes.length;
-          if (!isUint8(wireCapParamLen)) {
-            return err(`Capabilities Optional Parameter length must be 0-255 (got ${wireCapParamLen}).`);
+          const wireCapParamLen = param.lengthOverride ?? capsBytes.length;
+          if (!isUint8(wireCapParamLen) || capsBytes.length > 255) {
+            return err(
+              `Capabilities Optional Parameter length must be 0-255 (got ${wireCapParamLen}).`,
+            );
           }
 
           const paramBuf = new Uint8Array(2 + capsBytes.length);
@@ -280,61 +235,58 @@ export function encodeBgpMessage(
 
           optParamChunks.push(paramBuf);
           optParamNodes.push({
-            id: `open.optParams[${optParamNodes.length}]`,
+            id: `open.optParams[${pIdx}]`,
             label: 'Optional Parameter: Capabilities (Type 2)',
-            value: `${group.length} ${group.length === 1 ? 'capability' : 'capabilities'} (${capsBytes.length} bytes)`,
+            value: `${param.capabilities.length} ${param.capabilities.length === 1 ? 'capability' : 'capabilities'} (${capsBytes.length} bytes)`,
             explanation:
               'Optional Parameter Type 2 carries BGP capability TLVs so peers can negotiate features like MP-BGP, 4-octet AS, and Route Refresh.',
             reference: 'RFC 5492 §4',
-            byteRange: { start: groupStart, end: groupStart + paramBuf.length },
+            byteRange: { start: pStart, end: pStart + paramBuf.length },
             children: [
               {
-                id: `open.optParams[${optParamNodes.length}].type`,
+                id: `open.optParams[${pIdx}].type`,
                 label: 'Parameter Type',
                 value: '2 (Capabilities)',
                 explanation: 'Optional Parameter Type 2 identifies the Capabilities parameter.',
                 reference: 'RFC 5492 §4',
-                byteRange: { start: groupStart, end: groupStart + 1 },
+                byteRange: { start: pStart, end: pStart + 1 },
               },
               {
-                id: `open.optParams[${optParamNodes.length}].length`,
+                id: `open.optParams[${pIdx}].length`,
                 label: 'Parameter Length',
-                value: `${wireCapParamLen} bytes`,
-                explanation: 'Total length in octets of the capability TLVs inside this Optional Parameter.',
+                value:
+                  param.lengthOverride !== undefined && param.lengthOverride !== capsBytes.length
+                    ? `${wireCapParamLen} bytes (manual override; actual ${capsBytes.length} bytes)`
+                    : `${wireCapParamLen} bytes`,
+                explanation:
+                  'Total length in octets of the capability TLVs inside this Optional Parameter.',
                 reference: 'RFC 5492 §4',
-                byteRange: { start: groupStart + 1, end: groupStart + 2 },
+                byteRange: { start: pStart + 1, end: pStart + 2 },
               },
               ...capNodes,
             ],
           });
           optCursor += paramBuf.length;
-        }
-      }
-
-      if (msg.extraOptionalParameters) {
-        for (let i = 0; i < msg.extraOptionalParameters.length; i++) {
-          const extra = msg.extraOptionalParameters[i];
-          if (!isUint8(extra.type)) {
-            return err(`Extra optional parameter #${i + 1} type must be 0-255.`);
+        } else {
+          if (!isUint8(param.type)) {
+            return err(`Optional parameter #${pIdx + 1} type must be 0-255.`);
           }
-          const dataRes = parseHexBytes(extra.dataHex);
+          const dataRes = parseHexBytes(param.dataHex);
           if (!dataRes.ok) {
-            return err(`Extra optional parameter #${i + 1} dataHex: ${dataRes.error}`);
+            return err(`Optional parameter #${pIdx + 1} dataHex: ${dataRes.error}`);
           }
-          const wireLen = extra.lengthOverride ?? dataRes.value.length;
+          const wireLen = param.lengthOverride ?? dataRes.value.length;
           if (!isUint8(wireLen) || dataRes.value.length > 255) {
-            return err(`Extra optional parameter #${i + 1} length must be 0-255.`);
+            return err(`Optional parameter #${pIdx + 1} length must be 0-255.`);
           }
-          const pStart = optCursor;
           const pBuf = new Uint8Array(2 + dataRes.value.length);
-          pBuf[0] = extra.type;
+          pBuf[0] = param.type;
           pBuf[1] = wireLen;
           pBuf.set(dataRes.value, 2);
           optParamChunks.push(pBuf);
-          const pIdx = optParamNodes.length;
           optParamNodes.push({
             id: `open.optParams[${pIdx}]`,
-            label: `Optional Parameter (Type ${extra.type})`,
+            label: `Optional Parameter (Type ${param.type})`,
             value: dataRes.value.length === 0 ? '(empty)' : `0x${toHexString(dataRes.value)}`,
             explanation: 'Non-Capabilities Optional Parameter carried in the BGP OPEN message.',
             reference: 'RFC 4271 §4.2',
@@ -343,7 +295,7 @@ export function encodeBgpMessage(
               {
                 id: `open.optParams[${pIdx}].type`,
                 label: 'Parameter Type',
-                value: String(extra.type),
+                value: String(param.type),
                 explanation: '1-byte Optional Parameter type code.',
                 reference: 'RFC 4271 §4.2',
                 byteRange: { start: pStart, end: pStart + 1 },
@@ -351,7 +303,11 @@ export function encodeBgpMessage(
               {
                 id: `open.optParams[${pIdx}].length`,
                 label: 'Parameter Length',
-                value: `${wireLen} bytes`,
+                value:
+                  param.lengthOverride !== undefined &&
+                  param.lengthOverride !== dataRes.value.length
+                    ? `${wireLen} bytes (manual override; actual ${dataRes.value.length} bytes)`
+                    : `${wireLen} bytes`,
                 explanation: 'Length of this Optional Parameter value in octets.',
                 reference: 'RFC 4271 §4.2',
                 byteRange: { start: pStart + 1, end: pStart + 2 },
@@ -474,6 +430,7 @@ export function encodeBgpMessage(
         'Withdrawn IPv4 route prefix',
       );
       if (!withdrawnRes.ok) return withdrawnRes;
+      warnings.push(...withdrawnRes.value.warnings);
       const withdrawnBytes = withdrawnRes.value.bytes;
 
       const wireWithdrawnLen = msg.withdrawnRoutesLengthOverride ?? withdrawnBytes.length;
@@ -516,6 +473,7 @@ export function encodeBgpMessage(
         'Reachable IPv4 route prefix',
       );
       if (!nlriRes.ok) return nlriRes;
+      warnings.push(...nlriRes.value.warnings);
       const nlriBytes = nlriRes.value.bytes;
 
       const withdrawnLenBuf = new Uint8Array(2);
@@ -717,7 +675,7 @@ export function encodeBgpMessage(
       rootValue = `${subInfo.name} for ${formatAfiSafi(msg.afi, msg.safi)}`;
       rootExplanation =
         'Requests the peer to re-advertise routes for an AFI/SAFI without tearing down the session (or demarcates BoRR/EoRR).';
-      rootReference = msg.subtype === 0 ? 'RFC 2918 §3' : 'RFC 7313 §3';
+      rootReference = msg.subtype === 0 ? 'RFC 2918 §3' : 'RFC 7313 §3.2';
       break;
     }
 
@@ -764,7 +722,7 @@ export function encodeBgpMessage(
   headerBytes[18] = typeCode;
 
   const bytes = concatBytes(headerBytes, bodyBytes);
-  const headerNode = buildHeaderNode(
+  const headerNode = buildCommonHeaderNode(
     markerBytes,
     wireLength,
     actualLength,

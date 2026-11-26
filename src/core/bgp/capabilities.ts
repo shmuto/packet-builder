@@ -7,6 +7,7 @@ import {
   writeUint32BE,
 } from '../bytes';
 import { err, ok, type Result } from '../result';
+import { isUint16, isUint32, isUint8 } from './common';
 import {
   formatAfiSafi,
   getAddPathModeName,
@@ -20,18 +21,6 @@ import {
   type BgpGracefulRestartTuple,
   type DissectionNode,
 } from './types';
-
-function isUint8(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xff;
-}
-
-function isUint16(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xffff;
-}
-
-function isUint32(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
-}
 
 export interface EncodedCapability {
   readonly bytes: Uint8Array;

@@ -6,12 +6,12 @@ import {
 } from '../bytes';
 import { decodePathAttributesSlice } from './attributes';
 import { decodeCapabilitiesSlice } from './capabilities';
+import { buildCommonHeaderNode } from './common';
 import { encodeBgpMessage } from './encode';
 import { decodePrefixList } from './prefix';
 import {
   formatAfiSafi,
   getAfiName,
-  getMessageTypeName,
   getNotificationErrorInfo,
   getNotificationSubcodeInfo,
   getRouteRefreshSubtypeInfo,
@@ -33,61 +33,13 @@ import {
   type BgpMessage,
   type BgpNotificationMessage,
   type BgpOpenMessage,
+  type BgpOptionalParameter,
   type BgpRawOptionalParameter,
   type BgpRouteRefreshMessage,
   type BgpUpdateMessage,
   type DecodedBgpMessage,
   type DissectionNode,
 } from './types';
-
-function buildDecodedHeaderNode(
-  msgBytes: Uint8Array,
-  declaredLength: number,
-  typeCode: number,
-): DissectionNode {
-  const markerBytes = msgBytes.slice(0, BGP_MARKER_LENGTH);
-  const allOnes = markerBytes.every((b) => b === 0xff);
-  const typeName = getMessageTypeName(typeCode);
-
-  return {
-    id: 'header',
-    label: 'BGP Common Header',
-    value: `${typeName}, Length ${declaredLength} bytes`,
-    explanation:
-      'Every BGP message begins with a fixed 19-byte header: a 16-byte all-ones Marker, a 2-byte Length, and a 1-byte Type.',
-    reference: 'RFC 4271 §4.1',
-    byteRange: { start: 0, end: BGP_HEADER_LENGTH },
-    children: [
-      {
-        id: 'header.marker',
-        label: 'Marker',
-        value: allOnes ? 'ff:ff:...:ff (16 bytes of 0xff)' : `0x${toHexString(markerBytes)} (non-standard)`,
-        explanation:
-          '16-octet synchronization marker set to all ones (0xff) for BGP-4 compatibility.',
-        reference: 'RFC 4271 §4.1',
-        byteRange: { start: 0, end: BGP_MARKER_LENGTH },
-      },
-      {
-        id: 'header.length',
-        label: 'Length',
-        value: `${declaredLength} bytes`,
-        explanation:
-          'Total length of the BGP message in octets, including this 19-byte header (valid range 19–4096 bytes per RFC 4271).',
-        reference: 'RFC 4271 §4.1',
-        byteRange: { start: 16, end: 18 },
-      },
-      {
-        id: 'header.type',
-        label: 'Type',
-        value: `${typeCode} (${typeName})`,
-        explanation:
-          'Identifies the BGP message kind: 1=OPEN, 2=UPDATE, 3=NOTIFICATION, 4=KEEPALIVE, 5=ROUTE-REFRESH.',
-        reference: typeCode === BGP_MESSAGE_TYPE.ROUTE_REFRESH ? 'RFC 2918 §3' : 'RFC 4271 §4.1',
-        byteRange: { start: 18, end: 19 },
-      },
-    ],
-  };
-}
 
 function decodeSingleMessage(
   msgBytes: Uint8Array,
@@ -112,7 +64,13 @@ function decodeSingleMessage(
     );
   }
 
-  const headerNode = buildDecodedHeaderNode(msgBytes, declaredLength, typeCode);
+  const headerNode = buildCommonHeaderNode(
+    markerBytes,
+    declaredLength,
+    msgBytes.length,
+    typeCode,
+    declaredLength !== msgBytes.length,
+  );
 
   const tryEncodeTree = (message: BgpMessage, fallbackTree: DissectionNode): DissectionNode => {
     const encoded = encodeBgpMessage(message, ctx);
@@ -190,6 +148,7 @@ function decodeSingleMessage(
 
       const capabilities: BgpCapability[] = [];
       const extraOptionalParameters: BgpRawOptionalParameter[] = [];
+      const decodedOptParams: BgpOptionalParameter[] = [];
       const optParamNodes: DissectionNode[] = [];
       let cursor = 29;
       let pIdx = 0;
@@ -229,6 +188,11 @@ function decodeSingleMessage(
           );
           capabilities.push(...decodedCaps.capabilities);
           notes.push(...decodedCaps.notes);
+          decodedOptParams.push({
+            kind: 'capabilities',
+            capabilities: decodedCaps.capabilities,
+            ...(pLen !== pValEnd - pValStart ? { lengthOverride: pLen } : {}),
+          });
           optParamNodes.push({
             id: `open.optParams[${pIdx}]`,
             label: 'Optional Parameter: Capabilities (Type 2)',
@@ -259,11 +223,13 @@ function decodeSingleMessage(
           });
         } else {
           const rawVal = msgBytes.slice(pValStart, pValEnd);
-          extraOptionalParameters.push({
+          const rawParam = {
             type: pType,
             dataHex: toHexString(rawVal),
             ...(pLen !== rawVal.length ? { lengthOverride: pLen } : {}),
-          });
+          };
+          extraOptionalParameters.push(rawParam);
+          decodedOptParams.push({ kind: 'raw', ...rawParam });
           optParamNodes.push({
             id: `open.optParams[${pIdx}]`,
             label: `Optional Parameter (Type ${pType})`,
@@ -314,6 +280,11 @@ function decodeSingleMessage(
       const asn = as4Cap ? as4Cap.asn : myAs;
       const expectedAutoMyAs = asn <= 0xffff ? asn : BGP_AS_TRANS;
       const myAsOverride = myAs !== expectedAutoMyAs ? myAs : undefined;
+      const needsExplicitOptParams =
+        decodedOptParams.length > 1 ||
+        decodedOptParams.some(
+          (p) => p.kind === 'raw' || p.lengthOverride !== undefined,
+        );
 
       const openMsg: BgpOpenMessage = {
         type: 'open',
@@ -324,6 +295,7 @@ function decodeSingleMessage(
         holdTime,
         bgpIdentifier,
         capabilities,
+        ...(needsExplicitOptParams ? { optionalParameters: decodedOptParams } : {}),
         ...(extraOptionalParameters.length > 0 ? { extraOptionalParameters } : {}),
         ...(optParamLen !== availableOptLen ? { optParamLengthOverride: optParamLen } : {}),
       };
@@ -742,7 +714,10 @@ function decodeSingleMessage(
             : []),
         ],
       };
-      const tree = tryEncodeTree(keepaliveMsg, fallbackTree);
+      const tree =
+        msgBytes.length > BGP_HEADER_LENGTH
+          ? fallbackTree
+          : tryEncodeTree(keepaliveMsg, fallbackTree);
       return { message: keepaliveMsg, bytes: msgBytes, tree, offset: streamOffset, notes };
     }
 
@@ -802,7 +777,7 @@ function decodeSingleMessage(
         label: 'BGP ROUTE-REFRESH Message',
         value: `${subInfo.name} for ${formatAfiSafi(afi, safi)}`,
         explanation: 'Requests the peer to re-advertise routes for an AFI/SAFI without resetting the session.',
-        reference: subtype === 0 ? 'RFC 2918 §3' : 'RFC 7313 §3',
+        reference: subtype === 0 ? 'RFC 2918 §3' : 'RFC 7313 §3.2',
         byteRange: { start: 0, end: msgBytes.length },
         children: [
           headerNode,

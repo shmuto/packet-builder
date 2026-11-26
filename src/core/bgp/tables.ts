@@ -182,19 +182,19 @@ export function getRouteRefreshSubtypeInfo(subtype: number): NamedRfcEntry {
       return {
         name: 'BoRR (Beginning of Route Refresh)',
         explanation: 'Marks the start of a route refresh reply so the receiver can track stale routes.',
-        reference: 'RFC 7313 §3',
+        reference: 'RFC 7313 §3.2',
       };
     case 2:
       return {
         name: 'EoRR (End of Route Refresh)',
         explanation: 'Marks the end of a route refresh reply so the receiver can sweep unrefreshed routes.',
-        reference: 'RFC 7313 §3',
+        reference: 'RFC 7313 §3.2',
       };
     default:
       return {
         name: `Unknown Subtype (${subtype})`,
         explanation: 'Reserved/subtype octet in a ROUTE-REFRESH message (0 for standard refresh, 1/2 for Enhanced Route Refresh).',
-        reference: 'RFC 2918 §3 / RFC 7313 §3',
+        reference: 'RFC 2918 §3 / RFC 7313 §3.2',
       };
   }
 }
@@ -235,7 +235,7 @@ export function getCapabilityInfo(code: number): NamedRfcEntry {
       return {
         name: 'Enhanced Route Refresh',
         explanation: 'Adds BoRR/EoRR demarcation markers to Route Refresh replies so stale routes are purged safely.',
-        reference: 'RFC 7313 §2',
+        reference: 'RFC 7313 §3.1',
       };
     default:
       return {
