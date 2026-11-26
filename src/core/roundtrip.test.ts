@@ -96,6 +96,33 @@ describe('analyzeDecodeRoundTrip', () => {
       kind: 'reproducible',
     });
 
+    const ipv4WithOptions = [
+      createDefaultEthernet(),
+      { ...createDefaultIPv4(), options: [{ kind: 'routerAlert' as const, value: 0 }] },
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(ipv4WithOptions, encodeUtf8('ra-opt'))).toEqual({
+      kind: 'reproducible',
+    });
+
+    const rawIpv4WithOptions = [
+      { ...createDefaultIPv4(), options: [{ kind: 'routerAlert' as const, value: 0 }] },
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(rawIpv4WithOptions, encodeUtf8('raw-ra'))).toEqual({
+      kind: 'reproducible',
+    });
+
+    const ipInIpWithOptions = [
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      { ...createDefaultIPv4(), options: [{ kind: 'routerAlert' as const, value: 0 }] },
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(ipInIpWithOptions, encodeUtf8('inner-ra'))).toEqual({
+      kind: 'reproducible',
+    });
+
     const rawIpv6 = [createDefaultIPv6(), createDefaultUDP()];
     expect(analyzeDecodeRoundTrip(rawIpv6, encodeUtf8('raw-ipv6'))).toEqual({
       kind: 'reproducible',

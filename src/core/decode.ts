@@ -61,6 +61,13 @@ import {
   IP_PROTOCOL_UDP,
   IPV4_HEADER_LENGTH,
   IPV4_IHL,
+  IPV4_OPT_EOL,
+  IPV4_OPT_LSRR,
+  IPV4_OPT_NOP,
+  IPV4_OPT_ROUTER_ALERT,
+  IPV4_OPT_RR,
+  IPV4_OPT_SSRR,
+  IPV4_OPT_TIMESTAMP,
   IPV4_VERSION,
 } from './layers/ipv4';
 import { IPV6_HEADER_LENGTH, IPV6_VERSION } from './layers/ipv6';
@@ -86,6 +93,7 @@ import {
   type ICMPLayer,
   type ICMPv6Layer,
   type IPv4Layer,
+  type IPv4Option,
   type IPv6Layer,
   type Layer,
   type TCPLayer,
@@ -783,6 +791,165 @@ function decodeUDPAndVXLANAt(
   return innerPayload;
 }
 
+function decodeIPv4Options(optBytes: Uint8Array, notes: string[]): IPv4Option[] {
+  const options: IPv4Option[] = [];
+
+  const pushMalformedRaw = (slice: Uint8Array, note: string) => {
+    notes.push(note);
+    if (slice.length === 1) {
+      options.push({
+        kind: 'raw',
+        optionType: slice[0],
+        length: { mode: 'none' },
+        dataHex: '',
+      });
+      return;
+    }
+    const lenByte = slice[1];
+    if (lenByte < 2) {
+      options.push({
+        kind: 'raw',
+        optionType: slice[0],
+        length: { mode: 'none' },
+        dataHex: formatSpacedHexBytes(slice.subarray(1)),
+      });
+      return;
+    }
+    options.push({
+      kind: 'raw',
+      optionType: slice[0],
+      length: lenByte === slice.length ? autoValue() : manualValue(lenByte),
+      dataHex: formatSpacedHexBytes(slice.subarray(2)),
+    });
+  };
+
+  let i = 0;
+  while (i < optBytes.length) {
+    const typeByte = optBytes[i];
+
+    if (typeByte === IPV4_OPT_EOL) {
+      if (i > 0 && Math.ceil(i / 4) * 4 === optBytes.length && isAllZero(optBytes.subarray(i))) {
+        break;
+      }
+      options.push({ kind: 'eol' });
+      i += 1;
+      if (i < optBytes.length && !isAllZero(optBytes.subarray(i))) {
+        const trailing = optBytes.subarray(i);
+        notes.push(
+          `Preserved ${trailing.length} non-zero byte(s) after IPv4 End of Option List (Type 0) as a raw option block.`,
+        );
+        options.push({
+          kind: 'raw',
+          optionType: trailing[0],
+          length: { mode: 'none' },
+          dataHex: formatSpacedHexBytes(trailing.subarray(1)),
+        });
+        break;
+      }
+      continue;
+    }
+
+    if (typeByte === IPV4_OPT_NOP) {
+      options.push({ kind: 'nop' });
+      i += 1;
+      continue;
+    }
+
+    if (i + 1 >= optBytes.length) {
+      pushMalformedRaw(
+        optBytes.subarray(i),
+        `Truncated IPv4 option (Type ${typeByte}) missing Length byte; remaining option bytes preserved as a raw block.`,
+      );
+      break;
+    }
+
+    const optLen = optBytes[i + 1];
+    if (optLen < 2) {
+      pushMalformedRaw(
+        optBytes.subarray(i),
+        `Malformed IPv4 option (Type ${typeByte}) has Length ${optLen} (< 2); remaining option bytes preserved as a raw block.`,
+      );
+      break;
+    }
+
+    if (i + optLen > optBytes.length) {
+      pushMalformedRaw(
+        optBytes.subarray(i),
+        `Malformed IPv4 option (Type ${typeByte}) has Length ${optLen} exceeding remaining ${optBytes.length - i} option byte(s); remaining option bytes preserved as a raw block.`,
+      );
+      break;
+    }
+
+    if (
+      typeByte === IPV4_OPT_RR ||
+      typeByte === IPV4_OPT_LSRR ||
+      typeByte === IPV4_OPT_SSRR
+    ) {
+      const kind =
+        typeByte === IPV4_OPT_RR ? 'rr' : typeByte === IPV4_OPT_LSRR ? 'lsrr' : 'ssrr';
+      if (optLen < 3 || (optLen - 3) % 4 !== 0) {
+        pushMalformedRaw(
+          optBytes.subarray(i),
+          `Malformed IPv4 ${kind.toUpperCase()} option (Type ${typeByte}) has Length ${optLen} (expected 3 + 4n); remaining option bytes preserved as a raw block.`,
+        );
+        break;
+      }
+      const ptr = optBytes[i + 2];
+      const addrCount = (optLen - 3) / 4;
+      const addresses: string[] = [];
+      for (let a = 0; a < addrCount; a++) {
+        const aOff = i + 3 + a * 4;
+        addresses.push(formatIPv4(optBytes.subarray(aOff, aOff + 4)));
+      }
+      options.push({
+        kind,
+        pointer: ptr === 4 ? autoValue() : manualValue(ptr),
+        addresses,
+      });
+    } else if (typeByte === IPV4_OPT_TIMESTAMP) {
+      if (optLen < 4) {
+        pushMalformedRaw(
+          optBytes.subarray(i),
+          `Malformed IPv4 Timestamp option (Type 68) has Length ${optLen} (expected >= 4); remaining option bytes preserved as a raw block.`,
+        );
+        break;
+      }
+      const pointer = optBytes[i + 2];
+      const ovflFlag = optBytes[i + 3];
+      options.push({
+        kind: 'timestamp',
+        pointer,
+        overflow: (ovflFlag >>> 4) & 0x0f,
+        flag: ovflFlag & 0x0f,
+        dataHex: formatSpacedHexBytes(optBytes.subarray(i + 4, i + optLen)),
+      });
+    } else if (typeByte === IPV4_OPT_ROUTER_ALERT) {
+      if (optLen !== 4) {
+        pushMalformedRaw(
+          optBytes.subarray(i),
+          `Malformed IPv4 Router Alert option (Type 148) has Length ${optLen} (expected 4); remaining option bytes preserved as a raw block.`,
+        );
+        break;
+      }
+      options.push({
+        kind: 'routerAlert',
+        value: readUint16BE(optBytes, i + 2),
+      });
+    } else {
+      options.push({
+        kind: 'raw',
+        optionType: typeByte,
+        length: autoValue(),
+        dataHex: formatSpacedHexBytes(optBytes.subarray(i + 2, i + optLen)),
+      });
+    }
+
+    i += optLen;
+  }
+
+  return options;
+}
+
 function tryDecodeInnerIPv4(
   scopedBytes: Uint8Array,
   upperOffset: number,
@@ -801,13 +968,20 @@ function tryDecodeInnerIPv4(
   const innerVersion = scopedBytes[upperOffset] >>> 4;
   const innerIhl = scopedBytes[upperOffset] & 0x0f;
   const innerTotalLength = readUint16BE(scopedBytes, upperOffset + 2);
-  if (innerVersion !== IPV4_VERSION || innerIhl !== IPV4_IHL) {
+  if (innerVersion !== IPV4_VERSION || innerIhl < IPV4_IHL) {
     notes.push(
-      `Inner IPv4 header (${enclosingLabel}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+      `Inner IPv4 header (${enclosingLabel}) has Version=${innerVersion}, IHL=${innerIhl} (expected Version=4, IHL >= 5); remaining bytes kept as Payload.`,
     );
     return null;
   }
-  if (innerTotalLength >= IPV4_HEADER_LENGTH && innerTotalLength < upperRemaining) {
+  const innerHeaderLength = innerIhl * 4;
+  if (upperRemaining < innerHeaderLength) {
+    notes.push(
+      `Inner IPv4 header (${enclosingLabel}) is truncated (${upperRemaining} bytes available, IHL=${innerIhl} requires ${innerHeaderLength} bytes); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+  if (innerTotalLength >= innerHeaderLength && innerTotalLength < upperRemaining) {
     notes.push(
       `Inner IPv4 Total Length (${innerTotalLength}) is smaller than the enclosing IP payload (${upperRemaining} bytes); inner packet and trailing bytes kept in Payload to preserve exact round-trip bytes.`,
     );
@@ -856,6 +1030,8 @@ function decodeIPv4Chain(
   notes: string[],
   depth = 0,
 ): Uint8Array {
+  const ihl = bytes[offset] & 0x0f;
+  const headerLength = ihl * 4;
   const tos = bytes[offset + 1];
   const totalLength = readUint16BE(bytes, offset + 2);
   const identification = readUint16BE(bytes, offset + 4);
@@ -872,7 +1048,7 @@ function decodeIPv4Chain(
   let scopedBytes = bytes;
   let effectiveTotalLength = actualTotalLength;
 
-  if (depth === 0 && totalLength >= IPV4_HEADER_LENGTH && totalLength < actualTotalLength) {
+  if (depth === 0 && totalLength >= headerLength && totalLength < actualTotalLength) {
     const trailing = bytes.subarray(offset + totalLength);
     // Per RFC 791 / RFC 768 / RFC 9293 §3.1, upper-layer segments and checksums are bounded
     // strictly by the outermost IPv4 Total Length regardless of whether Ethernet padding bytes are zero or non-zero.
@@ -889,12 +1065,20 @@ function decodeIPv4Chain(
     }
   }
 
-  const headerCopy = new Uint8Array(scopedBytes.subarray(offset, offset + IPV4_HEADER_LENGTH));
+  const headerCopy = new Uint8Array(scopedBytes.subarray(offset, offset + headerLength));
   headerCopy[10] = 0;
   headerCopy[11] = 0;
   const computedHeaderChecksum = internetChecksum(headerCopy);
 
-  const upperOffset = offset + IPV4_HEADER_LENGTH;
+  const options =
+    ihl > IPV4_IHL
+      ? decodeIPv4Options(
+          scopedBytes.subarray(offset + IPV4_HEADER_LENGTH, offset + headerLength),
+          notes,
+        )
+      : [];
+
+  const upperOffset = offset + headerLength;
   const upperRemaining = scopedBytes.length - upperOffset;
 
   const decodedUpperLayers: Layer[] = [];
@@ -975,6 +1159,7 @@ function decodeIPv4Chain(
 
   const ipv4Layer: IPv4Layer = {
     type: 'ipv4',
+    ihl: autoValue(),
     tos,
     totalLength: totalLength === effectiveTotalLength ? autoValue() : manualValue(totalLength),
     identification,
@@ -990,6 +1175,7 @@ function decodeIPv4Chain(
       headerChecksum === computedHeaderChecksum ? autoValue() : manualValue(headerChecksum),
     srcIp: formatIPv4(srcIpBytes),
     dstIp: formatIPv4(dstIpBytes),
+    options,
   };
 
   layers.push(ipv4Layer, ...decodedUpperLayers);
@@ -1377,9 +1563,16 @@ function decodeEtherTypeChain(
     }
     const version = bytes[offset] >>> 4;
     const ihl = bytes[offset] & 0x0f;
-    if (version !== IPV4_VERSION || ihl !== IPV4_IHL) {
+    if (version !== IPV4_VERSION || ihl < IPV4_IHL) {
       notes.push(
-        `IPv4 header has Version=${version}, IHL=${ihl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+        `IPv4 header has Version=${version}, IHL=${ihl} (expected Version=4, IHL >= 5); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    const headerLength = ihl * 4;
+    if (remaining < headerLength) {
+      notes.push(
+        `IPv4 header after ${enclosing} is truncated (${remaining} bytes available, IHL=${ihl} requires ${headerLength} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
     }
@@ -1495,8 +1688,6 @@ export function decodePacket(
   const notes: string[] = [];
 
   if (startLayer === 'ipv4') {
-    // In Raw IPv4 mode the outermost layer itself must be a supported IHL=5 IPv4 header;
-    // in Ethernet mode, Ethernet II still decodes validly and keeps unsupported IPv4 options as Payload.
     if (bytes.length < IPV4_HEADER_LENGTH) {
       return err(
         `Packet is too short for an IPv4 header (need at least ${IPV4_HEADER_LENGTH} bytes, got ${bytes.length}).`,
@@ -1507,9 +1698,15 @@ export function decodePacket(
     if (version !== IPV4_VERSION) {
       return err(`Expected IPv4 (Version=4), but got Version=${version}.`);
     }
-    if (ihl !== IPV4_IHL) {
+    if (ihl < IPV4_IHL) {
       return err(
-        `Only IPv4 headers without options (IHL=5 / 20 bytes) are supported (got IHL=${ihl}).`,
+        `IPv4 header has invalid IHL=${ihl} (minimum is 5 / 20 bytes per RFC 791 §3.1).`,
+      );
+    }
+    const headerLength = ihl * 4;
+    if (bytes.length < headerLength) {
+      return err(
+        `Packet is too short for IPv4 header with IHL=${ihl} (need at least ${headerLength} bytes, got ${bytes.length}).`,
       );
     }
 

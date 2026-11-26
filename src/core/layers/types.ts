@@ -78,6 +78,14 @@ export interface ARPLayer {
   readonly targetIp: string;
 }
 
+/**
+ * Length encoding mode for Raw TCP/IPv4 options:
+ * - `auto`: length byte computed automatically from 2 + data bytes (TLV)
+ * - `manual`: explicit length byte override (TLV; < 2 is an error)
+ * - `none`: omit the length byte and emit [type/kind, ...data] verbatim (lossless malformed decode fallback)
+ */
+export type RawOptionLength = AutoOrManual<number> | { readonly mode: 'none' };
+
 export interface IPv4Flags {
   /** Reserved ビット（RFC 791 では 0 固定） */
   readonly reserved: boolean;
@@ -87,11 +95,63 @@ export interface IPv4Flags {
   readonly mf: boolean;
 }
 
+export type IPv4Option =
+  | { readonly kind: 'eol' }
+  | { readonly kind: 'nop' }
+  | {
+      readonly kind: 'rr';
+      /** 8-bit Pointer (auto = 4, RFC 791 §3.1) */
+      readonly pointer: AutoOrManual<number>;
+      /** Route data IPv4 addresses (n × 4 bytes) */
+      readonly addresses: readonly string[];
+    }
+  | {
+      readonly kind: 'timestamp';
+      /** 8-bit Pointer (default 5, RFC 791 §3.1) */
+      readonly pointer: number;
+      /** 4-bit Overflow counter (0-15, RFC 791 §3.1) */
+      readonly overflow: number;
+      /** 4-bit Flag (0=timestamps only, 1=IP+timestamps, 3=prespecified IPs, RFC 791 §3.1) */
+      readonly flag: number;
+      /** Timestamp data bytes in hexadecimal */
+      readonly dataHex: string;
+    }
+  | {
+      readonly kind: 'lsrr';
+      /** 8-bit Pointer (auto = 4, RFC 791 §3.1) */
+      readonly pointer: AutoOrManual<number>;
+      /** Loose source route IPv4 addresses (n × 4 bytes) */
+      readonly addresses: readonly string[];
+    }
+  | {
+      readonly kind: 'ssrr';
+      /** 8-bit Pointer (auto = 4, RFC 791 §3.1) */
+      readonly pointer: AutoOrManual<number>;
+      /** Strict source route IPv4 addresses (n × 4 bytes) */
+      readonly addresses: readonly string[];
+    }
+  | {
+      readonly kind: 'routerAlert';
+      /** 16-bit Value (0 = "Router shall examine packet", RFC 2113 §2.1) */
+      readonly value: number;
+    }
+  | {
+      readonly kind: 'raw';
+      /** 8-bit Option Type byte (copied 1b + class 2b + number 5b, RFC 791 §3.1) */
+      readonly optionType: number;
+      /** 8-bit Option Length (auto = 2 + data bytes, manual, or none for verbatim raw bytes) */
+      readonly length: RawOptionLength;
+      /** Option data bytes in hexadecimal (without Type/Length bytes) */
+      readonly dataHex: string;
+    };
+
 export interface IPv4Layer {
   readonly type: 'ipv4';
+  /** Internet Header Length (4-bit, in 32-bit words; auto = 5 + ceil(options / 4), RFC 791 §3.1) */
+  readonly ihl: AutoOrManual<number>;
   /** Type of Service / DSCP+ECN（8 ビット、0〜255） */
   readonly tos: number;
-  /** Total Length（16 ビット、自動時は 20 + 上位バイト長） */
+  /** Total Length（16 ビット、自動時は ヘッダ長 + 上位バイト長） */
   readonly totalLength: AutoOrManual<number>;
   /** Identification（16 ビット、0〜65535） */
   readonly identification: number;
@@ -101,7 +161,7 @@ export interface IPv4Layer {
   readonly fragmentOffset: number;
   /** Time to Live（8 ビット、0〜255） */
   readonly ttl: number;
-  /** Protocol（8 ビット、自動時は ICMP=1 / TCP=6 / UDP=17） */
+  /** Protocol（8 ビット、自動時は ICMP=1 / TCP=6 / UDP=17 等） */
   readonly protocol: AutoOrManual<number>;
   /** Header Checksum（16 ビット、自動時は RFC 1071 チェックサム） */
   readonly headerChecksum: AutoOrManual<number>;
@@ -109,6 +169,8 @@ export interface IPv4Layer {
   readonly srcIp: string;
   /** 宛先 IPv4 アドレス（例: 192.168.0.2） */
   readonly dstIp: string;
+  /** Ordered list of IPv4 options (padded to 32-bit boundary, max 40 bytes, RFC 791 §3.1) */
+  readonly options: readonly IPv4Option[];
 }
 
 export interface IPv6Layer {
@@ -199,14 +261,6 @@ export interface TCPFlags {
   /** Finish */
   readonly fin: boolean;
 }
-
-/**
- * Length encoding mode for Raw TCP/IPv4 options:
- * - `auto`: length byte computed automatically from 2 + data bytes (TLV)
- * - `manual`: explicit length byte override (TLV; < 2 is an error)
- * - `none`: omit the length byte and emit [type/kind, ...data] verbatim (lossless malformed decode fallback)
- */
-export type RawOptionLength = AutoOrManual<number> | { readonly mode: 'none' };
 
 export interface TCPSackBlock {
   /** Left Edge of SACK block (32-bit sequence number, RFC 2018 §3) */
