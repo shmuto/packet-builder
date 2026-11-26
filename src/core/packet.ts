@@ -1,4 +1,4 @@
-import { concatBytes, parseIPv4 } from './bytes';
+import { concatBytes, parseIPv4, parseIPv6 } from './bytes';
 import { ARP_HEADER_LENGTH, encodeARP } from './layers/arp';
 import {
   encodeBGP,
@@ -8,6 +8,7 @@ import {
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
+import { IPV6_HEADER_LENGTH, encodeIPv6 } from './layers/ipv6';
 import { TCP_HEADER_LENGTH, encodeTCP } from './layers/tcp';
 import type {
   BuildPacketResult,
@@ -19,7 +20,7 @@ import type {
   PacketWarning,
   RelativeFieldSpan,
 } from './layers/types';
-import { UDP_HEADER_LENGTH, encodeUDP, type IPv4PseudoContext } from './layers/udp';
+import { UDP_HEADER_LENGTH, encodeUDP, type IPPseudoContext } from './layers/udp';
 
 function getLayerHeaderLength(layer: Layer): number {
   switch (layer.type) {
@@ -29,6 +30,8 @@ function getLayerHeaderLength(layer: Layer): number {
       return ARP_HEADER_LENGTH;
     case 'ipv4':
       return IPV4_HEADER_LENGTH;
+    case 'ipv6':
+      return IPV6_HEADER_LENGTH;
     case 'icmp':
       return ICMP_HEADER_LENGTH;
     case 'udp':
@@ -41,21 +44,32 @@ function getLayerHeaderLength(layer: Layer): number {
 }
 
 /**
- * Resolves the immediately preceding IPv4 layer for UDP/TCP pseudo-header checksum calculation.
- * Checking only `layers[layerIndex - 1]` avoids mistakenly inheriting an outer tunnel's IPv4
- * addresses across intermediate headers (e.g., Outer IPv4 -> UDP -> Inner Ethernet -> UDP).
+ * Resolves the immediately preceding IPv4 or IPv6 layer for UDP/TCP pseudo-header checksum calculation.
+ * Checking only `layers[layerIndex - 1]` avoids mistakenly inheriting an outer tunnel's IP
+ * addresses across intermediate headers (e.g., Outer IPv4 -> IPv6 -> UDP uses inner IPv6).
  */
-function resolveIPv4ContextBefore(layers: readonly Layer[], layerIndex: number): IPv4PseudoContext {
+function resolveIPContextBefore(layers: readonly Layer[], layerIndex: number): IPPseudoContext {
   const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
-  if (!prev || prev.type !== 'ipv4') {
+  if (!prev) {
     return { status: 'absent' };
   }
-  const src = parseIPv4(prev.srcIp);
-  const dst = parseIPv4(prev.dstIp);
-  if (src.ok && dst.ok) {
-    return { status: 'valid', srcIp: src.value, dstIp: dst.value };
+  if (prev.type === 'ipv4') {
+    const src = parseIPv4(prev.srcIp);
+    const dst = parseIPv4(prev.dstIp);
+    if (src.ok && dst.ok) {
+      return { status: 'valid', version: 4, srcIp: src.value, dstIp: dst.value };
+    }
+    return { status: 'invalid' };
   }
-  return { status: 'invalid' };
+  if (prev.type === 'ipv6') {
+    const src = parseIPv6(prev.srcIp);
+    const dst = parseIPv6(prev.dstIp);
+    if (src.ok && dst.ok) {
+      return { status: 'valid', version: 6, srcIp: src.value, dstIp: dst.value };
+    }
+    return { status: 'invalid' };
+  }
+  return { status: 'absent' };
 }
 
 /**
@@ -120,6 +134,13 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
           upperBytesLength: currentUpperBytes.length,
         });
         break;
+      case 'ipv6':
+        result = encodeIPv6(layer, {
+          layerIndex: i,
+          upperLayerType,
+          upperBytesLength: currentUpperBytes.length,
+        });
+        break;
       case 'icmp':
         result = encodeICMP(layer, {
           layerIndex: i,
@@ -130,14 +151,14 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
         result = encodeUDP(layer, {
           layerIndex: i,
           upperBytes: currentUpperBytes,
-          ipv4: resolveIPv4ContextBefore(layers, i),
+          ip: resolveIPContextBefore(layers, i),
         });
         break;
       case 'tcp':
         result = encodeTCP(layer, {
           layerIndex: i,
           upperBytes: currentUpperBytes,
-          ipv4: resolveIPv4ContextBefore(layers, i),
+          ip: resolveIPContextBefore(layers, i),
         });
         break;
       case 'bgp':

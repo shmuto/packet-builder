@@ -9,6 +9,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
   createPresets,
@@ -114,19 +115,19 @@ describe('decodePacket', () => {
   });
 
   it('handles unsupported EtherType, unsupported IPv4 protocol, and TCP options gracefully with notes', () => {
-    // Unknown EtherType 0x86dd (IPv6)
-    const ipv6Eth = buildPacket(
-      [{ ...createDefaultEthernet(), etherType: manualValue(0x86dd) }],
-      new Uint8Array([0x60, 0x00, 0x00, 0x00]),
+    // Unknown EtherType 0x88cc (LLDP)
+    const lldpEth = buildPacket(
+      [{ ...createDefaultEthernet(), etherType: manualValue(0x88cc) }],
+      new Uint8Array([0x02, 0x07, 0x04, 0x00]),
     );
-    expect(ipv6Eth.ok).toBe(true);
-    if (ipv6Eth.ok) {
-      const dec = decodePacket(ipv6Eth.bytes, 'ethernet');
+    expect(lldpEth.ok).toBe(true);
+    if (lldpEth.ok) {
+      const dec = decodePacket(lldpEth.bytes, 'ethernet');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
         expect(dec.value.layers).toHaveLength(1);
-        expect(dec.value.payload).toEqual(new Uint8Array([0x60, 0x00, 0x00, 0x00]));
-        expect(dec.value.notes.some((n) => n.includes('0x86dd'))).toBe(true);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x02, 0x07, 0x04, 0x00]));
+        expect(dec.value.notes.some((n) => n.includes('0x88cc'))).toBe(true);
       }
     }
 
@@ -658,11 +659,204 @@ describe('decodePacket', () => {
       const dec = decodePacket(deepBuilt.bytes, 'ipv4');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
-        expect(dec.value.layers).toHaveLength(16); // MAX_IPV4_LAYERS = 16 decoded; remaining 2 in Payload
+        expect(dec.value.layers).toHaveLength(16); // MAX_IP_LAYERS = 16 decoded; remaining 2 in Payload
         expect(dec.value.payload).toHaveLength(40);
-        expect(dec.value.notes.some((n) => n.includes('IP-in-IP layer limit'))).toBe(true);
+        expect(dec.value.notes.some((n) => n.includes('IP tunnel layer limit'))).toBe(true);
         const r = buildPacket(dec.value.layers, dec.value.payload);
         expect(r.ok && r.bytes).toEqual(deepBuilt.bytes);
+      }
+    }
+  });
+
+  it('losslessly round-trips IPv6 + UDP/TCP/BGP, 6in4, 4in6, 6in6, and Raw IPv6 packets', () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly startLayer: 'ethernet' | 'ipv4' | 'ipv6';
+      readonly layers: readonly Layer[];
+      readonly payload: Uint8Array;
+    }[] = [
+      {
+        name: 'Ethernet + IPv6 + UDP + "Hello"',
+        startLayer: 'ethernet',
+        layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultUDP()],
+        payload: encodeUtf8('Hello'),
+      },
+      {
+        name: 'Ethernet + IPv6 + TCP SYN',
+        startLayer: 'ethernet',
+        layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultTCP()],
+        payload: new Uint8Array(0),
+      },
+      {
+        name: '6in4 (Ethernet + IPv4 Proto 41 + IPv6 + UDP + "Hello")',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+          createDefaultIPv6(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('Hello'),
+      },
+      {
+        name: '4in6 (Ethernet + IPv6 NH 4 + IPv4 + UDP + "Hello")',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv6(),
+          createDefaultIPv4(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('Hello'),
+      },
+      {
+        name: '6in6 (Ethernet + IPv6 NH 41 + IPv6 + UDP)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultIPv6(), srcIp: '2001:db8:1::1', dstIp: '2001:db8:1::2' },
+          createDefaultIPv6(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('6in6'),
+      },
+      {
+        name: 'Raw IPv6 + UDP',
+        startLayer: 'ipv6',
+        layers: [
+          { ...createDefaultIPv6(), trafficClass: 0x2e, flowLabel: 0xabcde, hopLimit: 255 },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('raw-v6'),
+      },
+      {
+        name: 'Ethernet + IPv6 + TCP(179) + BGP OPEN',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv6(),
+          { ...createDefaultTCP(), dstPort: 179 },
+          createDefaultBGP(),
+        ],
+        payload: new Uint8Array(0),
+      },
+    ];
+
+    for (const tc of cases) {
+      const built = buildPacket(tc.layers, tc.payload);
+      expect(built.ok, tc.name).toBe(true);
+      if (!built.ok) continue;
+
+      const decoded = decodePacket(built.bytes, tc.startLayer);
+      expect(decoded.ok, tc.name).toBe(true);
+      if (!decoded.ok) continue;
+
+      expect(decoded.value.notes, tc.name).toEqual([]);
+      expect(decoded.value.layers.map((l) => l.type), tc.name).toEqual(
+        tc.layers.map((l) => l.type),
+      );
+      expect(decoded.value.payload, tc.name).toEqual(tc.payload);
+
+      const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+      expect(rebuilt.ok, tc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, tc.name).toEqual(built.bytes);
+      }
+    }
+  });
+
+  it('keeps IPv6 extension header (Next Header 60) as Payload with a note and round-trips losslessly', () => {
+    const extPayload = new Uint8Array([0x11, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00]);
+    const built = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv6(), nextHeader: manualValue(60) },
+      ],
+      extPayload,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    const decoded = decodePacket(built.bytes, 'ethernet');
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+
+    expect(decoded.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv6']);
+    expect(decoded.value.layers[1].type === 'ipv6' && decoded.value.layers[1].nextHeader).toEqual(
+      manualValue(60),
+    );
+    expect(decoded.value.payload).toEqual(extPayload);
+    expect(
+      decoded.value.notes.some((n) => n.includes('Destination Options') && n.includes('60')),
+    ).toBe(true);
+
+    const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+    expect(rebuilt.ok && rebuilt.bytes).toEqual(built.bytes);
+  });
+
+  it('handles Ethernet padding on IPv6 frames, manual Payload Length, invalid Raw IPv6, and mixed tunnel depth guard', () => {
+    // 1) Ethernet frame padded to 60B carrying 40B IPv6 with Payload Length 0 (6 bytes trailing padding)
+    const bareV6 = buildPacket(
+      [createDefaultEthernet(), { ...createDefaultIPv6(), nextHeader: manualValue(59) }],
+      new Uint8Array(0),
+    );
+    expect(bareV6.ok).toBe(true);
+    if (bareV6.ok) {
+      const padded = new Uint8Array(60);
+      padded.set(bareV6.bytes, 0);
+      const dec = decodePacket(padded, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv6']);
+        expect(dec.value.payload).toHaveLength(0);
+        expect(
+          dec.value.notes.some((n) => n.includes('Ethernet padding beyond IPv6 Payload Length')),
+        ).toBe(true);
+      }
+    }
+
+    // 2) Manual Payload Length mismatch preserved
+    const mismatchLen = buildPacket(
+      [{ ...createDefaultIPv6(), payloadLength: manualValue(99), nextHeader: manualValue(59) }],
+      new Uint8Array([1, 2, 3, 4]),
+    );
+    expect(mismatchLen.ok).toBe(true);
+    if (mismatchLen.ok) {
+      const dec = decodePacket(mismatchLen.bytes, 'ipv6');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(
+          dec.value.layers[0].type === 'ipv6' && dec.value.layers[0].payloadLength,
+        ).toEqual(manualValue(99));
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok).toBe(true);
+        if (rebuilt.ok) {
+          expect(rebuilt.bytes).toEqual(mismatchLen.bytes);
+          expect(rebuilt.warnings.some((w) => w.fieldId === 'payloadLength')).toBe(true);
+        }
+      }
+    }
+
+    // 3) Invalid Raw IPv6 inputs (truncated or wrong version nibble) return err
+    expect(decodePacket(new Uint8Array(39), 'ipv6').ok).toBe(false);
+    const wrongVersion = new Uint8Array(40);
+    wrongVersion[0] = 0x45;
+    expect(decodePacket(wrongVersion, 'ipv6').ok).toBe(false);
+
+    // 4) Mixed IPv4/IPv6 nesting (> 16 total IP layers) stops cleanly at depth limit and round-trips
+    const mixedDeep: Layer[] = Array.from({ length: 18 }, (_, i) =>
+      i % 2 === 0 ? createDefaultIPv6() : createDefaultIPv4(),
+    );
+    const mixedBuilt = buildPacket(mixedDeep, new Uint8Array(0));
+    expect(mixedBuilt.ok).toBe(true);
+    if (mixedBuilt.ok) {
+      const dec = decodePacket(mixedBuilt.bytes, 'ipv6');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers).toHaveLength(16);
+        expect(dec.value.notes.some((n) => n.includes('IP tunnel layer limit'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(mixedBuilt.bytes);
       }
     }
   });

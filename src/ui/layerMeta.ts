@@ -5,6 +5,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
 } from '../core/presets';
@@ -37,6 +38,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     name: 'IPv4',
     shortName: 'IPv4',
     rfc: 'RFC 791',
+    osiLabel: 'L3',
+  },
+  ipv6: {
+    type: 'ipv6',
+    name: 'IPv6',
+    shortName: 'IPv6',
+    rfc: 'RFC 8200',
     osiLabel: 'L3',
   },
   icmp: {
@@ -73,6 +81,7 @@ export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'ethernet',
   'arp',
   'ipv4',
+  'ipv6',
   'icmp',
   'udp',
   'tcp',
@@ -87,6 +96,8 @@ export function createLayerByType(type: LayerType): Layer {
       return createDefaultARP();
     case 'ipv4':
       return createDefaultIPv4();
+    case 'ipv6':
+      return createDefaultIPv6();
     case 'icmp':
       return createDefaultICMP();
     case 'udp':

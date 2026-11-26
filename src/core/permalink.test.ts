@@ -18,6 +18,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
   createPresets,
@@ -153,7 +154,7 @@ describe('permalink', () => {
     }
   });
 
-  it('round-trips all 7 layer types including ARP and ICMP', () => {
+  it('round-trips all 8 layer types including ARP, IPv6, and ICMP', () => {
     const state: PermalinkState = {
       layers: [
         createDefaultEthernet(),
@@ -166,6 +167,13 @@ describe('permalink', () => {
           operation: 2,
         },
         createDefaultIPv4(),
+        {
+          ...createDefaultIPv6(),
+          trafficClass: 0x2e,
+          flowLabel: 0x12345,
+          payloadLength: manualValue(20),
+          nextHeader: manualValue(17),
+        },
         {
           ...createDefaultICMP(),
           checksum: manualValue(0x1234),

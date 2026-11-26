@@ -1,4 +1,4 @@
-import { writeUint16BE } from './bytes';
+import { writeUint16BE, writeUint32BE } from './bytes';
 import { err, ok, type Result } from './result';
 
 /**
@@ -67,6 +67,56 @@ export function ipv4PseudoHeaderChecksum(params: IPv4PseudoHeaderParams): Result
   buffer[9] = protocol;
   writeUint16BE(buffer, 10, segment.length);
   buffer.set(segment, 12);
+
+  return ok(internetChecksum(buffer));
+}
+
+export interface IPv6PseudoHeaderParams {
+  /** Source IPv6 address (16 bytes) */
+  readonly srcIp: Uint8Array;
+  /** Destination IPv6 address (16 bytes) */
+  readonly dstIp: Uint8Array;
+  /** Next Header value identifying the upper-layer protocol (e.g., TCP=6, UDP=17, ICMPv6=58) */
+  readonly nextHeader: number;
+  /** Upper-layer header + payload with checksum field zeroed */
+  readonly segment: Uint8Array;
+}
+
+/**
+ * Computes the RFC 1071 checksum prefixed with the 40-byte IPv6 pseudo-header
+ * defined in RFC 8200 §8.1:
+ * Source Address (16B) + Destination Address (16B) + Upper-Layer Packet Length (4B)
+ * + Zero (3B) + Next Header (1B).
+ *
+ * Note: Returns the raw checksum value; UDP's 0x0000 -> 0xffff mapping (RFC 8200 §8.1)
+ * is applied by the UDP encoder because TCP (RFC 9293) keeps 0x0000 as-is.
+ */
+export function ipv6PseudoHeaderChecksum(params: IPv6PseudoHeaderParams): Result<number> {
+  const { srcIp, dstIp, nextHeader, segment } = params;
+
+  if (srcIp.length !== 16) {
+    return err(`Source IPv6 address must be 16 bytes (got ${srcIp.length}).`);
+  }
+  if (dstIp.length !== 16) {
+    return err(`Destination IPv6 address must be 16 bytes (got ${dstIp.length}).`);
+  }
+  if (!Number.isInteger(nextHeader) || nextHeader < 0 || nextHeader > 0xff) {
+    return err(`Next Header must be an integer between 0 and 255 (got ${nextHeader}).`);
+  }
+  if (segment.length > 0xffffffff) {
+    return err(`Upper-layer segment exceeds 32-bit IPv6 length limit (got ${segment.length}).`);
+  }
+
+  // IPv6 pseudo-header (40 bytes) + upper-layer segment
+  const buffer = new Uint8Array(40 + segment.length);
+  buffer.set(srcIp, 0);
+  buffer.set(dstIp, 16);
+  writeUint32BE(buffer, 32, segment.length);
+  buffer[36] = 0;
+  buffer[37] = 0;
+  buffer[38] = 0;
+  buffer[39] = nextHeader;
+  buffer.set(segment, 40);
 
   return ok(internetChecksum(buffer));
 }

@@ -26,7 +26,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     etherType: {
       summary:
-        '16-bit identifier declaring which protocol is carried inside the Ethernet payload. Common values are 0x0800 (IPv4) and 0x0806 (ARP).',
+        '16-bit identifier declaring which protocol is carried inside the Ethernet payload. Common values are 0x0800 (IPv4), 0x86dd (IPv6), and 0x0806 (ARP).',
       reference: 'IEEE 802.3 §3.2.6',
     },
   },
@@ -122,7 +122,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     protocol: {
       summary:
-        '8-bit IANA number identifying the next encapsulated protocol in the IPv4 payload. Common values are 1 (ICMP), 4 (IP-in-IP), 6 (TCP), and 17 (UDP).',
+        '8-bit IANA number identifying the next encapsulated protocol in the IPv4 payload. Common values are 1 (ICMP), 4 (IP-in-IP), 6 (TCP), 17 (UDP), and 41 (IPv6).',
       reference: 'RFC 791 §3.1',
     },
     headerChecksum: {
@@ -139,6 +139,49 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
       summary:
         '32-bit IPv4 address of the final destination host.',
       reference: 'RFC 791 §3.1',
+    },
+  },
+
+  ipv6: {
+    version: {
+      summary:
+        '4-bit IP version number identifying the header format. Always 6 for IPv6 packets.',
+      reference: 'RFC 8200 §3',
+    },
+    trafficClass: {
+      summary:
+        '8-bit quality-of-service field split into a 6-bit DSCP priority code and 2-bit ECN congestion indicator. Defaults to 0x00 for best-effort traffic.',
+      reference: 'RFC 8200 §3 / RFC 2474 §3 / RFC 3168 §5',
+    },
+    flowLabel: {
+      summary:
+        '20-bit label identifying packets belonging to the same flow so routers can apply consistent forwarding or load-balancing. Set to 0 when unused.',
+      reference: 'RFC 8200 §3 / RFC 6437 §2',
+    },
+    payloadLength: {
+      summary:
+        '16-bit length in bytes of the payload following the 40-byte fixed IPv6 header (including any extension headers). Maximum standard value is 65,535 bytes.',
+      reference: 'RFC 8200 §3',
+    },
+    nextHeader: {
+      summary:
+        '8-bit IANA protocol number identifying the header immediately following the IPv6 header. Common values are 6 (TCP), 17 (UDP), 4 (IPv4), 41 (IPv6), and 58 (ICMPv6).',
+      reference: 'RFC 8200 §3',
+    },
+    hopLimit: {
+      summary:
+        'Remaining router hops allowed before the packet is discarded; decremented by 1 at each forwarding node. Common initial value is 64.',
+      reference: 'RFC 8200 §3',
+    },
+    srcIp: {
+      summary:
+        '128-bit IPv6 address of the packet originator, written in RFC 5952 canonical colon-hexadecimal notation.',
+      reference: 'RFC 8200 §3',
+    },
+    dstIp: {
+      summary:
+        '128-bit IPv6 address of the intended recipient (or next-hop routing header target).',
+      reference: 'RFC 8200 §3',
     },
   },
 
@@ -188,8 +231,8 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     checksum: {
       summary:
-        '16-bit checksum over the IPv4 pseudo-header, UDP header, and payload. A transmitted value of 0x0000 means checksum disabled; a computed zero is sent as 0xffff.',
-      reference: 'RFC 768 "Fields"',
+        '16-bit checksum over the IPv4/IPv6 pseudo-header, UDP header, and payload. A computed zero is sent as 0xffff; 0x0000 disables the checksum over IPv4 but is invalid over IPv6 where checksums are mandatory.',
+      reference: 'RFC 768 "Fields" / RFC 8200 §8.1',
     },
   },
 
@@ -236,8 +279,8 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     checksum: {
       summary:
-        '16-bit mandatory checksum covering the IPv4 pseudo-header, TCP header, and payload to verify end-to-end integrity.',
-      reference: 'RFC 9293 §3.1',
+        '16-bit mandatory checksum covering the IPv4/IPv6 pseudo-header, TCP header, and payload to verify end-to-end integrity.',
+      reference: 'RFC 9293 §3.1 / RFC 8200 §8.1',
     },
     urgentPointer: {
       summary:

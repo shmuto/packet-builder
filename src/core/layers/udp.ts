@@ -1,5 +1,5 @@
 import { concatBytes, writeUint16BE } from '../bytes';
-import { ipv4PseudoHeaderChecksum } from '../checksum';
+import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum';
 import { IP_PROTOCOL_UDP } from './ipv4';
 import type {
   LayerEncodeResult,
@@ -21,21 +21,26 @@ export const UDP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'checksum', label: 'Checksum', bitOffset: 48, bitLength: 16 },
 ];
 
-export type IPv4PseudoContext =
-  | { readonly status: 'valid'; readonly srcIp: Uint8Array; readonly dstIp: Uint8Array }
+export type IPPseudoContext =
+  | {
+      readonly status: 'valid';
+      readonly version: 4 | 6;
+      readonly srcIp: Uint8Array;
+      readonly dstIp: Uint8Array;
+    }
   | { readonly status: 'invalid' }
   | { readonly status: 'absent' };
 
 export interface EncodeUDPContext {
   readonly layerIndex: number;
   readonly upperBytes: Uint8Array;
-  /** Underlying IPv4 layer state used for pseudo-header checksum calculation */
-  readonly ipv4: IPv4PseudoContext;
+  /** Immediately preceding IPv4 or IPv6 layer state used for pseudo-header checksum calculation */
+  readonly ip: IPPseudoContext;
 }
 
 /**
- * Encodes an 8-byte UDP header (RFC 768).
- * Converts a computed checksum of 0x0000 to 0xffff per RFC 768.
+ * Encodes an 8-byte UDP header (RFC 768 / RFC 8200 §8.1).
+ * Converts a computed checksum of 0x0000 to 0xffff per RFC 768 and RFC 8200 §8.1.
  */
 export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeResult {
   const errors: PacketError[] = [];
@@ -102,38 +107,55 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
   header[7] = 0;
 
   let autoChecksum = 0;
-  if (ctx.ipv4.status === 'valid') {
+  if (ctx.ip.status === 'valid') {
     const segment = concatBytes(header, ctx.upperBytes);
-    const csumResult = ipv4PseudoHeaderChecksum({
-      srcIp: ctx.ipv4.srcIp,
-      dstIp: ctx.ipv4.dstIp,
-      protocol: IP_PROTOCOL_UDP,
-      segment,
-    });
+    const csumResult =
+      ctx.ip.version === 4
+        ? ipv4PseudoHeaderChecksum({
+            srcIp: ctx.ip.srcIp,
+            dstIp: ctx.ip.dstIp,
+            protocol: IP_PROTOCOL_UDP,
+            segment,
+          })
+        : ipv6PseudoHeaderChecksum({
+            srcIp: ctx.ip.srcIp,
+            dstIp: ctx.ip.dstIp,
+            nextHeader: IP_PROTOCOL_UDP,
+            segment,
+          });
     if (!csumResult.ok) {
       errors.push({ layerIndex: ctx.layerIndex, fieldId: 'checksum', message: csumResult.error });
       return { ok: false, errors, warnings };
     }
-    // RFC 768: transmit all-ones (0xffff) when computed checksum is zero
+    // RFC 768 / RFC 8200 §8.1: transmit all-ones (0xffff) when computed checksum is zero
     autoChecksum = csumResult.value === 0 ? 0xffff : csumResult.value;
-  } else if (ctx.ipv4.status === 'absent' && layer.checksum.mode === 'auto') {
+  } else if (ctx.ip.status === 'absent' && layer.checksum.mode === 'auto') {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: 'No underlying IPv4 layer for pseudo-header; setting UDP Checksum to 0x0000 (unused).',
+      message: 'No underlying IPv4 or IPv6 layer for pseudo-header; setting UDP Checksum to 0x0000 (unused).',
     });
   }
 
   const checksumValue = layer.checksum.mode === 'manual' ? layer.checksum.value : autoChecksum;
   writeUint16BE(header, 6, checksumValue);
 
-  if (layer.checksum.mode === 'manual' && ctx.ipv4.status === 'valid') {
+  if (layer.checksum.mode === 'manual' && ctx.ip.status === 'valid') {
     if (checksumValue === 0) {
-      warnings.push({
-        layerIndex: ctx.layerIndex,
-        fieldId: 'checksum',
-        message: 'UDP Checksum is set to 0x0000 (checksum disabled / unused per RFC 768).',
-      });
+      if (ctx.ip.version === 6) {
+        warnings.push({
+          layerIndex: ctx.layerIndex,
+          fieldId: 'checksum',
+          message:
+            'UDP Checksum is mandatory over IPv6; packets with a 0x0000 checksum must be discarded by receivers (RFC 8200 §8.1).',
+        });
+      } else {
+        warnings.push({
+          layerIndex: ctx.layerIndex,
+          fieldId: 'checksum',
+          message: 'UDP Checksum is set to 0x0000 (checksum disabled / unused per RFC 768).',
+        });
+      }
     } else if (checksumValue !== autoChecksum) {
       warnings.push({
         layerIndex: ctx.layerIndex,

@@ -5,6 +5,7 @@ import {
   createDefaultBGP,
   createDefaultEthernet,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
   createPresets,
@@ -20,7 +21,7 @@ describe('analyzeDecodeRoundTrip', () => {
     }
   });
 
-  it('reports reproducible for IP-in-IP (Ethernet -> IPv4 -> IPv4 -> UDP) and Raw IPv4 stacks', () => {
+  it('reports reproducible for IP-in-IP, 6in4, 4in6, Raw IPv4, and Raw IPv6 stacks', () => {
     const ipInIp = [
       createDefaultEthernet(),
       createDefaultIPv4(),
@@ -31,8 +32,33 @@ describe('analyzeDecodeRoundTrip', () => {
       kind: 'reproducible',
     });
 
+    const sixInFour = [
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      createDefaultIPv6(),
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(sixInFour, encodeUtf8('6in4'))).toEqual({
+      kind: 'reproducible',
+    });
+
+    const fourInSix = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      createDefaultIPv4(),
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(fourInSix, encodeUtf8('4in6'))).toEqual({
+      kind: 'reproducible',
+    });
+
     const rawIpv4 = [createDefaultIPv4(), createDefaultUDP()];
     expect(analyzeDecodeRoundTrip(rawIpv4, encodeUtf8('raw-ip'))).toEqual({
+      kind: 'reproducible',
+    });
+
+    const rawIpv6 = [createDefaultIPv6(), createDefaultUDP()];
+    expect(analyzeDecodeRoundTrip(rawIpv6, encodeUtf8('raw-ipv6'))).toEqual({
       kind: 'reproducible',
     });
   });

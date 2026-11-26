@@ -8,6 +8,7 @@ import type {
   ICMPLayer,
   IPv4Flags,
   IPv4Layer,
+  IPv6Layer,
   Layer,
   TCPFlags,
   TCPLayer,
@@ -370,6 +371,49 @@ function validateIPv4Layer(raw: Record<string, unknown>, ctx: string): Result<IP
   });
 }
 
+function validateIPv6Layer(raw: Record<string, unknown>, ctx: string): Result<IPv6Layer> {
+  const checked = validateExactKeys(
+    raw,
+    [
+      'type',
+      'trafficClass',
+      'flowLabel',
+      'payloadLength',
+      'nextHeader',
+      'hopLimit',
+      'srcIp',
+      'dstIp',
+    ],
+    ctx,
+  );
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const trafficClass = expectNumber(obj, 'trafficClass', ctx);
+  if (!trafficClass.ok) return trafficClass;
+  const flowLabel = expectNumber(obj, 'flowLabel', ctx);
+  if (!flowLabel.ok) return flowLabel;
+  const payloadLength = validateAutoOrManualNumber(obj.payloadLength, `${ctx}.payloadLength`);
+  if (!payloadLength.ok) return payloadLength;
+  const nextHeader = validateAutoOrManualNumber(obj.nextHeader, `${ctx}.nextHeader`);
+  if (!nextHeader.ok) return nextHeader;
+  const hopLimit = expectNumber(obj, 'hopLimit', ctx);
+  if (!hopLimit.ok) return hopLimit;
+  const srcIp = expectString(obj, 'srcIp', ctx);
+  if (!srcIp.ok) return srcIp;
+  const dstIp = expectString(obj, 'dstIp', ctx);
+  if (!dstIp.ok) return dstIp;
+  return ok({
+    type: 'ipv6',
+    trafficClass: trafficClass.value,
+    flowLabel: flowLabel.value,
+    payloadLength: payloadLength.value,
+    nextHeader: nextHeader.value,
+    hopLimit: hopLimit.value,
+    srcIp: srcIp.value,
+    dstIp: dstIp.value,
+  });
+}
+
 function validateICMPLayer(raw: Record<string, unknown>, ctx: string): Result<ICMPLayer> {
   const checked = validateExactKeys(
     raw,
@@ -562,6 +606,8 @@ function validateLayer(raw: unknown, index: number): Result<Layer> {
       return validateARPLayer(raw, ctx);
     case 'ipv4':
       return validateIPv4Layer(raw, ctx);
+    case 'ipv6':
+      return validateIPv6Layer(raw, ctx);
     case 'icmp':
       return validateICMPLayer(raw, ctx);
     case 'udp':

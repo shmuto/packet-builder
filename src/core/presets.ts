@@ -5,13 +5,14 @@ import type {
   EthernetLayer,
   ICMPLayer,
   IPv4Layer,
+  IPv6Layer,
   Layer,
   TCPLayer,
   UDPLayer,
 } from './layers/types';
 import { autoValue } from './layers/types';
 
-export type PresetId = 'udp' | 'tcp-syn' | 'icmp-echo' | 'arp-request' | 'bgp-open';
+export type PresetId = 'udp' | 'udp-ipv6' | 'tcp-syn' | 'icmp-echo' | 'arp-request' | 'bgp-open';
 
 export interface PacketPreset {
   readonly id: PresetId;
@@ -59,6 +60,20 @@ export function createDefaultIPv4(): IPv4Layer {
     headerChecksum: autoValue(),
     srcIp: '192.168.0.1',
     dstIp: '192.168.0.2',
+  };
+}
+
+/** Creates a default IPv6 header using the RFC 3849 documentation prefix (2001:db8::/32). */
+export function createDefaultIPv6(): IPv6Layer {
+  return {
+    type: 'ipv6',
+    trafficClass: 0,
+    flowLabel: 0,
+    payloadLength: autoValue(),
+    nextHeader: autoValue(),
+    hopLimit: 64,
+    srcIp: '2001:db8::1',
+    dstIp: '2001:db8::2',
   };
 }
 
@@ -128,6 +143,7 @@ export function createDefaultBGP(): BGPLayer {
 /** Creates the built-in packet presets for quick exploration */
 export function createPresets(): readonly PacketPreset[] {
   const udpText = 'Hello, tsumiki!!!!';
+  const udpIpv6Text = 'Hello';
   const icmpText = 'tsumiki-icmp-ping!';
 
   return [
@@ -138,6 +154,14 @@ export function createPresets(): readonly PacketPreset[] {
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
       payloadText: udpText,
       payloadBytes: encodeUtf8(udpText),
+    },
+    {
+      id: 'udp-ipv6',
+      name: 'IPv6 UDP',
+      description: 'Ethernet II + IPv6 (RFC 8200) + UDP frame with IPv6 pseudo-header checksum',
+      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultUDP()],
+      payloadText: udpIpv6Text,
+      payloadBytes: encodeUtf8(udpIpv6Text),
     },
     {
       id: 'tcp-syn',

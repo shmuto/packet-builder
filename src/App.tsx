@@ -406,7 +406,7 @@ export function App() {
             <span className="brand-sub">packet builder</span>
           </div>
           <p className="brand-desc">
-            Stack Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4 layers like building blocks to inspect, decode, and export raw network packets.
+            Stack Ethernet II, ARP, IPv4, IPv6, ICMP, UDP, TCP, and BGP-4 layers like building blocks to inspect, decode, and export raw network packets.
           </p>
         </div>
 
