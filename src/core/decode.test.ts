@@ -734,7 +734,7 @@ describe('decodePacket', () => {
         payload: encodeUtf8('raw-v6'),
       },
       {
-        name: 'IPv6 boundary Flow Label 0xfffff + Traffic Class 0x00 and 0xff',
+        name: 'IPv6 boundary Traffic Class 0x00 + Flow Label 0xfffff',
         startLayer: 'ethernet',
         layers: [
           createDefaultEthernet(),
@@ -1042,6 +1042,40 @@ describe('decodePacket', () => {
         expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv6']);
         expect(dec.value.payload).toEqual(new Uint8Array([0x80, 0x00, 0x00, 0x00]));
         expect(dec.value.notes.some((n) => n.includes('truncated'))).toBe(true);
+      }
+    }
+
+    // Type 128/129 built with the Raw 32-bit variant intentionally decode as the Echo variant with identical bytes
+    const rawType128 = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv6(),
+        {
+          ...createDefaultICMPv6(),
+          icmpType: 128,
+          code: 0,
+          rest: { kind: 'raw', value: 0x12345678 },
+        },
+      ],
+      encodeUtf8('raw-echo'),
+    );
+    expect(rawType128.ok).toBe(true);
+    if (rawType128.ok) {
+      const dec = decodePacket(rawType128.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        const icmpv6 = dec.value.layers[2];
+        expect(icmpv6.type).toBe('icmpv6');
+        if (icmpv6.type === 'icmpv6') {
+          expect(icmpv6.rest).toEqual({
+            kind: 'echo',
+            identifier: 0x1234,
+            sequence: 0x5678,
+          });
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(rawType128.bytes);
       }
     }
   });

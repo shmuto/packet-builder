@@ -158,6 +158,8 @@ function decodeICMPv6At(
   const code = bytes[offset + 1];
   const checksum = readUint16BE(bytes, offset + 2);
 
+  // Type 128 (Echo Request) and Type 129 (Echo Reply) always decode to the Echo variant
+  // (even if originally constructed using the Raw 32-bit variant); the wire bytes are identical.
   const isEcho =
     icmpType === ICMPV6_TYPE_ECHO_REQUEST || icmpType === ICMPV6_TYPE_ECHO_REPLY;
   const rest = isEcho

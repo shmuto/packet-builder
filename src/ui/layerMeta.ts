@@ -152,3 +152,15 @@ export function createLayerByType(type: LayerType): Layer {
       return createDefaultBGP();
   }
 }
+
+/**
+ * Formats the supported layer display names in stack-toolbar order as an English prose list
+ * (e.g., "Ethernet II, VLAN (802.1Q), ..., and BGP-4") so UI copy never goes stale.
+ */
+export function formatSupportedLayersList(): string {
+  const names = ADDABLE_LAYER_TYPES.map((type) => LAYER_META[type].name);
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
