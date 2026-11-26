@@ -16,7 +16,16 @@ export function manualValue<T>(value: T): AutoOrManual<T> {
   return { mode: 'manual', value };
 }
 
-export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'ipv6' | 'icmp' | 'udp' | 'tcp' | 'bgp';
+export type LayerType =
+  | 'ethernet'
+  | 'arp'
+  | 'ipv4'
+  | 'ipv6'
+  | 'icmp'
+  | 'icmpv6'
+  | 'udp'
+  | 'tcp'
+  | 'bgp';
 
 export interface EthernetLayer {
   readonly type: 'ethernet';
@@ -115,6 +124,32 @@ export interface ICMPLayer {
   readonly sequenceNumber: number;
 }
 
+export type ICMPv6Rest =
+  | {
+      readonly kind: 'echo';
+      /** 16-bit Identifier (RFC 4443 §4.1 / §4.2) */
+      readonly identifier: number;
+      /** 16-bit Sequence Number (RFC 4443 §4.1 / §4.2) */
+      readonly sequence: number;
+    }
+  | {
+      readonly kind: 'raw';
+      /** 32-bit type-specific body header: MTU (Type 2), Pointer (Type 4), or Unused */
+      readonly value: number;
+    };
+
+export interface ICMPv6Layer {
+  readonly type: 'icmpv6';
+  /** Message Type (8-bit, e.g., 128=Echo Request, 129=Echo Reply, 2=Packet Too Big, RFC 4443 §2.1) */
+  readonly icmpType: number;
+  /** Message Code (8-bit, 0-255, RFC 4443 §2.1) */
+  readonly code: number;
+  /** Checksum (16-bit, auto = mandatory IPv6 pseudo-header + ICMPv6 checksum, RFC 4443 §2.3) */
+  readonly checksum: AutoOrManual<number>;
+  /** Type-dependent 32-bit header word (Echo Identifier/Sequence or raw 32-bit MTU/Pointer/Unused) */
+  readonly rest: ICMPv6Rest;
+}
+
 export interface UDPLayer {
   readonly type: 'udp';
   /** 送信元ポート番号（16 ビット、0〜65535） */
@@ -208,6 +243,7 @@ export type Layer =
   | IPv4Layer
   | IPv6Layer
   | ICMPLayer
+  | ICMPv6Layer
   | UDPLayer
   | TCPLayer
   | BGPLayer;

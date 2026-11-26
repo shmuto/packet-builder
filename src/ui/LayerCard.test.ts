@@ -9,6 +9,7 @@ import {
   createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
+  createDefaultICMPv6,
   createDefaultIPv4,
   createDefaultIPv6,
   createDefaultTCP,
@@ -24,6 +25,12 @@ describe('LayerCard per-field info controls', () => {
       createDefaultIPv4(),
       createDefaultIPv6(),
       createDefaultICMP(),
+      createDefaultICMPv6(),
+      {
+        ...createDefaultICMPv6(),
+        icmpType: 2,
+        rest: { kind: 'raw', value: 1280 },
+      },
       createDefaultUDP(),
       createDefaultTCP(),
       { ...createDefaultBGP(), bgpType: 1 },
@@ -82,6 +89,36 @@ describe('LayerCard per-field info controls', () => {
           `Expected accessible info control for ${layerType}.${fieldId}`,
         ).toBe(true);
       }
+    }
+
+    // ICMPv6 Type 2 (Packet Too Big) renders the RFC 4443 §3.2 MTU label
+    const ptbLayer = {
+      ...createDefaultICMPv6(),
+      icmpType: 2,
+      rest: { kind: 'raw' as const, value: 1280 },
+    };
+    const ptbBuilt = buildPacket([createDefaultIPv6(), ptbLayer], new Uint8Array(0));
+    expect(ptbBuilt.ok).toBe(true);
+    if (ptbBuilt.ok) {
+      const ptbHtml = renderToStaticMarkup(
+        createElement(LayerCard, {
+          id: 'layer-ptb',
+          index: 1,
+          total: 2,
+          layer: ptbLayer,
+          spans: ptbBuilt.spans,
+          highlight: null,
+          resolvedAutoValues: ptbBuilt.resolvedAutoValues[1],
+          errors: [],
+          warnings: [],
+          onHighlightChange: () => {},
+          onChange: () => {},
+          onMoveUp: () => {},
+          onMoveDown: () => {},
+          onRemove: () => {},
+        }),
+      );
+      expect(ptbHtml).toContain('>MTU<');
     }
   });
 });

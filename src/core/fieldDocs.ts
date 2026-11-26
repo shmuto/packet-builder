@@ -213,6 +213,39 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
   },
 
+  icmpv6: {
+    icmpType: {
+      summary:
+        '8-bit message category: 0-127 are error messages (such as 2 = Packet Too Big, 4 = Parameter Problem) and 128-255 are informational messages (128 = Echo Request, 129 = Echo Reply).',
+      reference: 'RFC 4443 §2.1',
+    },
+    code: {
+      summary:
+        '8-bit subtype refining the ICMPv6 Type (for example, 0 for Echo Request/Reply and Packet Too Big, or 0-2 for Parameter Problem).',
+      reference: 'RFC 4443 §2.1',
+    },
+    checksum: {
+      summary:
+        '16-bit mandatory one\'s-complement checksum covering the 40-byte IPv6 pseudo-header (Next Header 58), the ICMPv6 header, and the message payload.',
+      reference: 'RFC 4443 §2.3 / RFC 8200 §8.1',
+    },
+    identifier: {
+      summary:
+        '16-bit identifier chosen by the sender to match Echo Replies back to the originating IPv6 ping session.',
+      reference: 'RFC 4443 §4.1 / §4.2',
+    },
+    sequence: {
+      summary:
+        '16-bit counter incremented for each Echo Request sent in a session to order replies and detect packet loss.',
+      reference: 'RFC 4443 §4.1 / §4.2',
+    },
+    restValue: {
+      summary:
+        '32-bit type-specific header field: carries the next-hop link MTU for Packet Too Big (Type 2), the byte offset Pointer for Parameter Problem (Type 4), or Unused zero bits for other messages.',
+      reference: 'RFC 4443 §2.1 / §3.2 / §3.4',
+    },
+  },
+
   udp: {
     srcPort: {
       summary:

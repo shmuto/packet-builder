@@ -7,6 +7,7 @@ import {
 } from './layers/bgp';
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
+import { ICMPV6_HEADER_LENGTH, encodeICMPv6 } from './layers/icmpv6';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
 import { IPV6_HEADER_LENGTH, encodeIPv6 } from './layers/ipv6';
 import { TCP_HEADER_LENGTH, encodeTCP } from './layers/tcp';
@@ -34,6 +35,8 @@ function getLayerHeaderLength(layer: Layer): number {
       return IPV6_HEADER_LENGTH;
     case 'icmp':
       return ICMP_HEADER_LENGTH;
+    case 'icmpv6':
+      return ICMPV6_HEADER_LENGTH;
     case 'udp':
       return UDP_HEADER_LENGTH;
     case 'tcp':
@@ -44,7 +47,7 @@ function getLayerHeaderLength(layer: Layer): number {
 }
 
 /**
- * Resolves the immediately preceding IPv4 or IPv6 layer for UDP/TCP pseudo-header checksum calculation.
+ * Resolves the immediately preceding IPv4 or IPv6 layer for UDP/TCP/ICMPv6 pseudo-header checksum calculation.
  * Checking only `layers[layerIndex - 1]` avoids mistakenly inheriting an outer tunnel's IP
  * addresses across intermediate headers (e.g., Outer IPv4 -> IPv6 -> UDP uses inner IPv6).
  */
@@ -59,7 +62,7 @@ function resolveIPContextBefore(layers: readonly Layer[], layerIndex: number): I
     if (src.ok && dst.ok) {
       return { status: 'valid', version: 4, srcIp: src.value, dstIp: dst.value };
     }
-    return { status: 'invalid' };
+    return { status: 'invalid', version: 4 };
   }
   if (prev.type === 'ipv6') {
     const src = parseIPv6(prev.srcIp);
@@ -67,7 +70,7 @@ function resolveIPContextBefore(layers: readonly Layer[], layerIndex: number): I
     if (src.ok && dst.ok) {
       return { status: 'valid', version: 6, srcIp: src.value, dstIp: dst.value };
     }
-    return { status: 'invalid' };
+    return { status: 'invalid', version: 6 };
   }
   return { status: 'absent' };
 }
@@ -145,6 +148,13 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
         result = encodeICMP(layer, {
           layerIndex: i,
           upperBytes: currentUpperBytes,
+        });
+        break;
+      case 'icmpv6':
+        result = encodeICMPv6(layer, {
+          layerIndex: i,
+          upperBytes: currentUpperBytes,
+          ip: resolveIPContextBefore(layers, i),
         });
         break;
       case 'udp':

@@ -6,6 +6,8 @@ import type {
   BGPMessageType,
   EthernetLayer,
   ICMPLayer,
+  ICMPv6Layer,
+  ICMPv6Rest,
   IPv4Flags,
   IPv4Layer,
   IPv6Layer,
@@ -442,6 +444,55 @@ function validateICMPLayer(raw: Record<string, unknown>, ctx: string): Result<IC
   });
 }
 
+function validateICMPv6Rest(raw: unknown, context: string): Result<ICMPv6Rest> {
+  if (!isPlainObject(raw)) {
+    return err(`${context} must be an object.`);
+  }
+  const kind = raw.kind;
+  if (kind === 'echo') {
+    const checked = validateExactKeys(raw, ['kind', 'identifier', 'sequence'], context);
+    if (!checked.ok) return checked;
+    const identifier = expectNumber(checked.value, 'identifier', context);
+    if (!identifier.ok) return identifier;
+    const sequence = expectNumber(checked.value, 'sequence', context);
+    if (!sequence.ok) return sequence;
+    return ok({ kind: 'echo', identifier: identifier.value, sequence: sequence.value });
+  }
+  if (kind === 'raw') {
+    const checked = validateExactKeys(raw, ['kind', 'value'], context);
+    if (!checked.ok) return checked;
+    const value = expectNumber(checked.value, 'value', context);
+    if (!value.ok) return value;
+    return ok({ kind: 'raw', value: value.value });
+  }
+  return err(`${context}.kind must be "echo" or "raw".`);
+}
+
+function validateICMPv6Layer(raw: Record<string, unknown>, ctx: string): Result<ICMPv6Layer> {
+  const checked = validateExactKeys(
+    raw,
+    ['type', 'icmpType', 'code', 'checksum', 'rest'],
+    ctx,
+  );
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const icmpType = expectNumber(obj, 'icmpType', ctx);
+  if (!icmpType.ok) return icmpType;
+  const code = expectNumber(obj, 'code', ctx);
+  if (!code.ok) return code;
+  const checksum = validateAutoOrManualNumber(obj.checksum, `${ctx}.checksum`);
+  if (!checksum.ok) return checksum;
+  const rest = validateICMPv6Rest(obj.rest, `${ctx}.rest`);
+  if (!rest.ok) return rest;
+  return ok({
+    type: 'icmpv6',
+    icmpType: icmpType.value,
+    code: code.value,
+    checksum: checksum.value,
+    rest: rest.value,
+  });
+}
+
 function validateUDPLayer(raw: Record<string, unknown>, ctx: string): Result<UDPLayer> {
   const checked = validateExactKeys(
     raw,
@@ -610,6 +661,8 @@ function validateLayer(raw: unknown, index: number): Result<Layer> {
       return validateIPv6Layer(raw, ctx);
     case 'icmp':
       return validateICMPLayer(raw, ctx);
+    case 'icmpv6':
+      return validateICMPv6Layer(raw, ctx);
     case 'udp':
       return validateUDPLayer(raw, ctx);
     case 'tcp':

@@ -7,6 +7,7 @@ import {
   createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
+  createDefaultICMPv6,
   createDefaultIPv4,
   createDefaultIPv6,
   createDefaultTCP,
@@ -785,5 +786,59 @@ describe('buildPacket', () => {
         overflow.errors.some((e) => e.layerIndex === 0 && e.fieldId === 'payloadLength'),
       ).toBe(true);
     }
+  });
+
+  it('matches known Ethernet II + IPv6 + ICMPv6 Echo Request + "ping" packet byte-for-byte (RFC 4443)', () => {
+    // Hand-verified ICMPv6 checksum (RFC 4443 §2.3 / RFC 8200 §8.1):
+    //   pseudo: 2001:db8::1 (0x2dba) + 2001:db8::2 (0x2dbb) + len=12 (0x000c) + NH=58 (0x003a) = 0x5bbb
+    //   ICMPv6: Type=128/Code=0 (0x8000) + ID=1 (0x0001) + Seq=1 (0x0001) + "ping" (0x7069+0x6e67=0xded0) = 0x15ed2
+    //   total = 0x1ba8d -> fold: 0xba8d + 1 = 0xba8e -> ~0xba8e = 0x4571
+    const baseLayers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      createDefaultICMPv6(),
+    ];
+
+    const result = buildPacket(baseLayers, encodeUtf8('ping'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): EtherType = 0x86dd (IPv6)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x86, 0xdd,
+      // IPv6 (40B): PayloadLen=12(0x000c), NH=58(0x3a), HopLimit=64
+      0x60, 0x00, 0x00, 0x00,
+      0x00, 0x0c, 0x3a, 0x40,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      // ICMPv6 Echo Request (8B): Type=128, Code=0, Checksum=0x4571, ID=1, Seq=1
+      0x80, 0x00, 0x45, 0x71,
+      0x00, 0x01, 0x00, 0x01,
+      // Payload ("ping")
+      0x70, 0x69, 0x6e, 0x67,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+
+    // Changing ONLY the IPv6 source address MUST change the ICMPv6 checksum (proves pseudo-header inclusion)
+    const changedSrc = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv6(), srcIp: '2001:db8::9' },
+        createDefaultICMPv6(),
+      ],
+      encodeUtf8('ping'),
+    );
+    expect(changedSrc.ok).toBe(true);
+    if (!changedSrc.ok) return;
+    // 0x4571 - 8 = 0x4569
+    expect(changedSrc.bytes.slice(56, 58)).toEqual(new Uint8Array([0x45, 0x69]));
+    expect(changedSrc.bytes.slice(56, 58)).not.toEqual(result.bytes.slice(56, 58));
   });
 });

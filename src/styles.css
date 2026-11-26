@@ -30,6 +30,7 @@
   --layer-ipv4: #158467;
   --layer-ipv6: #1d6fa5;
   --layer-icmp: #0e7c94;
+  --layer-icmpv6: #6b4fb8;
   --layer-udp: #b86b0b;
   --layer-tcp: #c43b52;
   --layer-bgp: #a14d1c;
@@ -76,6 +77,7 @@
     --layer-ipv4: #4fd1a5;
     --layer-ipv6: #63b8ee;
     --layer-icmp: #56c2d6;
+    --layer-icmpv6: #b49bff;
     --layer-udp: #f0b254;
     --layer-tcp: #f2798f;
     --layer-bgp: #e09362;
@@ -301,6 +303,7 @@ body {
 .layer-theme-ipv4 { --layer-color: var(--layer-ipv4); }
 .layer-theme-ipv6 { --layer-color: var(--layer-ipv6); }
 .layer-theme-icmp { --layer-color: var(--layer-icmp); }
+.layer-theme-icmpv6 { --layer-color: var(--layer-icmpv6); }
 .layer-theme-udp { --layer-color: var(--layer-udp); }
 .layer-theme-tcp { --layer-color: var(--layer-tcp); }
 .layer-theme-bgp { --layer-color: var(--layer-bgp); }
@@ -775,6 +778,7 @@ body {
 .layer-bg-ipv4 { background: var(--layer-ipv4); }
 .layer-bg-ipv6 { background: var(--layer-ipv6); }
 .layer-bg-icmp { background: var(--layer-icmp); }
+.layer-bg-icmpv6 { background: var(--layer-icmpv6); }
 .layer-bg-udp { background: var(--layer-udp); }
 .layer-bg-tcp { background: var(--layer-tcp); }
 .layer-bg-bgp { background: var(--layer-bgp); }
@@ -785,6 +789,7 @@ body {
 .layer-fg-ipv4 { color: var(--layer-ipv4); }
 .layer-fg-ipv6 { color: var(--layer-ipv6); }
 .layer-fg-icmp { color: var(--layer-icmp); }
+.layer-fg-icmpv6 { color: var(--layer-icmpv6); }
 .layer-fg-udp { color: var(--layer-udp); }
 .layer-fg-tcp { color: var(--layer-tcp); }
 .layer-fg-bgp { color: var(--layer-bgp); }
