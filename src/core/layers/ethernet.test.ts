@@ -93,6 +93,40 @@ describe('encodeEthernet', () => {
     expect(autoIPv6.warnings).toHaveLength(0);
   });
 
+  it('selects 0x8100 for single VLAN tag and 0x88a8 (802.1ad S-tag) for double-tagged QinQ', () => {
+    const singleTag = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'vlan', upperNextLayerType: 'ipv4', upperBytesLength: 46 },
+    );
+    expect(singleTag.ok).toBe(true);
+    if (singleTag.ok) {
+      expect(singleTag.bytes.slice(12, 14)).toEqual(new Uint8Array([0x81, 0x00]));
+      expect(singleTag.resolvedAutoValues).toEqual({ etherType: 0x8100 });
+      expect(singleTag.warnings).toHaveLength(0);
+    }
+
+    const qinq = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'vlan', upperNextLayerType: 'vlan', upperBytesLength: 46 },
+    );
+    expect(qinq.ok).toBe(true);
+    if (qinq.ok) {
+      expect(qinq.bytes.slice(12, 14)).toEqual(new Uint8Array([0x88, 0xa8]));
+      expect(qinq.resolvedAutoValues).toEqual({ etherType: 0x88a8 });
+      expect(qinq.warnings).toHaveLength(0);
+    }
+  });
+
   it('フレーム長 59 バイトでは警告が出て、ちょうど 60 バイトでは警告が出ない（IEEE 802.3）', () => {
     const shortFrame = encodeEthernet(
       {

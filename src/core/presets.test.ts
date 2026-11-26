@@ -113,4 +113,20 @@ describe('presets', () => {
       new Uint8Array([0x80, 0x00, 0x45, 0x71, 0x00, 0x01, 0x00, 0x01]),
     );
   });
+
+  it('VLAN UDP preset builds a 60-byte 802.1Q frame (VID 100, TPID 0x8100) with zero warnings', () => {
+    const vlanPreset = createPresets().find((p) => p.id === 'vlan-udp');
+    expect(vlanPreset).toBeDefined();
+    if (!vlanPreset) return;
+
+    const result = buildPacket(vlanPreset.layers, vlanPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Ethernet) + 4(VLAN) + 20(IPv4) + 8(UDP) + 14("Hello, VLAN!!!") = 60 bytes
+    expect(result.bytes.length).toBe(60);
+    expect(result.warnings).toHaveLength(0);
+    // Ethernet TPID = 0x8100, VLAN TCI = 0x0064 (VID 100), Inner EtherType = 0x0800
+    expect(result.bytes.slice(12, 18)).toEqual(new Uint8Array([0x81, 0x00, 0x00, 0x64, 0x08, 0x00]));
+  });
 });

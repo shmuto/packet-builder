@@ -26,8 +26,31 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     etherType: {
       summary:
-        '16-bit identifier declaring which protocol is carried inside the Ethernet payload. Common values are 0x0800 (IPv4), 0x86dd (IPv6), and 0x0806 (ARP).',
-      reference: 'IEEE 802.3 §3.2.6',
+        '16-bit identifier declaring which protocol or VLAN TPID follows the Ethernet header. Common values are 0x0800 (IPv4), 0x86dd (IPv6), 0x0806 (ARP), 0x8100 (802.1Q C-tag), and 0x88a8 (802.1ad S-tag).',
+      reference: 'IEEE 802.3 §3.2.6 / IEEE 802.1Q §9.4',
+    },
+  },
+
+  vlan: {
+    pcp: {
+      summary:
+        '3-bit Priority Code Point (0-7) specifying the Layer 2 class-of-service priority for this tagged frame. On the wire, the 16-bit TPID (0x8100 or 0x88a8) sits in the preceding Ethernet or outer VLAN EtherType field.',
+      reference: 'IEEE 802.1Q §9.6',
+    },
+    dei: {
+      summary:
+        '1-bit Drop Eligible Indicator (formerly CFI) signaling whether this frame may be dropped first during network congestion (0 = not drop-eligible, 1 = drop-eligible).',
+      reference: 'IEEE 802.1Q §9.6',
+    },
+    vid: {
+      summary:
+        '12-bit VLAN Identifier (0-4095) assigning the frame to a virtual LAN. Values 1-4094 are normal VLANs; 0 denotes a priority-tagged frame and 4095 (0xfff) is reserved.',
+      reference: 'IEEE 802.1Q §9.6',
+    },
+    etherType: {
+      summary:
+        '16-bit EtherType (or inner TPID in QinQ) declaring the protocol that follows this 4-byte VLAN tag body (TCI + EtherType): 0x0800 (IPv4), 0x86dd (IPv6), 0x0806 (ARP), or 0x8100 (inner C-tag).',
+      reference: 'IEEE 802.1Q §9.4 / IEEE 802.3 §3.2.6',
     },
   },
 

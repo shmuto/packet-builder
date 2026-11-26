@@ -15,6 +15,7 @@ import type {
   TCPFlags,
   TCPLayer,
   UDPLayer,
+  VLANLayer,
 } from './layers/types';
 import { err, ok, type Result } from './result';
 
@@ -263,6 +264,27 @@ function validateEthernetLayer(raw: Record<string, unknown>, ctx: string): Resul
     type: 'ethernet',
     dstMac: dstMac.value,
     srcMac: srcMac.value,
+    etherType: etherType.value,
+  });
+}
+
+function validateVLANLayer(raw: Record<string, unknown>, ctx: string): Result<VLANLayer> {
+  const checked = validateExactKeys(raw, ['type', 'pcp', 'dei', 'vid', 'etherType'], ctx);
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const pcp = expectNumber(obj, 'pcp', ctx);
+  if (!pcp.ok) return pcp;
+  const dei = expectBoolean(obj, 'dei', ctx);
+  if (!dei.ok) return dei;
+  const vid = expectNumber(obj, 'vid', ctx);
+  if (!vid.ok) return vid;
+  const etherType = validateAutoOrManualNumber(obj.etherType, `${ctx}.etherType`);
+  if (!etherType.ok) return etherType;
+  return ok({
+    type: 'vlan',
+    pcp: pcp.value,
+    dei: dei.value,
+    vid: vid.value,
     etherType: etherType.value,
   });
 }
@@ -653,6 +675,8 @@ function validateLayer(raw: unknown, index: number): Result<Layer> {
   switch (type) {
     case 'ethernet':
       return validateEthernetLayer(raw, ctx);
+    case 'vlan':
+      return validateVLANLayer(raw, ctx);
     case 'arp':
       return validateARPLayer(raw, ctx);
     case 'ipv4':

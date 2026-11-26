@@ -10,6 +10,7 @@ import type {
   Layer,
   TCPLayer,
   UDPLayer,
+  VLANLayer,
 } from './layers/types';
 import { autoValue } from './layers/types';
 
@@ -20,6 +21,7 @@ export type PresetId =
   | 'icmp-echo'
   | 'icmpv6-echo'
   | 'arp-request'
+  | 'vlan-udp'
   | 'bgp-open';
 
 export interface PacketPreset {
@@ -36,6 +38,17 @@ export function createDefaultEthernet(): EthernetLayer {
     type: 'ethernet',
     dstMac: '00:11:22:33:44:55',
     srcMac: '66:77:88:99:aa:bb',
+    etherType: autoValue(),
+  };
+}
+
+/** Creates a default IEEE 802.1Q VLAN tag (PCP 0, DEI 0, VID 100). */
+export function createDefaultVLAN(): VLANLayer {
+  return {
+    type: 'vlan',
+    pcp: 0,
+    dei: false,
+    vid: 100,
     etherType: autoValue(),
   };
 }
@@ -169,6 +182,7 @@ export function createPresets(): readonly PacketPreset[] {
   const udpIpv6Text = 'Hello';
   const icmpText = 'tsumiki-icmp-ping!';
   const icmpv6Text = 'ping';
+  const vlanUdpText = 'Hello, VLAN!!!';
 
   return [
     {
@@ -221,6 +235,19 @@ export function createPresets(): readonly PacketPreset[] {
       ],
       payloadText: '',
       payloadBytes: new Uint8Array(0),
+    },
+    {
+      id: 'vlan-udp',
+      name: 'VLAN UDP',
+      description: 'Ethernet II + IEEE 802.1Q VLAN (VID 100) + IPv4 + UDP frame',
+      layers: [
+        createDefaultEthernet(),
+        createDefaultVLAN(),
+        createDefaultIPv4(),
+        createDefaultUDP(),
+      ],
+      payloadText: vlanUdpText,
+      payloadBytes: encodeUtf8(vlanUdpText),
     },
     {
       id: 'bgp-open',

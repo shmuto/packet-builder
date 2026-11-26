@@ -214,7 +214,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-etherType`}
                 label="EtherType"
-                hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP"
+                hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP / 0x8100=VLAN"
                 doc={fieldDoc('etherType')}
                 allowHex
                 hexDigits={4}
@@ -229,6 +229,99 @@ export function LayerCard({
               />
             </div>
           )}
+
+          {layer.type === 'vlan' && (() => {
+            const deiDoc = fieldDoc('dei');
+            return (
+              <div className="field-grid">
+                <NumberField
+                  id={`${id}-vid`}
+                  label="VLAN ID (VID)"
+                  hint="0-4095 (12 bit)"
+                  doc={fieldDoc('vid')}
+                  value={layer.vid}
+                  error={fieldError('vid')}
+                  warning={fieldWarning('vid')}
+                  isHighlighted={isHighlighted('vid')}
+                  onHoverStart={hoverStart('vid')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(vid) => onChange({ ...layer, vid })}
+                />
+                <NumberField
+                  id={`${id}-pcp`}
+                  label="Priority (PCP)"
+                  hint="0-7 (3 bit)"
+                  doc={fieldDoc('pcp')}
+                  value={layer.pcp}
+                  error={fieldError('pcp')}
+                  warning={fieldWarning('pcp')}
+                  isHighlighted={isHighlighted('pcp')}
+                  onHoverStart={hoverStart('pcp')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(pcp) => onChange({ ...layer, pcp })}
+                />
+                <div
+                  className={`field${isHighlighted('dei') ? ' is-highlighted' : ''}`}
+                  onMouseEnter={hoverStart('dei')}
+                  onMouseLeave={hoverEnd}
+                >
+                  <div className="field-label-row">
+                    <div className="field-label-main">
+                      <span className="field-label">DEI (Drop Eligible)</span>
+                      {deiDoc && (
+                        <FieldInfoButton
+                          label="DEI (Drop Eligible)"
+                          docId={`${id}-dei-doc`}
+                          open={isCustomDocOpen('dei')}
+                          onToggle={() => toggleCustomDoc('dei')}
+                          onClose={() => closeCustomDoc('dei')}
+                          onFocus={hoverStart('dei')}
+                          onBlur={hoverEnd}
+                        />
+                      )}
+                    </div>
+                    <span className="field-hint">1 bit (IEEE 802.1Q)</span>
+                  </div>
+                  <div
+                    className="flag-chip-row"
+                    role="group"
+                    aria-label="VLAN DEI Flag"
+                    aria-describedby={isCustomDocOpen('dei') ? `${id}-dei-doc` : undefined}
+                  >
+                    <label className={`flag-chip${layer.dei ? ' is-checked' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={layer.dei}
+                        onFocus={hoverStart('dei')}
+                        onBlur={hoverEnd}
+                        onChange={(e) => onChange({ ...layer, dei: e.target.checked })}
+                      />
+                      <span>DEI = {layer.dei ? '1 (Drop Eligible)' : '0'}</span>
+                    </label>
+                  </div>
+                  {deiDoc && isCustomDocOpen('dei') && (
+                    <FieldDocBox id={`${id}-dei-doc`} doc={deiDoc} />
+                  )}
+                </div>
+                <AutoManualField
+                  id={`${id}-etherType`}
+                  label="Inner EtherType"
+                  hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP / 0x8100=VLAN"
+                  doc={fieldDoc('etherType')}
+                  allowHex
+                  hexDigits={4}
+                  value={layer.etherType}
+                  resolvedAutoValue={resolvedAutoValues?.etherType}
+                  error={fieldError('etherType')}
+                  warning={fieldWarning('etherType')}
+                  isHighlighted={isHighlighted('etherType')}
+                  onHoverStart={hoverStart('etherType')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(etherType) => onChange({ ...layer, etherType })}
+                />
+              </div>
+            );
+          })()}
 
           {layer.type === 'arp' && (
             <div className="field-grid">

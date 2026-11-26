@@ -9,6 +9,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
 } from '../core/presets';
 
 export interface LayerMetaInfo {
@@ -25,6 +26,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     name: 'Ethernet II',
     shortName: 'ETH',
     rfc: 'RFC 894 / IEEE 802.3',
+    osiLabel: 'L2',
+  },
+  vlan: {
+    type: 'vlan',
+    name: 'VLAN (802.1Q)',
+    shortName: 'VLAN',
+    rfc: 'IEEE 802.1Q',
     osiLabel: 'L2',
   },
   arp: {
@@ -87,6 +95,7 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
 
 export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'ethernet',
+  'vlan',
   'arp',
   'ipv4',
   'ipv6',
@@ -101,6 +110,8 @@ export function createLayerByType(type: LayerType): Layer {
   switch (type) {
     case 'ethernet':
       return createDefaultEthernet();
+    case 'vlan':
+      return createDefaultVLAN();
     case 'arp':
       return createDefaultARP();
     case 'ipv4':

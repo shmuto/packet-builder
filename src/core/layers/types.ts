@@ -18,6 +18,7 @@ export function manualValue<T>(value: T): AutoOrManual<T> {
 
 export type LayerType =
   | 'ethernet'
+  | 'vlan'
   | 'arp'
   | 'ipv4'
   | 'ipv6'
@@ -33,7 +34,23 @@ export interface EthernetLayer {
   readonly dstMac: string;
   /** 送信元 MAC アドレス（例: 11:22:33:44:55:66） */
   readonly srcMac: string;
-  /** EtherType（16 ビット、自動時は直上が IPv4 なら 0x0800、ARP なら 0x0806） */
+  /** EtherType / TPID (16-bit; auto = 0x0800 IPv4, 0x86dd IPv6, 0x0806 ARP, 0x8100 VLAN, 0x88a8 QinQ S-tag) */
+  readonly etherType: AutoOrManual<number>;
+}
+
+/**
+ * IEEE 802.1Q / 802.1ad VLAN tag (4 bytes following the TPID in the preceding Ethernet or outer VLAN header).
+ * Encodes TCI (PCP 3b + DEI 1b + VID 12b) + next EtherType / inner TPID (16b).
+ */
+export interface VLANLayer {
+  readonly type: 'vlan';
+  /** Priority Code Point (3-bit, 0-7, IEEE 802.1Q §9.6) */
+  readonly pcp: number;
+  /** Drop Eligible Indicator (1-bit, IEEE 802.1Q §9.6) */
+  readonly dei: boolean;
+  /** VLAN Identifier (12-bit, 0-4095; 0 = priority-tagged, 4095 = reserved, IEEE 802.1Q §9.6) */
+  readonly vid: number;
+  /** Encapsulated EtherType or inner VLAN TPID (16-bit; auto = 0x0800 / 0x0806 / 0x86dd / 0x8100) */
   readonly etherType: AutoOrManual<number>;
 }
 
@@ -239,6 +256,7 @@ export interface BGPLayer {
 
 export type Layer =
   | EthernetLayer
+  | VLANLayer
   | ARPLayer
   | IPv4Layer
   | IPv6Layer

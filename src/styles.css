@@ -26,6 +26,7 @@
   --status-err-border: #f3b5b1;
 
   --layer-ethernet: #3b63c4;
+  --layer-vlan: #9b3f8c;
   --layer-arp: #5c7d1f;
   --layer-ipv4: #158467;
   --layer-ipv6: #1d6fa5;
@@ -73,6 +74,7 @@
     --status-err-border: rgba(252, 165, 165, 0.35);
 
     --layer-ethernet: #7aa2f7;
+    --layer-vlan: #df8cd2;
     --layer-arp: #9ece6a;
     --layer-ipv4: #4fd1a5;
     --layer-ipv6: #63b8ee;
@@ -299,6 +301,7 @@ body {
 }
 
 .layer-theme-ethernet { --layer-color: var(--layer-ethernet); }
+.layer-theme-vlan { --layer-color: var(--layer-vlan); }
 .layer-theme-arp { --layer-color: var(--layer-arp); }
 .layer-theme-ipv4 { --layer-color: var(--layer-ipv4); }
 .layer-theme-ipv6 { --layer-color: var(--layer-ipv6); }
@@ -774,6 +777,7 @@ body {
 }
 
 .layer-bg-ethernet { background: var(--layer-ethernet); }
+.layer-bg-vlan { background: var(--layer-vlan); }
 .layer-bg-arp { background: var(--layer-arp); }
 .layer-bg-ipv4 { background: var(--layer-ipv4); }
 .layer-bg-ipv6 { background: var(--layer-ipv6); }
@@ -785,6 +789,7 @@ body {
 .layer-bg-payload { background: var(--layer-payload); }
 
 .layer-fg-ethernet { color: var(--layer-ethernet); }
+.layer-fg-vlan { color: var(--layer-vlan); }
 .layer-fg-arp { color: var(--layer-arp); }
 .layer-fg-ipv4 { color: var(--layer-ipv4); }
 .layer-fg-ipv6 { color: var(--layer-ipv6); }

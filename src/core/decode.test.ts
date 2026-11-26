@@ -13,6 +13,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
   createPresets,
 } from './presets';
 
@@ -1039,6 +1040,135 @@ describe('decodePacket', () => {
         expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv6']);
         expect(dec.value.payload).toEqual(new Uint8Array([0x80, 0x00, 0x00, 0x00]));
         expect(dec.value.notes.some((n) => n.includes('truncated'))).toBe(true);
+      }
+    }
+  });
+
+  it('losslessly round-trips 802.1Q single-tagged, 802.1ad QinQ (0x88a8/0x8100), and legacy QinQ (0x8100/0x8100 and 0x9100/0x8100)', () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly layers: readonly Layer[];
+      readonly payload: Uint8Array;
+      readonly expectedEthAuto: boolean;
+    }[] = [
+      {
+        name: '802.1Q single-tagged (PCP 5, DEI 1, VID 100 -> IPv4 + UDP)',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultVLAN(), pcp: 5, dei: true, vid: 100 },
+          createDefaultIPv4(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('Hello'),
+        expectedEthAuto: true,
+      },
+      {
+        name: '802.1ad QinQ (0x88a8 VID 200 -> 0x8100 VID 100 -> IPv4 + UDP)',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultVLAN(), vid: 200 },
+          { ...createDefaultVLAN(), vid: 100 },
+          createDefaultIPv4(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('qinq-8021ad'),
+        expectedEthAuto: true,
+      },
+      {
+        name: 'Legacy QinQ (manual 0x8100 / 0x8100)',
+        layers: [
+          { ...createDefaultEthernet(), etherType: manualValue(0x8100) },
+          { ...createDefaultVLAN(), vid: 200 },
+          { ...createDefaultVLAN(), vid: 100 },
+          createDefaultIPv4(),
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('legacy-8100'),
+        expectedEthAuto: false,
+      },
+      {
+        name: 'Legacy QinQ (manual 0x9100 / 0x8100 -> IPv6 + ICMPv6)',
+        layers: [
+          { ...createDefaultEthernet(), etherType: manualValue(0x9100) },
+          { ...createDefaultVLAN(), vid: 300 },
+          { ...createDefaultVLAN(), vid: 400 },
+          createDefaultIPv6(),
+          createDefaultICMPv6(),
+        ],
+        payload: encodeUtf8('legacy-9100'),
+        expectedEthAuto: false,
+      },
+      {
+        name: '802.1Q single-tagged ARP',
+        layers: [
+          { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+          { ...createDefaultVLAN(), vid: 10 },
+          createDefaultARP(),
+        ],
+        payload: new Uint8Array(0),
+        expectedEthAuto: true,
+      },
+    ];
+
+    for (const tc of cases) {
+      const built = buildPacket(tc.layers, tc.payload);
+      expect(built.ok, tc.name).toBe(true);
+      if (!built.ok) continue;
+
+      const decoded = decodePacket(built.bytes, 'ethernet');
+      expect(decoded.ok, tc.name).toBe(true);
+      if (!decoded.ok) continue;
+
+      expect(decoded.value.notes, tc.name).toEqual([]);
+      expect(decoded.value.layers.map((l) => l.type), tc.name).toEqual(
+        tc.layers.map((l) => l.type),
+      );
+      expect(
+        decoded.value.layers[0].type === 'ethernet' && decoded.value.layers[0].etherType.mode,
+        tc.name,
+      ).toBe(tc.expectedEthAuto ? 'auto' : 'manual');
+      expect(decoded.value.payload, tc.name).toEqual(tc.payload);
+
+      const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+      expect(rebuilt.ok, tc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, tc.name).toEqual(built.bytes);
+      }
+    }
+
+    // Depth guard: > 16 stacked VLAN tags stops cleanly at 16 with note and round-trips losslessly
+    const deepVlanLayers: Layer[] = [
+      createDefaultEthernet(),
+      ...Array.from({ length: 18 }, (_, i) => ({ ...createDefaultVLAN(), vid: i + 1 })),
+    ];
+    const deepBuilt = buildPacket(deepVlanLayers, new Uint8Array(0));
+    expect(deepBuilt.ok).toBe(true);
+    if (deepBuilt.ok) {
+      const dec = decodePacket(deepBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        // 1 Ethernet + 16 VLAN tags decoded; remaining 2 tags (8B) kept in Payload
+        expect(dec.value.layers).toHaveLength(17);
+        expect(dec.value.payload).toHaveLength(8);
+        expect(dec.value.notes.some((n) => n.includes('VLAN tag depth limit'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(deepBuilt.bytes);
+      }
+    }
+
+    // Truncated VLAN tag (< 4 bytes) stays in Payload with a note
+    const truncVlan = buildPacket(
+      [{ ...createDefaultEthernet(), etherType: manualValue(0x8100) }],
+      new Uint8Array([0x00, 0x64]),
+    );
+    expect(truncVlan.ok).toBe(true);
+    if (truncVlan.ok) {
+      const dec = decodePacket(truncVlan.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet']);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x00, 0x64]));
+        expect(dec.value.notes.some((n) => n.includes('VLAN tag header'))).toBe(true);
       }
     }
   });

@@ -31,9 +31,13 @@ import {
 } from './layers/bgp';
 import {
   ETHERNET_HEADER_LENGTH,
+  ethernetEtherTypeForUpperLayers,
   ETHERTYPE_ARP,
   ETHERTYPE_IPV4,
   ETHERTYPE_IPV6,
+  ETHERTYPE_QINQ,
+  ETHERTYPE_QINQ_LEGACY,
+  ETHERTYPE_VLAN,
 } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH } from './layers/icmp';
 import {
@@ -68,8 +72,10 @@ import {
   type Layer,
   type TCPLayer,
   type UDPLayer,
+  type VLANLayer,
 } from './layers/types';
 import { UDP_HEADER_LENGTH } from './layers/udp';
+import { VLAN_HEADER_LENGTH, vlanInnerEtherTypeForUpperLayer } from './layers/vlan';
 import { err, ok, type Result } from './result';
 
 export type DecodeStartLayer = 'ethernet' | 'ipv4' | 'ipv6';
@@ -812,6 +818,129 @@ function decodeIPv6Chain(
   return payload;
 }
 
+const MAX_VLAN_TAGS = 16;
+
+function isVLANTpid(etherType: number): boolean {
+  return (
+    etherType === ETHERTYPE_VLAN ||
+    etherType === ETHERTYPE_QINQ ||
+    etherType === ETHERTYPE_QINQ_LEGACY
+  );
+}
+
+function decodeEtherTypeChain(
+  bytes: Uint8Array,
+  offset: number,
+  etherType: number,
+  layers: Layer[],
+  notes: string[],
+  vlanDepth = 0,
+): Uint8Array {
+  const remaining = bytes.length - offset;
+
+  if (isVLANTpid(etherType)) {
+    if (vlanDepth >= MAX_VLAN_TAGS) {
+      notes.push(
+        `VLAN tag depth limit (${MAX_VLAN_TAGS} tags) exceeded; remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    if (remaining < VLAN_HEADER_LENGTH) {
+      notes.push(
+        `VLAN tag header (TPID 0x${etherType.toString(16).padStart(4, '0')}) is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+
+    const tci = readUint16BE(bytes, offset);
+    const pcp = (tci >>> 13) & 0x7;
+    const dei = ((tci >>> 12) & 0x1) !== 0;
+    const vid = tci & 0xfff;
+    const innerEtherType = readUint16BE(bytes, offset + 2);
+
+    const decodedUpperLayers: Layer[] = [];
+    const payload = decodeEtherTypeChain(
+      bytes,
+      offset + VLAN_HEADER_LENGTH,
+      innerEtherType,
+      decodedUpperLayers,
+      notes,
+      vlanDepth + 1,
+    );
+
+    const expectedInner = vlanInnerEtherTypeForUpperLayer(decodedUpperLayers[0]?.type ?? null);
+    const vlanLayer: VLANLayer = {
+      type: 'vlan',
+      pcp,
+      dei,
+      vid,
+      etherType:
+        expectedInner !== null && innerEtherType === expectedInner
+          ? autoValue()
+          : manualValue(innerEtherType),
+    };
+    layers.push(vlanLayer, ...decodedUpperLayers);
+    return payload;
+  }
+
+  if (etherType === ETHERTYPE_IPV4) {
+    if (remaining < IPV4_HEADER_LENGTH) {
+      notes.push(
+        `IPv4 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    const version = bytes[offset] >>> 4;
+    const ihl = bytes[offset] & 0x0f;
+    if (version !== IPV4_VERSION || ihl !== IPV4_IHL) {
+      notes.push(
+        `IPv4 header has Version=${version}, IHL=${ihl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    return decodeIPv4Chain(bytes, offset, layers, notes);
+  }
+
+  if (etherType === ETHERTYPE_IPV6) {
+    if (remaining < IPV6_HEADER_LENGTH) {
+      notes.push(
+        `IPv6 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    const version = bytes[offset] >>> 4;
+    if (version !== IPV6_VERSION) {
+      notes.push(
+        `IPv6 header has Version=${version} (expected Version=6); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    return decodeIPv6Chain(bytes, offset, layers, notes);
+  }
+
+  if (etherType === ETHERTYPE_ARP) {
+    if (remaining < ARP_HEADER_LENGTH) {
+      notes.push(
+        `ARP packet after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+      );
+      return bytes.slice(offset);
+    }
+    layers.push(decodeARPAt(bytes, offset));
+    const trailing = bytes.slice(offset + ARP_HEADER_LENGTH);
+    if (trailing.length > 0) {
+      notes.push(
+        `Preserved ${trailing.length} trailing byte(s) after the 28-byte ARP header (e.g., Ethernet padding) in Payload.`,
+      );
+    }
+    return trailing;
+  }
+
+  notes.push(
+    `EtherType 0x${etherType.toString(16).padStart(4, '0')} is not decoded into a layer; remaining bytes kept as Payload.`,
+  );
+  return bytes.slice(offset);
+}
+
 /**
  * Decodes raw packet bytes into a stack of tsumiki Layer objects and a Payload.
  * Preserves auto vs. manual field status so re-encoding reproduces the exact input bytes.
@@ -876,88 +1005,26 @@ export function decodePacket(
   const srcMac = formatMac(bytes.subarray(6, 12));
   const etherType = readUint16BE(bytes, 12);
   const afterEth = ETHERNET_HEADER_LENGTH;
-  const remaining = bytes.length - afterEth;
 
-  let canDecodeIPv4 = false;
-  let canDecodeIPv6 = false;
-  let canDecodeARP = false;
+  const decodedUpperLayers: Layer[] = [];
+  const payload = decodeEtherTypeChain(bytes, afterEth, etherType, decodedUpperLayers, notes, 0);
 
-  if (etherType === ETHERTYPE_IPV4) {
-    if (remaining < IPV4_HEADER_LENGTH) {
-      notes.push(
-        `IPv4 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
-      );
-    } else {
-      const version = bytes[afterEth] >>> 4;
-      const ihl = bytes[afterEth] & 0x0f;
-      if (version === IPV4_VERSION && ihl === IPV4_IHL) {
-        canDecodeIPv4 = true;
-      } else {
-        notes.push(
-          `IPv4 header has Version=${version}, IHL=${ihl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
-        );
-      }
-    }
-  } else if (etherType === ETHERTYPE_IPV6) {
-    if (remaining < IPV6_HEADER_LENGTH) {
-      notes.push(
-        `IPv6 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
-      );
-    } else {
-      const version = bytes[afterEth] >>> 4;
-      if (version === IPV6_VERSION) {
-        canDecodeIPv6 = true;
-      } else {
-        notes.push(
-          `IPv6 header has Version=${version} (expected Version=6); remaining bytes kept as Payload.`,
-        );
-      }
-    }
-  } else if (etherType === ETHERTYPE_ARP) {
-    if (remaining >= ARP_HEADER_LENGTH) {
-      canDecodeARP = true;
-    } else {
-      notes.push(
-        `ARP packet after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
-      );
-    }
-  } else {
-    notes.push(
-      `EtherType 0x${etherType.toString(16).padStart(4, '0')} is not decoded into a layer; remaining bytes kept as Payload.`,
-    );
-  }
-
+  const expectedEthEtherType = ethernetEtherTypeForUpperLayers(
+    decodedUpperLayers[0]?.type ?? null,
+    decodedUpperLayers[1]?.type ?? null,
+  );
   const ethLayer: EthernetLayer = {
     type: 'ethernet',
     dstMac,
     srcMac,
     etherType:
-      canDecodeIPv4 || canDecodeIPv6 || canDecodeARP ? autoValue() : manualValue(etherType),
+      expectedEthEtherType !== null && etherType === expectedEthEtherType
+        ? autoValue()
+        : manualValue(etherType),
   };
-  layers.push(ethLayer);
+  layers.push(ethLayer, ...decodedUpperLayers);
 
-  if (canDecodeIPv4) {
-    const payload = decodeIPv4Chain(bytes, afterEth, layers, notes);
-    return ok({ layers, payload, notes });
-  }
-
-  if (canDecodeIPv6) {
-    const payload = decodeIPv6Chain(bytes, afterEth, layers, notes);
-    return ok({ layers, payload, notes });
-  }
-
-  if (canDecodeARP) {
-    layers.push(decodeARPAt(bytes, afterEth));
-    const trailing = bytes.slice(afterEth + ARP_HEADER_LENGTH);
-    if (trailing.length > 0) {
-      notes.push(
-        `Preserved ${trailing.length} trailing byte(s) after the 28-byte ARP header (e.g., Ethernet padding) in Payload.`,
-      );
-    }
-    return ok({ layers, payload: trailing, notes });
-  }
-
-  return ok({ layers, payload: bytes.slice(afterEth), notes });
+  return ok({ layers, payload, notes });
 }
 
 export type PrintableUtf8Result =
