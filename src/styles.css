@@ -808,9 +808,17 @@ body {
 .hexdump-row {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: subgrid;
+  grid-template-columns: 6ch minmax(38ch, max-content) max-content;
+  column-gap: 0.55rem;
   align-items: baseline;
   white-space: nowrap;
+}
+
+@supports (grid-template-columns: subgrid) {
+  .hexdump-head,
+  .hexdump-row {
+    grid-template-columns: subgrid;
+  }
 }
 
 .hexdump-head {
