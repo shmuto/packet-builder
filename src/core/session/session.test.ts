@@ -334,12 +334,14 @@ describe('BGP session scenario engine', () => {
     expect(notifHold.summary).toBe('NOTIFICATION (4/0)');
     // Verify timestamp is Hold Time (90s) after last BGP message received by A (B's KEEPALIVE)
     const lastFromB = holdBgp.filter((s) => s.from === 'B').at(-1)!;
+    const lastFromABeforeHold = holdBgp.filter((s) => s.from === 'A' && s.t <= lastFromB.t).at(-1)!;
     expect(notifHold.t - lastFromB.t).toBe(90_000);
-    // Verify periodic KEEPALIVEs at 30s and 60s
+    // Verify periodic KEEPALIVEs are spaced at 30s intervals from A's last TX time, strictly before expiry
     const periodicKas = holdBgp.filter(
       (s) => s.from === 'A' && s.summary === 'KEEPALIVE' && s.t > lastFromB.t,
     );
-    expect(periodicKas.map((k) => k.t - lastFromB.t)).toEqual([30_000, 60_000]);
+    expect(periodicKas.map((k) => k.t - lastFromABeforeHold.t)).toEqual([30_000, 60_000, 90_000]);
+    expect(periodicKas.every((k) => k.t < notifHold.t)).toBe(true);
     expect(holdTrace.finalState.phase).toBe('Closed');
 
     // 3. Administrative Shutdown
@@ -351,5 +353,114 @@ describe('BGP session scenario engine', () => {
     expect(shutNotif.from).toBe('B');
     expect(shutNotif.summary).toBe('NOTIFICATION (6/2)');
     expect(shutTrace.finalState.phase).toBe('Closed');
+  });
+
+  it('keeps session Established and records a note when holdTimerExpires fires with negotiated Hold Time 0', () => {
+    const cfg = makeBaseConfig({
+      routerA: { holdTime: 0, routes: [] },
+      routerB: { holdTime: 90, routes: [] },
+    });
+    const trace = buildSession(cfg, [
+      { type: 'establish' },
+      { type: 'holdTimerExpires', router: 'A' },
+    ]);
+
+    expect(trace.finalState.negotiatedHoldTime).toBe(0);
+    expect(trace.finalState.keepaliveInterval).toBe(0);
+    expect(trace.finalState.phase).toBe('Established');
+    expect(bgpSteps(trace.steps).some((s) => s.bgpMessage?.type === 'notification')).toBe(false);
+    expect(trace.notes).toHaveLength(1);
+    expect(trace.notes[0]).toContain('Hold Time is 0s');
+    expect(trace.notes[0]).toContain('RFC 4271 §4.2');
+  });
+
+  it('explains accurately in OPEN when ASN > 65535 and fourOctetAs capability is disabled', () => {
+    const cfg = makeBaseConfig({
+      routerA: { asn: 65551, capabilities: { fourOctetAs: false }, routes: [] },
+      routerB: { asn: 65552, capabilities: { fourOctetAs: false }, routes: [] },
+    });
+    const trace = buildSession(cfg, [{ type: 'establish' }]);
+    const [openA, openB] = bgpSteps(trace.steps);
+
+    expect(
+      openA.explanations.some(
+        (e) => e.includes('4-octet AS capability is disabled') && e.includes('not carried in Capability 65'),
+      ),
+    ).toBe(true);
+    expect(
+      openB.explanations.some(
+        (e) => e.includes('4-octet AS capability is disabled') && e.includes('not carried in Capability 65'),
+      ),
+    ).toBe(true);
+  });
+
+  it('uses configured ipv4NextHop or falls back to Router ID with clear explanation for IPv4 routes over IPv6 peering', () => {
+    const fallbackCfg = makeBaseConfig({
+      routerA: {
+        peeringAddress: '2001:db8::1',
+        routerId: '192.0.2.10',
+        routes: [{ id: 'v4', prefix: '203.0.113.0/24', origin: 0 }],
+      },
+      routerB: { peeringAddress: '2001:db8::2', routes: [] },
+    });
+    const fallbackTrace = buildSession(fallbackCfg, [
+      { type: 'establish' },
+      { type: 'advertise', router: 'A' },
+    ]);
+    const fallbackAdv = bgpSteps(fallbackTrace.steps).find((s) => s.summary === 'UPDATE +203.0.113.0/24')!;
+    expect(
+      fallbackAdv.bgpMessage?.type === 'update' &&
+        fallbackAdv.bgpMessage.pathAttributes.find((a) => a.kind === 'nextHop'),
+    ).toEqual({ kind: 'nextHop', nextHop: '192.0.2.10' });
+    expect(
+      fallbackAdv.explanations.some(
+        (e) => e.includes('IPv6 peering session') && e.includes('falls back to') && e.includes('Router ID'),
+      ),
+    ).toBe(true);
+
+    const configuredCfg = makeBaseConfig({
+      routerA: {
+        peeringAddress: '2001:db8::1',
+        routerId: '192.0.2.10',
+        ipv4NextHop: '198.51.100.1',
+        routes: [{ id: 'v4', prefix: '203.0.113.0/24', origin: 0 }],
+      },
+      routerB: { peeringAddress: '2001:db8::2', routes: [] },
+    });
+    const configuredTrace = buildSession(configuredCfg, [
+      { type: 'establish' },
+      { type: 'advertise', router: 'A' },
+    ]);
+    const configuredAdv = bgpSteps(configuredTrace.steps).find((s) => s.summary === 'UPDATE +203.0.113.0/24')!;
+    expect(
+      configuredAdv.bgpMessage?.type === 'update' &&
+        configuredAdv.bgpMessage.pathAttributes.find((a) => a.kind === 'nextHop'),
+    ).toEqual({ kind: 'nextHop', nextHop: '198.51.100.1' });
+    expect(
+      configuredAdv.explanations.some(
+        (e) => e.includes('IPv6 peering session') && e.includes('configured ipv4NextHop 198.51.100.1'),
+      ),
+    ).toBe(true);
+  });
+
+  it('records an omission when withdraw targets an inactive address family', () => {
+    const cfg = makeBaseConfig({
+      routerA: {
+        capabilities: { mpIpv4Unicast: true, mpIpv6Unicast: true },
+        routes: [{ id: 'v6', prefix: '2001:db8:1::/48', origin: 0 }],
+      },
+      routerB: {
+        capabilities: { mpIpv4Unicast: true, mpIpv6Unicast: false },
+        routes: [],
+      },
+    });
+    const trace = buildSession(cfg, [
+      { type: 'establish' },
+      { type: 'withdraw', router: 'A', routeIds: ['v6'] },
+    ]);
+    expect(trace.omissions).toHaveLength(1);
+    expect(trace.omissions[0].prefix).toBe('2001:db8:1::/48');
+    expect(trace.omissions[0].reason).toContain('did not withdraw');
+    expect(trace.omissions[0].reason).toContain('MP IPv6 Unicast');
   });
 });

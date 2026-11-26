@@ -46,6 +46,8 @@ export interface RouterConfig {
   readonly mac: string;
   /** Peering IP address (IPv4 or IPv6). Both routers must use the same IP version. */
   readonly peeringAddress: string;
+  /** Optional IPv4 next hop used when advertising IPv4 routes over an IPv6 peering session. */
+  readonly ipv4NextHop?: string;
   /** Optional IPv6 next hop used when advertising IPv6 routes over an IPv4 peering session. */
   readonly ipv6NextHop?: string;
   readonly capabilities: RouterCapabilities;
@@ -130,6 +132,7 @@ export interface SessionTrace {
   readonly events: readonly SessionEvent[];
   readonly steps: readonly SessionStep[];
   readonly omissions: readonly RouteOmission[];
+  readonly notes: readonly string[];
   readonly finalState: NegotiatedState;
 }
 

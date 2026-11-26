@@ -275,11 +275,17 @@ function resolveIpv6NextHop(sender: RouterConfig): string {
   return `::ffff:${sender.peeringAddress}`;
 }
 
-function resolveIpv4NextHop(sender: RouterConfig): string {
+function resolveIpv4NextHop(sender: RouterConfig): {
+  readonly nextHop: string;
+  readonly source: 'peering' | 'configured' | 'routerId';
+} {
   if (!isIPv6Address(sender.peeringAddress)) {
-    return sender.peeringAddress;
+    return { nextHop: sender.peeringAddress, source: 'peering' };
   }
-  return sender.routerId;
+  if (sender.ipv4NextHop) {
+    return { nextHop: sender.ipv4NextHop, source: 'configured' };
+  }
+  return { nextHop: sender.routerId, source: 'routerId' };
 }
 
 /**
@@ -298,6 +304,7 @@ export function buildSession(
 
   const steps: SessionStep[] = [];
   const omissions: RouteOmission[] = [];
+  const notes: string[] = [];
 
   let phase: BgpFsmPhase = 'Idle';
   let openASent = false;
@@ -307,6 +314,7 @@ export function buildSession(
   let closedReason: string | undefined;
   let currentT = 0;
   const lastBgpRxTime: Record<RouterId, number> = { A: 0, B: 0 };
+  const lastBgpTxTime: Record<RouterId, number> = { A: 0, B: 0 };
 
   const snapshotState = (): NegotiatedState => {
     const bothOpens = openASent && openBSent;
@@ -378,6 +386,7 @@ export function buildSession(
       flags: { psh: true, ack: true },
       payload: encoded.value.bytes,
     });
+    lastBgpTxTime[from] = currentT;
     lastBgpRxTime[to] = currentT;
 
     steps.push({
@@ -505,7 +514,9 @@ export function buildSession(
     ];
     if (routerA.asn > 0xffff) {
       openAExplanations.push(
-        `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerA.asn} exceeds 65535; the full 32-bit ASN is carried in Capability 65 (RFC 6793 §3).`,
+        routerA.capabilities.fourOctetAs
+          ? `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerA.asn} exceeds 65535; the full 32-bit ASN is carried in Capability 65 (RFC 6793 §3).`
+          : `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerA.asn} exceeds 65535, but 4-octet AS capability is disabled on ${routerA.name}, so the full 32-bit ASN is not carried in Capability 65 (RFC 6793 §3).`,
       );
     }
     emitBgp('A', openA, openAExplanations);
@@ -545,7 +556,9 @@ export function buildSession(
     ];
     if (routerB.asn > 0xffff) {
       openBExplanations.push(
-        `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerB.asn} exceeds 65535; the full 32-bit ASN is carried in Capability 65 (RFC 6793 §3).`,
+        routerB.capabilities.fourOctetAs
+          ? `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerB.asn} exceeds 65535; the full 32-bit ASN is carried in Capability 65 (RFC 6793 §3).`
+          : `My AS is set to AS_TRANS (${BGP_AS_TRANS}) because AS ${routerB.asn} exceeds 65535, but 4-octet AS capability is disabled on ${routerB.name}, so the full 32-bit ASN is not carried in Capability 65 (RFC 6793 §3).`,
       );
     }
     emitBgp('B', openB, openBExplanations);
@@ -645,11 +658,21 @@ export function buildSession(
 
         // NEXT_HOP (for IPv4 NLRI)
         if (family === 'ipv4-unicast') {
-          const nextHop = resolveIpv4NextHop(sender);
+          const { nextHop, source } = resolveIpv4NextHop(sender);
           attrs.push({ kind: 'nextHop', nextHop });
-          explanations.push(
-            `NEXT_HOP is set to ${sender.name}’s peering address ${nextHop} (RFC 4271 §5.1.3).`,
-          );
+          if (source === 'peering') {
+            explanations.push(
+              `NEXT_HOP is set to ${sender.name}’s peering address ${nextHop} (RFC 4271 §5.1.3).`,
+            );
+          } else if (source === 'configured') {
+            explanations.push(
+              `Because this is an IPv6 peering session, IPv4 NEXT_HOP uses ${sender.name}’s configured ipv4NextHop ${nextHop} (RFC 4271 §5.1.3).`,
+            );
+          } else {
+            explanations.push(
+              `Because this is an IPv6 peering session with no ipv4NextHop configured, IPv4 NEXT_HOP falls back to ${sender.name}’s Router ID ${nextHop} in this simulator (RFC 4271 §5.1.3).`,
+            );
+          }
         }
 
         // MULTI_EXIT_DISC (optional)
@@ -743,37 +766,59 @@ export function buildSession(
     const v4Prefixes = selected.filter((r) => !isIPv6Prefix(r.prefix)).map((r) => r.prefix);
     const v6Prefixes = selected.filter((r) => isIPv6Prefix(r.prefix)).map((r) => r.prefix);
 
-    if (v4Prefixes.length > 0 && state.activeFamilies.includes('ipv4-unicast')) {
-      currentT += 20;
-      const withdrawMsg: BgpUpdateMessage = {
-        type: 'update',
-        withdrawnRoutes: v4Prefixes.map((prefix) => ({ prefix })),
-        pathAttributes: [],
-        nlri: [],
-      };
-      emitBgp(routerId, withdrawMsg, [
-        `${sender.name} withdraws IPv4 prefix${v4Prefixes.length === 1 ? '' : 'es'} ${v4Prefixes.join(', ')} using the Withdrawn Routes field; no path attributes are required for withdrawals (RFC 4271 §4.3).`,
-      ]);
+    if (v4Prefixes.length > 0) {
+      if (!state.activeFamilies.includes('ipv4-unicast')) {
+        for (const prefix of v4Prefixes) {
+          omissions.push({
+            router: routerId,
+            prefix,
+            reason: `${sender.name} did not withdraw ${prefix} because MP IPv4 Unicast was not negotiated by both peers (RFC 4760 §8 / RFC 5492 §3).`,
+            reference: 'RFC 4760 §8 / RFC 5492 §3',
+          });
+        }
+      } else {
+        currentT += 20;
+        const withdrawMsg: BgpUpdateMessage = {
+          type: 'update',
+          withdrawnRoutes: v4Prefixes.map((prefix) => ({ prefix })),
+          pathAttributes: [],
+          nlri: [],
+        };
+        emitBgp(routerId, withdrawMsg, [
+          `${sender.name} withdraws IPv4 prefix${v4Prefixes.length === 1 ? '' : 'es'} ${v4Prefixes.join(', ')} using the Withdrawn Routes field; no path attributes are required for withdrawals (RFC 4271 §4.3).`,
+        ]);
+      }
     }
 
-    if (v6Prefixes.length > 0 && state.activeFamilies.includes('ipv6-unicast')) {
-      currentT += 20;
-      const withdrawMsg: BgpUpdateMessage = {
-        type: 'update',
-        withdrawnRoutes: [],
-        pathAttributes: [
-          {
-            kind: 'mpUnreachNlri',
-            afi: BGP_AFI.IPV6,
-            safi: BGP_SAFI.UNICAST,
-            withdrawnRoutes: v6Prefixes.map((prefix) => ({ prefix })),
-          },
-        ],
-        nlri: [],
-      };
-      emitBgp(routerId, withdrawMsg, [
-        `${sender.name} withdraws IPv6 prefix${v6Prefixes.length === 1 ? '' : 'es'} ${v6Prefixes.join(', ')} using MP_UNREACH_NLRI (AFI 2 / SAFI 1) (RFC 4760 §4).`,
-      ]);
+    if (v6Prefixes.length > 0) {
+      if (!state.activeFamilies.includes('ipv6-unicast')) {
+        for (const prefix of v6Prefixes) {
+          omissions.push({
+            router: routerId,
+            prefix,
+            reason: `${sender.name} did not withdraw ${prefix} because MP IPv6 Unicast was not negotiated by both peers (RFC 4760 §8 / RFC 5492 §3).`,
+            reference: 'RFC 4760 §8 / RFC 5492 §3',
+          });
+        }
+      } else {
+        currentT += 20;
+        const withdrawMsg: BgpUpdateMessage = {
+          type: 'update',
+          withdrawnRoutes: [],
+          pathAttributes: [
+            {
+              kind: 'mpUnreachNlri',
+              afi: BGP_AFI.IPV6,
+              safi: BGP_SAFI.UNICAST,
+              withdrawnRoutes: v6Prefixes.map((prefix) => ({ prefix })),
+            },
+          ],
+          nlri: [],
+        };
+        emitBgp(routerId, withdrawMsg, [
+          `${sender.name} withdraws IPv6 prefix${v6Prefixes.length === 1 ? '' : 'es'} ${v6Prefixes.join(', ')} using MP_UNREACH_NLRI (AFI 2 / SAFI 1) (RFC 4760 §4).`,
+        ]);
+      }
     }
   };
 
@@ -783,12 +828,24 @@ export function buildSession(
     const peer = getRouter(config, peerOf(routerId));
     const holdSec = negotiatedHoldTime ?? 0;
     const kaSec = keepaliveInterval ?? 0;
-    const lastRx = lastBgpRxTime[routerId];
 
-    // Emit periodic KEEPALIVEs from `routerId` at the negotiated interval while the peer stays silent
-    if (holdSec > 0 && kaSec > 0) {
-      for (let elapsed = kaSec * 1000; elapsed < holdSec * 1000; elapsed += kaSec * 1000) {
-        const kaTime = lastRx + elapsed;
+    // RFC 4271 §4.2: When the negotiated Hold Time is 0, neither periodic KEEPALIVEs
+    // nor the Hold Timer run, so a holdTimerExpires event cannot tear down the session.
+    if (holdSec === 0) {
+      notes.push(
+        `Hold Timer expiry event for ${router.name} did not fire because the negotiated Hold Time is 0s, which disables both periodic KEEPALIVEs and the Hold Timer (RFC 4271 §4.2).`,
+      );
+      return;
+    }
+
+    const lastRx = lastBgpRxTime[routerId];
+    const lastTx = lastBgpTxTime[routerId];
+    const expiryTime = lastRx + holdSec * 1000;
+
+    // Emit periodic KEEPALIVEs from `routerId` at the negotiated interval from its last TX time
+    // while the peer remains silent until Hold Timer expiry (lastRx + holdSec * 1000).
+    if (kaSec > 0) {
+      for (let kaTime = lastTx + kaSec * 1000; kaTime + 2 < expiryTime; kaTime += kaSec * 1000) {
         if (kaTime > currentT) {
           currentT = kaTime;
           emitBgp(routerId, { type: 'keepalive' }, [
@@ -799,8 +856,7 @@ export function buildSession(
     }
 
     // Hold Timer expires exactly Hold Time after the last BGP message received from peer
-    const expiryTime = holdSec > 0 ? lastRx + holdSec * 1000 : currentT + 1000;
-    currentT = Math.max(currentT + 10, expiryTime);
+    currentT = Math.max(currentT + 1, expiryTime);
 
     const reason = `Hold Timer Expired (${holdSec}s elapsed with no BGP message from ${peer.name})`;
     closedReason = reason;
@@ -878,6 +934,7 @@ export function buildSession(
     events,
     steps,
     omissions,
+    notes,
     finalState: snapshotState(),
   };
 }
