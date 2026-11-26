@@ -213,6 +213,7 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
       case 'udp':
         result = encodeUDP(layer, {
           layerIndex: i,
+          upperLayerType,
           upperBytes: currentUpperBytes,
           ip: resolveIPContextBefore(layers, i),
         });

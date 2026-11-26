@@ -159,7 +159,6 @@ describe('presets', () => {
 
     // 14(Eth) + 20(IPv4) + 8(UDP) + 8(VXLAN) + 14(Inner Eth) + 28(ARP) = 92 bytes
     expect(result.bytes.length).toBe(92);
-    expect(result.warnings.filter((w) => w.layerIndex === 3)).toHaveLength(0);
     expect(result.warnings.filter((w) => w.layerIndex !== 4)).toHaveLength(0);
     // Outer UDP dstPort = 4789 (0x12b5) at offset 36..37
     expect(result.bytes.slice(36, 38)).toEqual(new Uint8Array([0x12, 0xb5]));

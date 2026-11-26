@@ -411,7 +411,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     vni: {
       summary:
-        '24-bit VXLAN Network Identifier (0-16,777,215) isolating virtual Layer 2 overlay segments across an IP/UDP (port 4789) underlay. Per RFC 7348 §5, the outer UDP checksum over IPv4 SHOULD be zero, though a non-zero checksum MAY be used.',
+        '24-bit VXLAN Network Identifier (0-16,777,215) isolating virtual Layer 2 overlay segments across an IP/UDP (port 4789) underlay.',
       reference: 'RFC 7348 §5',
     },
     reserved2: {

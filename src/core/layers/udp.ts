@@ -3,6 +3,7 @@ import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum'
 import { IP_PROTOCOL_UDP } from './ipv4';
 import type {
   LayerEncodeResult,
+  LayerType,
   PacketError,
   PacketWarning,
   RelativeFieldSpan,
@@ -33,6 +34,7 @@ export type IPPseudoContext =
 
 export interface EncodeUDPContext {
   readonly layerIndex: number;
+  readonly upperLayerType?: LayerType | null;
   readonly upperBytes: Uint8Array;
   /** Immediately preceding IPv4 or IPv6 layer state used for pseudo-header checksum calculation */
   readonly ip: IPPseudoContext;
@@ -149,7 +151,8 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
           message:
             'UDP Checksum is mandatory over IPv6; packets with a 0x0000 checksum must be discarded by receivers (RFC 8200 §8.1).',
         });
-      } else {
+      } else if (ctx.upperLayerType !== 'vxlan') {
+        // RFC 7348 §5: VXLAN over IPv4 SHOULD transmit outer UDP checksum as 0x0000 (and MAY be non-zero); do not warn on either choice.
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'checksum',

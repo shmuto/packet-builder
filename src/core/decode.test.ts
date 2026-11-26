@@ -1554,6 +1554,8 @@ describe('decodePacket', () => {
     );
     expect(zeroUdpCsum.ok).toBe(true);
     if (zeroUdpCsum.ok) {
+      // RFC 7348 §5: outer UDP checksum SHOULD be 0 over IPv4 (and MAY be non-zero); neither produces UDP/VXLAN warnings
+      expect(zeroUdpCsum.warnings.filter((w) => w.layerIndex !== 4)).toHaveLength(0);
       const dec = decodePacket(zeroUdpCsum.bytes, 'ethernet');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
