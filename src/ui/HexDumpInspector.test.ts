@@ -259,4 +259,38 @@ describe('HexDumpInspector', () => {
     );
     expect(payloadHighlightHtml).not.toContain('hover-detail-doc');
   });
+
+  it('renders Import Hex inside the export toolbar when onToggleImport is provided and reveals importPanel when open', () => {
+    const preset = createPresets()[0];
+    const draft = evaluatePacketDraft(preset.layers, ok(preset.payloadBytes));
+
+    const closedHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        showImportPanel: false,
+        onToggleImport: () => {},
+        importPanel: createElement('div', { className: 'import-panel' }, 'Panel Content'),
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(closedHtml).toContain('Import Hex');
+    expect(closedHtml).toContain('aria-expanded="false"');
+    expect(closedHtml).not.toContain('Panel Content');
+
+    const openHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        showImportPanel: true,
+        onToggleImport: () => {},
+        importPanel: createElement('div', { className: 'import-panel' }, 'Panel Content'),
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(openHtml).toContain('aria-expanded="true"');
+    expect(openHtml).toContain('Panel Content');
+  });
 });

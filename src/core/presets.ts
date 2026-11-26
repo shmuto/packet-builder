@@ -16,6 +16,22 @@ import type {
 } from './layers/types';
 import { autoValue, manualValue } from './layers/types';
 
+export type PresetGroupId = 'basics' | 'ipv6' | 'tunnels' | 'advanced';
+
+export interface PresetGroupMeta {
+  readonly id: PresetGroupId;
+  readonly label: string;
+  readonly primary?: boolean;
+}
+
+/** Stable learning-topic order for displaying preset groups in the UI. */
+export const PRESET_GROUPS: readonly PresetGroupMeta[] = [
+  { id: 'basics', label: 'Basics', primary: true },
+  { id: 'ipv6', label: 'IPv6' },
+  { id: 'tunnels', label: 'Tunnels & Overlays' },
+  { id: 'advanced', label: 'Advanced' },
+];
+
 export type PresetId =
   | 'udp'
   | 'udp-ipv6'
@@ -31,6 +47,7 @@ export type PresetId =
 
 export interface PacketPreset {
   readonly id: PresetId;
+  readonly group: PresetGroupId;
   readonly name: string;
   readonly description: string;
   readonly layers: readonly Layer[];
@@ -221,8 +238,10 @@ export function createPresets(): readonly PacketPreset[] {
   const grePingText = 'gre-ping';
 
   return [
+    // Basics
     {
       id: 'udp',
+      group: 'basics',
       name: 'UDP Packet',
       description: 'Standard Ethernet II + IPv4 + UDP frame with payload',
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
@@ -230,15 +249,8 @@ export function createPresets(): readonly PacketPreset[] {
       payloadBytes: encodeUtf8(udpText),
     },
     {
-      id: 'udp-ipv6',
-      name: 'IPv6 UDP',
-      description: 'Ethernet II + IPv6 (RFC 8200) + UDP frame with IPv6 pseudo-header checksum',
-      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultUDP()],
-      payloadText: udpIpv6Text,
-      payloadBytes: encodeUtf8(udpIpv6Text),
-    },
-    {
       id: 'tcp-syn',
+      group: 'basics',
       name: 'TCP SYN',
       description:
         'Initial TCP SYN packet with Linux-style options (MSS 1460, SACK-Permitted, Timestamps, NOP, Window Scale 7)',
@@ -261,6 +273,7 @@ export function createPresets(): readonly PacketPreset[] {
     },
     {
       id: 'icmp-echo',
+      group: 'basics',
       name: 'ICMP Ping',
       description: 'ICMP Echo Request packet (Type 8, Code 0)',
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultICMP()],
@@ -268,15 +281,8 @@ export function createPresets(): readonly PacketPreset[] {
       payloadBytes: encodeUtf8(icmpText),
     },
     {
-      id: 'icmpv6-echo',
-      name: 'IPv6 Ping',
-      description: 'Ethernet II + IPv6 + ICMPv6 Echo Request (Type 128, Code 0, RFC 4443)',
-      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultICMPv6()],
-      payloadText: icmpv6Text,
-      payloadBytes: encodeUtf8(icmpv6Text),
-    },
-    {
       id: 'arp-request',
+      group: 'basics',
       name: 'ARP Request',
       description: 'Broadcast Ethernet II + ARP Request (who-has 192.168.0.2)',
       layers: [
@@ -286,8 +292,29 @@ export function createPresets(): readonly PacketPreset[] {
       payloadText: '',
       payloadBytes: new Uint8Array(0),
     },
+    // IPv6
+    {
+      id: 'udp-ipv6',
+      group: 'ipv6',
+      name: 'IPv6 UDP',
+      description: 'Ethernet II + IPv6 (RFC 8200) + UDP frame with IPv6 pseudo-header checksum',
+      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultUDP()],
+      payloadText: udpIpv6Text,
+      payloadBytes: encodeUtf8(udpIpv6Text),
+    },
+    {
+      id: 'icmpv6-echo',
+      group: 'ipv6',
+      name: 'IPv6 Ping',
+      description: 'Ethernet II + IPv6 + ICMPv6 Echo Request (Type 128, Code 0, RFC 4443)',
+      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultICMPv6()],
+      payloadText: icmpv6Text,
+      payloadBytes: encodeUtf8(icmpv6Text),
+    },
+    // Tunnels & Overlays
     {
       id: 'vlan-udp',
+      group: 'tunnels',
       name: 'VLAN UDP',
       description: 'Ethernet II + IEEE 802.1Q VLAN (VID 100) + IPv4 + UDP frame',
       layers: [
@@ -301,6 +328,7 @@ export function createPresets(): readonly PacketPreset[] {
     },
     {
       id: 'gre-ipv4',
+      group: 'tunnels',
       name: 'GRE Tunnel',
       description: 'Ethernet II + Outer IPv4 (Proto 47) + GRE + Inner IPv4 + ICMP Echo Request',
       layers: [
@@ -324,6 +352,7 @@ export function createPresets(): readonly PacketPreset[] {
     },
     {
       id: 'vxlan',
+      group: 'tunnels',
       name: 'VXLAN Overlay',
       description:
         'Outer Ethernet II + IPv4 + UDP (4789) + VXLAN (VNI 100) + Inner Ethernet II + ARP Request',
@@ -346,8 +375,10 @@ export function createPresets(): readonly PacketPreset[] {
       payloadText: '',
       payloadBytes: new Uint8Array(0),
     },
+    // Advanced
     {
       id: 'bgp-open',
+      group: 'advanced',
       name: 'BGP OPEN',
       description: 'Ethernet II + IPv4 + TCP (port 179) + BGP-4 OPEN message (RFC 4271)',
       layers: [
@@ -375,6 +406,7 @@ export function createPresets(): readonly PacketPreset[] {
     },
     {
       id: 'igmp-router-alert',
+      group: 'advanced',
       name: 'IGMPv2 (Router Alert)',
       description:
         'Ethernet II + IPv4 (TTL 1, Router Alert option 94 04 00 00, Protocol 2) + IGMPv2 General Query payload',

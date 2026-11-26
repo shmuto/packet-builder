@@ -15,7 +15,13 @@ import {
   hasOnlyFiniteNumbers,
   type PermalinkState,
 } from './core/permalink';
-import { createPresets, type PacketPreset, type PresetId } from './core/presets';
+import {
+  createPresets,
+  PRESET_GROUPS,
+  type PacketPreset,
+  type PresetGroupId,
+  type PresetId,
+} from './core/presets';
 import { ok, type Result } from './core/result';
 import { analyzeBuiltBytesRoundTrip, type RoundTripReport } from './core/roundtrip';
 import { HexDumpInspector } from './ui/HexDumpInspector';
@@ -104,6 +110,14 @@ function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState
 
 export function App() {
   const presets = useMemo(() => createPresets(), []);
+  const presetGroups = useMemo(
+    () =>
+      PRESET_GROUPS.map((group) => ({
+        group,
+        items: presets.filter((preset) => preset.group === group.id),
+      })),
+    [presets],
+  );
   const nextIdRef = useRef(1);
   const allocateId = useCallback(() => `layer-${nextIdRef.current++}`, []);
 
@@ -116,6 +130,7 @@ export function App() {
   const [activePresetId, setActivePresetId] = useState<PresetId | null>(
     initialState.activePresetId,
   );
+  const [selectedPresetGroup, setSelectedPresetGroup] = useState<PresetGroupId>('basics');
   const [layerItems, setLayerItems] = useState<LayerItem[]>(() =>
     initialState.layers.map((layer) => ({ id: allocateId(), layer })),
   );
@@ -298,6 +313,7 @@ export function App() {
 
   const applyPreset = (preset: PacketPreset) => {
     markUserEdited();
+    setSelectedPresetGroup(preset.group);
     applyEditorFields(fieldsFromPreset(preset), null);
   };
 
@@ -415,29 +431,50 @@ export function App() {
           </p>
         </div>
 
-        <nav className="preset-bar" aria-label="Packet presets and import">
-          <span className="preset-label">Presets</span>
-          <div className="preset-list">
-            {presets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={`preset-btn${activePresetId === preset.id ? ' is-active' : ''}`}
-                title={preset.description}
-                aria-pressed={activePresetId === preset.id}
-                onClick={() => applyPreset(preset)}
-              >
-                {preset.name}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`preset-btn is-import${showImportPanel ? ' is-active' : ''}`}
-              aria-expanded={showImportPanel}
-              onClick={() => setShowImportPanel((open) => !open)}
+        <nav className="preset-bar" aria-label="Packet presets">
+          <div className="preset-mobile-selector">
+            <label className="preset-label" htmlFor="preset-group-select">
+              Presets
+            </label>
+            <select
+              id="preset-group-select"
+              className="preset-group-select"
+              value={selectedPresetGroup}
+              onChange={(e) => setSelectedPresetGroup(e.target.value as PresetGroupId)}
             >
-              Import Hex
-            </button>
+              {presetGroups.map(({ group, items }) => (
+                <option key={group.id} value={group.id}>
+                  {group.label} ({items.length})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="preset-groups">
+            {presetGroups.map(({ group, items }) => (
+              <div
+                key={group.id}
+                className={`preset-group${group.primary ? ' is-primary' : ''}${selectedPresetGroup === group.id ? ' is-mobile-active' : ''}`}
+                data-preset-group={group.id}
+                role="group"
+                aria-label={`${group.label} presets`}
+              >
+                <span className="preset-group-title">{group.label}</span>
+                <div className="preset-list">
+                  {items.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`preset-btn${activePresetId === preset.id ? ' is-active' : ''}`}
+                      title={preset.description}
+                      aria-pressed={activePresetId === preset.id}
+                      onClick={() => applyPreset(preset)}
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </nav>
       </header>
@@ -457,13 +494,6 @@ export function App() {
             ✕
           </button>
         </div>
-      )}
-
-      {showImportPanel && (
-        <ImportHexPanel
-          onImport={handleImportDecoded}
-          onClose={() => setShowImportPanel(false)}
-        />
       )}
 
       {importNotes.length > 0 && (
@@ -573,6 +603,14 @@ export function App() {
             highlight={highlight}
             permalinkUrl={permalinkUrl}
             roundTripReport={roundTripReport}
+            showImportPanel={showImportPanel}
+            onToggleImport={() => setShowImportPanel((open) => !open)}
+            importPanel={
+              <ImportHexPanel
+                onImport={handleImportDecoded}
+                onClose={() => setShowImportPanel(false)}
+              />
+            }
             onHighlightChange={setHighlight}
           />
         </div>

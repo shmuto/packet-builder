@@ -1,8 +1,52 @@
 import { describe, expect, it } from 'vitest';
 import { buildPacket } from './packet';
-import { createPresets } from './presets';
+import { createPresets, PRESET_GROUPS } from './presets';
 
 describe('presets', () => {
+  it('assigns every preset to a valid group in stable learning-topic order with no empty groups', () => {
+    const presets = createPresets();
+    const groupIds = PRESET_GROUPS.map((g) => g.id);
+
+    expect(groupIds).toEqual(['basics', 'ipv6', 'tunnels', 'advanced']);
+    expect(PRESET_GROUPS.map((g) => g.label)).toEqual([
+      'Basics',
+      'IPv6',
+      'Tunnels & Overlays',
+      'Advanced',
+    ]);
+    expect(PRESET_GROUPS[0].primary).toBe(true);
+
+    const groupIdSet = new Set(groupIds);
+    for (const preset of presets) {
+      expect(groupIdSet.has(preset.group)).toBe(true);
+    }
+
+    for (const group of PRESET_GROUPS) {
+      const members = presets.filter((p) => p.group === group.id);
+      expect(members.length).toBeGreaterThanOrEqual(1);
+    }
+
+    expect(presets.filter((p) => p.group === 'basics').map((p) => p.id)).toEqual([
+      'udp',
+      'tcp-syn',
+      'icmp-echo',
+      'arp-request',
+    ]);
+    expect(presets.filter((p) => p.group === 'ipv6').map((p) => p.id)).toEqual([
+      'udp-ipv6',
+      'icmpv6-echo',
+    ]);
+    expect(presets.filter((p) => p.group === 'tunnels').map((p) => p.id)).toEqual([
+      'vlan-udp',
+      'gre-ipv4',
+      'vxlan',
+    ]);
+    expect(presets.filter((p) => p.group === 'advanced').map((p) => p.id)).toEqual([
+      'bgp-open',
+      'igmp-router-alert',
+    ]);
+  });
+
   it('すべてのプリセットがエラーなしで正しくパケットを組み立てられる', () => {
     const presets = createPresets();
     expect(presets.length).toBeGreaterThanOrEqual(3);

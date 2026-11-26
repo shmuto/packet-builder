@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toHexDump, toHexString } from '../core/bytes';
 import { getFieldDoc, type FieldDoc } from '../core/fieldDocs';
 import {
@@ -21,6 +21,9 @@ export interface HexDumpInspectorProps {
   readonly highlight: HighlightTarget | null;
   readonly permalinkUrl?: string | null;
   readonly roundTripReport?: RoundTripReport;
+  readonly showImportPanel?: boolean;
+  readonly onToggleImport?: () => void;
+  readonly importPanel?: ReactNode;
   readonly onHighlightChange: (target: HighlightTarget | null) => void;
 }
 
@@ -114,6 +117,9 @@ export function HexDumpInspector({
   highlight,
   permalinkUrl,
   roundTripReport,
+  showImportPanel = false,
+  onToggleImport,
+  importPanel,
   onHighlightChange,
 }: HexDumpInspectorProps) {
   const { ok: isSuccess, bytes, spans, rows, segments, errors, warnings, payloadError } = draft;
@@ -283,7 +289,7 @@ export function HexDumpInspector({
         </div>
       </div>
 
-      <div className="export-toolbar" role="group" aria-label="Export packet">
+      <div className="export-toolbar" role="group" aria-label="Import and export packet">
         <button
           type="button"
           className="export-btn is-primary"
@@ -321,12 +327,24 @@ export function HexDumpInspector({
         >
           {copyStatus === 'link-ok' ? 'Copied Link!' : 'Copy Link'}
         </button>
+        {onToggleImport && (
+          <button
+            type="button"
+            className={`export-btn is-import${showImportPanel ? ' is-active' : ''}`}
+            aria-expanded={showImportPanel}
+            onClick={onToggleImport}
+          >
+            Import Hex
+          </button>
+        )}
         {copyStatus === 'error' && (
           <span className="export-status-error" role="alert">
             Clipboard access denied
           </span>
         )}
       </div>
+
+      {showImportPanel && importPanel}
 
       {permalinkUrl && permalinkUrl.length > PERMALINK_LONG_URL_THRESHOLD && (
         <p className="export-status-note" role="status">

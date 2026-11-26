@@ -24,9 +24,12 @@ test.describe('Import Hex round-trip', () => {
     await page.goto('/');
     await expect(page.locator('.hexdump-grid')).toBeVisible();
 
-    const presetButtons = page.locator('.preset-list .preset-btn:not(.is-import)');
+    const presetButtons = page.locator('.preset-group .preset-btn');
     const presetCount = await presetButtons.count();
-    expect(presetCount).toBeGreaterThanOrEqual(8);
+    expect(presetCount).toBeGreaterThanOrEqual(11);
+
+    const importToggle = page.locator('.export-toolbar').getByRole('button', { name: 'Import Hex' });
+    await expect(importToggle).toBeVisible();
 
     for (let i = 0; i < presetCount; i++) {
       const btn = presetButtons.nth(i);
@@ -45,8 +48,7 @@ test.describe('Import Hex round-trip', () => {
       const copiedHex = await page.evaluate(() => window.__copiedHex ?? '');
       expect(copiedHex.length, `Copy Hex output for "${presetName}"`).toBeGreaterThan(0);
 
-      // Open Import Hex panel, paste the copied hex, and decode
-      const importToggle = page.getByRole('button', { name: 'Import Hex' });
+      // Open Import Hex panel from the export toolbar, paste the copied hex, and decode
       if ((await importToggle.getAttribute('aria-expanded')) !== 'true') {
         await importToggle.click();
       }

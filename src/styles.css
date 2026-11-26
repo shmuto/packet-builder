@@ -171,9 +171,28 @@ body {
 
 .preset-bar {
   display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.preset-mobile-selector {
+  display: none;
   align-items: center;
-  flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.preset-group-select {
+  appearance: auto;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  min-width: 0;
 }
 
 .preset-label {
@@ -184,10 +203,45 @@ body {
   letter-spacing: 0.04em;
 }
 
+.preset-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem 0.75rem;
+}
+
+.preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.preset-group.is-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.preset-group-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+}
+
+.preset-group.is-primary .preset-group-title {
+  color: var(--accent);
+}
+
 .preset-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.38rem;
 }
 
 .preset-btn {
@@ -195,9 +249,9 @@ body {
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
-  padding: 0.4rem 0.75rem;
+  padding: 0.36rem 0.68rem;
   border-radius: var(--radius-sm);
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
@@ -212,6 +266,42 @@ body {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.preset-group.is-primary .preset-btn.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+@media (max-width: 599px) {
+  .preset-mobile-selector {
+    display: flex;
+  }
+
+  .preset-group {
+    display: none;
+  }
+
+  .preset-group.is-mobile-active {
+    display: flex;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .preset-group.is-mobile-active .preset-group-title {
+    display: none;
+  }
+
+  .preset-group.is-mobile-active .preset-list {
+    gap: 0.28rem;
+  }
+
+  .preset-group.is-mobile-active .preset-btn {
+    padding: 0.26rem 0.44rem;
+    font-size: 0.74rem;
+  }
 }
 
 /* 2 ペイン・ワークベンチ */
@@ -1445,8 +1535,15 @@ body {
 }
 
 /* Import Hex panel & decoded notes banner */
-.preset-btn.is-import {
+.export-btn.is-import {
   border-style: dashed;
+}
+
+.export-btn.is-import.is-active {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .import-panel {
@@ -1454,11 +1551,10 @@ body {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
-  padding: 1rem 1.15rem;
-  margin-bottom: 1.25rem;
+  padding: 0.9rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.7rem;
 }
 
 .import-panel-header {
