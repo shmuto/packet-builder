@@ -12,6 +12,7 @@ import type {
   TCPLayer,
   UDPLayer,
   VLANLayer,
+  VXLANLayer,
 } from './layers/types';
 import { autoValue } from './layers/types';
 
@@ -24,6 +25,7 @@ export type PresetId =
   | 'arp-request'
   | 'vlan-udp'
   | 'gre-ipv4'
+  | 'vxlan'
   | 'bgp-open';
 
 export interface PacketPreset {
@@ -175,6 +177,17 @@ export function createDefaultGRE(): GRELayer {
   };
 }
 
+/** Creates a default VXLAN header (I-flag auto 0x08, VNI 100, reserved fields 0, RFC 7348 §5). */
+export function createDefaultVXLAN(): VXLANLayer {
+  return {
+    type: 'vxlan',
+    flags: autoValue(),
+    vni: 100,
+    reserved1: 0,
+    reserved2: 0,
+  };
+}
+
 export function createDefaultBGP(): BGPLayer {
   return {
     type: 'bgp',
@@ -289,6 +302,30 @@ export function createPresets(): readonly PacketPreset[] {
       ],
       payloadText: grePingText,
       payloadBytes: encodeUtf8(grePingText),
+    },
+    {
+      id: 'vxlan',
+      name: 'VXLAN Overlay',
+      description:
+        'Outer Ethernet II + IPv4 + UDP (4789) + VXLAN (VNI 100) + Inner Ethernet II + ARP Request',
+      layers: [
+        createDefaultEthernet(),
+        {
+          ...createDefaultIPv4(),
+          srcIp: '198.51.100.1',
+          dstIp: '198.51.100.2',
+        },
+        {
+          ...createDefaultUDP(),
+          srcPort: 49152,
+          dstPort: 4789,
+        },
+        createDefaultVXLAN(),
+        { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+        createDefaultARP(),
+      ],
+      payloadText: '',
+      payloadBytes: new Uint8Array(0),
     },
     {
       id: 'bgp-open',

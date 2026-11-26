@@ -220,4 +220,47 @@ describe('encodeUDP', () => {
     expect(result.bytes.slice(6, 8)).toEqual(new Uint8Array([0x00, 0x00]));
     expect(result.warnings.some((w) => w.fieldId === 'checksum')).toBe(true);
   });
+
+  it('produces zero warnings for both auto non-zero and manual 0x0000 UDP checksums over IPv4 when encapsulating VXLAN (RFC 7348 §5)', () => {
+    const vxlanZero = encodeUDP(
+      {
+        type: 'udp',
+        srcPort: 49152,
+        dstPort: 4789,
+        length: autoValue(),
+        checksum: manualValue(0x0000),
+      },
+      {
+        layerIndex: 2,
+        upperLayerType: 'vxlan',
+        upperBytes: new Uint8Array(8),
+        ip: validIPv4,
+      },
+    );
+    expect(vxlanZero.ok).toBe(true);
+    if (vxlanZero.ok) {
+      expect(vxlanZero.bytes.slice(6, 8)).toEqual(new Uint8Array([0x00, 0x00]));
+      expect(vxlanZero.warnings).toHaveLength(0);
+    }
+
+    const vxlanAuto = encodeUDP(
+      {
+        type: 'udp',
+        srcPort: 49152,
+        dstPort: 4789,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+      {
+        layerIndex: 2,
+        upperLayerType: 'vxlan',
+        upperBytes: new Uint8Array(8),
+        ip: validIPv4,
+      },
+    );
+    expect(vxlanAuto.ok).toBe(true);
+    if (vxlanAuto.ok) {
+      expect(vxlanAuto.warnings).toHaveLength(0);
+    }
+  });
 });

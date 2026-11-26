@@ -14,6 +14,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
   createPresets,
 } from './presets';
 
@@ -96,6 +97,7 @@ describe('FIELD_DOCS coverage and quality', () => {
           fin: true,
         },
       },
+      createDefaultVXLAN(),
       { ...createDefaultBGP(), bgpType: 1 },
       { ...createDefaultBGP(), bgpType: 2 },
       { ...createDefaultBGP(), bgpType: 3 },
