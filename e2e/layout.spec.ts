@@ -3,6 +3,14 @@ import { expect, test } from './fixtures';
 const VIEWPORT_WIDTHS = [360, 390, 768, 1040, 1100, 1280] as const;
 
 test.describe('Responsive layout', () => {
+  test('serves a valid favicon linked from index.html (200 OK)', async ({ page }) => {
+    await page.goto('/');
+    const href = await page.locator('link[rel="icon"]').getAttribute('href');
+    expect(href).toBeTruthy();
+    const res = await page.request.get(new URL(href!, page.url()).toString());
+    expect(res.status()).toBe(200);
+  });
+
   test('every preset has zero page horizontal overflow across all widths and zero hex-dump scroll at 1100px and 1280px', async ({
     page,
   }) => {

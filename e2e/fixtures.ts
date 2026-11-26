@@ -12,17 +12,10 @@ export const test = base.extend<{ failOnBrowserErrors: void }>({
       const attached = new WeakSet<Page>();
       const baseOrigin = baseURL ? new URL(baseURL).origin : null;
 
-      const isSameOrigin = (responseUrl: string, target: Page): boolean => {
+      const isSameOrigin = (responseUrl: string): boolean => {
+        if (!baseOrigin) return false;
         try {
-          const responseOrigin = new URL(responseUrl).origin;
-          if (baseOrigin) {
-            return responseOrigin === baseOrigin;
-          }
-          const pageUrl = target.url();
-          if (pageUrl && pageUrl !== 'about:blank') {
-            return responseOrigin === new URL(pageUrl).origin;
-          }
-          return false;
+          return new URL(responseUrl).origin === baseOrigin;
         } catch {
           return false;
         }
@@ -40,7 +33,7 @@ export const test = base.extend<{ failOnBrowserErrors: void }>({
           }
         });
         target.on('response', (res: Response) => {
-          if (res.status() >= 400 && isSameOrigin(res.url(), target)) {
+          if (res.status() >= 400 && isSameOrigin(res.url())) {
             errors.push(`HTTP ${res.status()}: ${res.url()}`);
           }
         });
