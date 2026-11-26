@@ -656,19 +656,32 @@ function decodeIPv6Chain(
   const actualPayloadLength = bytes.length - upperOffset;
   let scopedBytes = bytes;
   let effectivePayloadLength = actualPayloadLength;
+  const isJumbogramShape =
+    payloadLength === 0 && nextHeader === 0 && actualPayloadLength > 0;
 
-  if (depth === 0 && payloadLength < actualPayloadLength) {
+  if (depth === 0 && isJumbogramShape) {
+    notes.push(
+      'IPv6 Payload Length is 0 with Next Header 0 (Hop-by-Hop Options); Jumbogram (RFC 2675 §2) is not supported, so remaining bytes are kept as Payload.',
+    );
+  } else if (depth === 0 && payloadLength < actualPayloadLength) {
     const trailing = bytes.subarray(upperOffset + payloadLength);
     // Per RFC 8200 §3 / §8.1, upper-layer segments and checksums are bounded by IPv6 Payload Length.
     scopedBytes = bytes.subarray(0, upperOffset + payloadLength);
     effectivePayloadLength = payloadLength;
-    if (isAllZero(trailing)) {
-      notes.push(
-        `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv6 Payload Length (${payloadLength}).`,
-      );
+    const isInsideEthernet = offset > 0;
+    if (isInsideEthernet) {
+      if (isAllZero(trailing)) {
+        notes.push(
+          `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv6 Payload Length (${payloadLength}).`,
+        );
+      } else {
+        notes.push(
+          `Stripped ${trailing.length} trailing non-zero byte(s) of Ethernet padding/trailer beyond IPv6 Payload Length (${payloadLength}) per RFC 8200 §3; re-encoded bytes will omit these trailing bytes.`,
+        );
+      }
     } else {
       notes.push(
-        `Stripped ${trailing.length} trailing non-zero byte(s) of Ethernet padding/trailer beyond IPv6 Payload Length (${payloadLength}) per RFC 8200 §3; re-encoded bytes will omit these trailing bytes.`,
+        `Stripped ${trailing.length} trailing byte(s) beyond IPv6 Payload Length (${payloadLength}) per RFC 8200 §3; re-encoded bytes will omit these trailing bytes.`,
       );
     }
   }
@@ -677,7 +690,9 @@ function decodeIPv6Chain(
   const decodedUpperLayers: Layer[] = [];
   let payload: Uint8Array = scopedBytes.slice(upperOffset);
 
-  if (Object.prototype.hasOwnProperty.call(IPV6_EXTENSION_HEADER_NAMES, nextHeader)) {
+  if (depth === 0 && isJumbogramShape) {
+    // Already noted as an unsupported RFC 2675 §2 Jumbogram; keep remaining bytes in Payload.
+  } else if (Object.prototype.hasOwnProperty.call(IPV6_EXTENSION_HEADER_NAMES, nextHeader)) {
     notes.push(
       `IPv6 extension header Next Header ${nextHeader} (${IPV6_EXTENSION_HEADER_NAMES[nextHeader]}) is not decoded into a layer; remaining bytes kept as Payload.`,
     );

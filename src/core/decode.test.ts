@@ -730,6 +730,25 @@ describe('decodePacket', () => {
         payload: encodeUtf8('raw-v6'),
       },
       {
+        name: 'IPv6 boundary Flow Label 0xfffff + Traffic Class 0x00 and 0xff',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultIPv6(), trafficClass: 0x00, flowLabel: 0xfffff },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('flow-max'),
+      },
+      {
+        name: 'IPv6 boundary Traffic Class 0xff + Flow Label 0xfffff',
+        startLayer: 'ipv6',
+        layers: [
+          { ...createDefaultIPv6(), trafficClass: 0xff, flowLabel: 0xfffff },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('tc-flow-max'),
+      },
+      {
         name: 'Ethernet + IPv6 + TCP(179) + BGP OPEN',
         startLayer: 'ethernet',
         layers: [
@@ -763,9 +782,32 @@ describe('decodePacket', () => {
         expect(rebuilt.bytes, tc.name).toEqual(built.bytes);
       }
     }
+
+    // Boundary: Raw IPv6 with max Payload Length (65535 bytes) round-trips losslessly
+    const maxPayload = new Uint8Array(65535);
+    maxPayload[0] = 0xaa;
+    maxPayload[65534] = 0x55;
+    const maxV6Built = buildPacket(
+      [{ ...createDefaultIPv6(), nextHeader: manualValue(59) }],
+      maxPayload,
+    );
+    expect(maxV6Built.ok).toBe(true);
+    if (maxV6Built.ok) {
+      const dec = decodePacket(maxV6Built.bytes, 'ipv6');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers).toHaveLength(1);
+        expect(
+          dec.value.layers[0].type === 'ipv6' && dec.value.layers[0].payloadLength,
+        ).toEqual(autoValue());
+        expect(dec.value.payload).toEqual(maxPayload);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(maxV6Built.bytes);
+      }
+    }
   });
 
-  it('keeps IPv6 extension header (Next Header 60) as Payload with a note and round-trips losslessly', () => {
+  it('keeps IPv6 extension header (Next Header 60) and RFC 2675 Jumbogram shape (Payload Length 0 + NH 0) as Payload with notes and round-trips losslessly', () => {
     const extPayload = new Uint8Array([0x11, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00]);
     const built = buildPacket(
       [
@@ -792,6 +834,36 @@ describe('decodePacket', () => {
 
     const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
     expect(rebuilt.ok && rebuilt.bytes).toEqual(built.bytes);
+
+    // RFC 2675 §2 Jumbogram shape: Payload Length = 0 + Next Header = 0 (Hop-by-Hop Options)
+    // Trailing bytes must NOT be stripped as Ethernet padding.
+    const jumboBody = new Uint8Array([0x11, 0x00, 0xc2, 0x04, 0x00, 0x01, 0x00, 0x00]);
+    const jumboBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        {
+          ...createDefaultIPv6(),
+          payloadLength: manualValue(0),
+          nextHeader: manualValue(0),
+        },
+      ],
+      jumboBody,
+    );
+    expect(jumboBuilt.ok).toBe(true);
+    if (jumboBuilt.ok) {
+      const decJumbo = decodePacket(jumboBuilt.bytes, 'ethernet');
+      expect(decJumbo.ok).toBe(true);
+      if (decJumbo.ok) {
+        expect(decJumbo.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv6']);
+        expect(
+          decJumbo.value.layers[1].type === 'ipv6' && decJumbo.value.layers[1].payloadLength,
+        ).toEqual(manualValue(0));
+        expect(decJumbo.value.payload).toEqual(jumboBody);
+        expect(decJumbo.value.notes.some((n) => n.includes('RFC 2675'))).toBe(true);
+        const rebuiltJumbo = buildPacket(decJumbo.value.layers, decJumbo.value.payload);
+        expect(rebuiltJumbo.ok && rebuiltJumbo.bytes).toEqual(jumboBuilt.bytes);
+      }
+    }
   });
 
   it('handles Ethernet padding on IPv6 frames, manual Payload Length, invalid Raw IPv6, and mixed tunnel depth guard', () => {
