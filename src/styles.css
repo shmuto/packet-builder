@@ -1026,6 +1026,17 @@ body {
   line-height: 1.45;
 }
 
+.export-status-info {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+  color: var(--text-primary);
+  font-size: 0.77rem;
+  line-height: 1.45;
+}
+
 /* Hover detail strip */
 .hover-detail-strip {
   display: flex;
