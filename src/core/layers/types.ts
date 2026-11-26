@@ -1,3 +1,14 @@
+import type { LayerType } from './registry';
+
+export type { LayerType };
+
+export interface FieldDoc {
+  /** 1-2 plain-English sentences explaining what the field does and typical values. */
+  readonly summary: string;
+  /** Specific RFC or IEEE specification section reference (e.g., "RFC 791 §3.1"). */
+  readonly reference: string;
+}
+
 /**
  * 自動計算または手動上書きを表すフィールド値。
  * 学習用に、自動計算されるヘッダ項目（長さ・チェックサム等）へ任意の値を手動指定できる。
@@ -15,20 +26,6 @@ export function autoValue<T = number>(): AutoOrManual<T> {
 export function manualValue<T>(value: T): AutoOrManual<T> {
   return { mode: 'manual', value };
 }
-
-export type LayerType =
-  | 'ethernet'
-  | 'vlan'
-  | 'arp'
-  | 'ipv4'
-  | 'ipv6'
-  | 'icmp'
-  | 'icmpv6'
-  | 'gre'
-  | 'udp'
-  | 'tcp'
-  | 'vxlan'
-  | 'bgp';
 
 export interface EthernetLayer {
   readonly type: 'ethernet';

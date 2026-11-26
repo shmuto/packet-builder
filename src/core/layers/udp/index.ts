@@ -1,19 +1,37 @@
-import { concatBytes, writeUint16BE } from '../bytes';
-import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum';
-import { IP_PROTOCOL_UDP } from './ipv4';
+import { concatBytes, readUint16BE, writeUint16BE } from '../../bytes';
+import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../../checksum';
+import { ok, type Result } from '../../result';
+import { computePseudoChecksum } from '../decodeHelpers';
 import type {
-  LayerEncodeResult,
-  LayerType,
-  PacketError,
-  PacketWarning,
-  RelativeFieldSpan,
-  UDPLayer,
-} from './types';
-import { validateUintRange } from './types';
+  FieldDoc,
+  IPPseudoContext,
+  LayerDefinition,
+  ProtocolTables,
+} from '../definition';
+import {
+  expectNumber,
+  validateAutoOrManualNumber,
+  validateExactKeys,
+} from '../permalinkHelpers';
+import { getDefaultProtocolTables } from '../registry';
+import {
+  autoValue,
+  manualValue,
+  validateUintRange,
+  type LayerEncodeResult,
+  type PacketError,
+  type PacketWarning,
+  type RelativeFieldSpan,
+  type UDPLayer,
+} from '../types';
+
+export type { IPPseudoContext };
 
 /** UDP header length (8 bytes, RFC 768) */
 export const UDP_HEADER_LENGTH = 8;
 export const UDP_MAX_LENGTH = 0xffff;
+/** IANA IP Protocol / IPv6 Next Header number for UDP (RFC 768) */
+export const IP_PROTOCOL_UDP = 17;
 
 export const UDP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'srcPort', label: 'Source Port', bitOffset: 0, bitLength: 16 },
@@ -22,22 +40,46 @@ export const UDP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'checksum', label: 'Checksum', bitOffset: 48, bitLength: 16 },
 ];
 
-export type IPPseudoContext =
-  | {
-      readonly status: 'valid';
-      readonly version: 4 | 6;
-      readonly srcIp: Uint8Array;
-      readonly dstIp: Uint8Array;
-    }
-  | { readonly status: 'invalid'; readonly version?: 4 | 6 }
-  | { readonly status: 'absent' };
+export const UDP_FIELD_DOCS: Readonly<Record<string, FieldDoc>> = {
+  srcPort: {
+    summary:
+      '16-bit port number of the sending process, typically an ephemeral port (49152-65535). May be 0 when no reply is needed.',
+    reference: 'RFC 768 "Fields"',
+  },
+  dstPort: {
+    summary:
+      '16-bit port number identifying the target service on the destination host, such as 53 (DNS) or 443 (QUIC).',
+    reference: 'RFC 768 "Fields"',
+  },
+  length: {
+    summary:
+      'Length in bytes of the UDP header (8 bytes) plus its payload. Minimum valid value is 8.',
+    reference: 'RFC 768 "Fields"',
+  },
+  checksum: {
+    summary:
+      '16-bit checksum over the IPv4/IPv6 pseudo-header, UDP header, and payload. A computed zero is sent as 0xffff; 0x0000 disables the checksum over IPv4, while IPv6 normally requires a non-zero checksum (except for specific tunnel protocols permitted under RFC 6935 / RFC 6936).',
+    reference: 'RFC 768 "Fields" / RFC 8200 §8.1 / RFC 6935',
+  },
+};
 
 export interface EncodeUDPContext {
   readonly layerIndex: number;
-  readonly upperLayerType?: LayerType | null;
+  readonly upperLayerType?: string | null;
   readonly upperBytes: Uint8Array;
   /** Immediately preceding IPv4 or IPv6 layer state used for pseudo-header checksum calculation */
   readonly ip: IPPseudoContext;
+  readonly tables?: ProtocolTables;
+}
+
+export function createDefaultUDP(): UDPLayer {
+  return {
+    type: 'udp',
+    srcPort: 12345,
+    dstPort: 8080,
+    length: autoValue(),
+    checksum: autoValue(),
+  };
 }
 
 /**
@@ -47,6 +89,7 @@ export interface EncodeUDPContext {
 export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeResult {
   const errors: PacketError[] = [];
   const warnings: PacketWarning[] = [];
+  const tables = ctx.tables ?? getDefaultProtocolTables();
 
   const srcPortErr = validateUintRange(layer.srcPort, 0xffff, 'Source Port');
   if (srcPortErr !== null) {
@@ -151,8 +194,7 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
           message:
             'UDP Checksum is mandatory over IPv6; packets with a 0x0000 checksum must be discarded by receivers (RFC 8200 §8.1).',
         });
-      } else if (ctx.upperLayerType !== 'vxlan') {
-        // RFC 7348 §5: VXLAN over IPv4 SHOULD transmit outer UDP checksum as 0x0000 (and MAY be non-zero); do not warn on either choice.
+      } else if (!tables.allowsZeroUdpChecksumOverIPv4(ctx.upperLayerType ?? null)) {
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'checksum',
@@ -179,3 +221,93 @@ export function encodeUDP(layer: UDPLayer, ctx: EncodeUDPContext): LayerEncodeRe
     },
   };
 }
+
+function validateUDPPermalink(raw: Record<string, unknown>, ctx: string): Result<UDPLayer> {
+  const checked = validateExactKeys(raw, ['type', 'srcPort', 'dstPort', 'length', 'checksum'], ctx);
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const srcPort = expectNumber(obj, 'srcPort', ctx);
+  if (!srcPort.ok) return srcPort;
+  const dstPort = expectNumber(obj, 'dstPort', ctx);
+  if (!dstPort.ok) return dstPort;
+  const length = validateAutoOrManualNumber(obj.length, `${ctx}.length`);
+  if (!length.ok) return length;
+  const checksum = validateAutoOrManualNumber(obj.checksum, `${ctx}.checksum`);
+  if (!checksum.ok) return checksum;
+  return ok({
+    type: 'udp',
+    srcPort: srcPort.value,
+    dstPort: dstPort.value,
+    length: length.value,
+    checksum: checksum.value,
+  });
+}
+
+export const udpDefinition: LayerDefinition<UDPLayer, 'udp'> = {
+  type: 'udp',
+  minHeaderLength: UDP_HEADER_LENGTH,
+  createDefault: createDefaultUDP,
+  headerLength: () => UDP_HEADER_LENGTH,
+  encode: (layer, ctx) =>
+    encodeUDP(layer, {
+      layerIndex: ctx.layerIndex,
+      upperLayerType: ctx.upperLayerType,
+      upperBytes: ctx.upperBytes,
+      ip: ctx.ip,
+      tables: ctx.tables,
+    }),
+  provideLowerContext(layer) {
+    if (
+      Number.isInteger(layer.srcPort) &&
+      layer.srcPort >= 0 &&
+      layer.srcPort <= 0xffff &&
+      Number.isInteger(layer.dstPort) &&
+      layer.dstPort >= 0 &&
+      layer.dstPort <= 0xffff
+    ) {
+      return { udp: { status: 'valid', srcPort: layer.srcPort, dstPort: layer.dstPort } };
+    }
+    return { udp: { status: 'invalid' } };
+  },
+  decode(bytes, offset, ctx) {
+    const srcPort = readUint16BE(bytes, offset);
+    const dstPort = readUint16BE(bytes, offset + 2);
+    const length = readUint16BE(bytes, offset + 4);
+    const checksum = readUint16BE(bytes, offset + 6);
+
+    const actualLength = bytes.length - offset;
+    const segmentCopy = new Uint8Array(bytes.subarray(offset));
+    segmentCopy[6] = 0;
+    segmentCopy[7] = 0;
+
+    const expectedChecksum = ctx.ip
+      ? (() => {
+          const csumRes = computePseudoChecksum(ctx.ip, IP_PROTOCOL_UDP, segmentCopy);
+          return csumRes.ok ? (csumRes.value === 0 ? 0xffff : csumRes.value) : null;
+        })()
+      : null;
+
+    const udpLayer: UDPLayer = {
+      type: 'udp',
+      srcPort,
+      dstPort,
+      length: length === actualLength ? autoValue() : manualValue(length),
+      checksum:
+        expectedChecksum !== null && checksum === expectedChecksum
+          ? autoValue()
+          : manualValue(checksum),
+    };
+
+    const payloadOffset = offset + UDP_HEADER_LENGTH;
+    const upper = ctx.decodeByUdpPort(bytes, payloadOffset, dstPort, ctx.tunnelDepth);
+    return {
+      layers: [udpLayer, ...upper.layers],
+      payload: upper.payload,
+    };
+  },
+  validatePermalink: validateUDPPermalink,
+  fieldDocs: UDP_FIELD_DOCS,
+  protocols: {
+    ipProtocol: IP_PROTOCOL_UDP,
+  },
+};

@@ -1,13 +1,34 @@
-import { parseHexBytes, parseIPv4, writeUint16BE } from '../bytes';
+import {
+  formatIPv4,
+  parseHexBytes,
+  parseIPv4,
+  readUint16BE,
+  writeUint16BE,
+} from '../../bytes';
+import { err, ok, type Result } from '../../result';
 import type {
-  BGPLayer,
-  BGPMessageType,
-  LayerEncodeResult,
-  PacketError,
-  PacketWarning,
-  RelativeFieldSpan,
-} from './types';
-import { validateUintRange } from './types';
+  FieldDoc,
+  LayerDefinition,
+  TCPTransportContext,
+} from '../definition';
+import {
+  expectNumber,
+  expectString,
+  validateAutoOrManualNumber,
+  validateAutoOrManualString,
+  validateExactKeys,
+} from '../permalinkHelpers';
+import {
+  autoValue,
+  manualValue,
+  validateUintRange,
+  type BGPLayer,
+  type BGPMessageType,
+  type LayerEncodeResult,
+  type PacketError,
+  type PacketWarning,
+  type RelativeFieldSpan,
+} from '../types';
 
 /** BGP-4 common header length (19 bytes: 16B Marker + 2B Length + 1B Type, RFC 4271 §4.1) */
 export const BGP_COMMON_HEADER_LENGTH = 19;
@@ -25,6 +46,15 @@ export const BGP_TYPE_NOTIFICATION = 3;
 export const BGP_TYPE_KEEPALIVE = 4;
 
 export const BGP_DEFAULT_MARKER_HEX = 'ff'.repeat(16);
+
+const MIN_VALID_TCP_DATA_OFFSET = 5;
+
+const BGP_TYPE_NAMES: Readonly<Record<BGPMessageType, string>> = {
+  1: 'OPEN',
+  2: 'UPDATE',
+  3: 'NOTIFICATION',
+  4: 'KEEPALIVE',
+};
 
 const COMMON_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'marker', label: 'Marker', bitOffset: 0, bitLength: 128 },
@@ -55,6 +85,87 @@ export const BGP_NOTIFICATION_FIELD_SPANS: readonly RelativeFieldSpan[] = [
 
 export const BGP_KEEPALIVE_FIELD_SPANS: readonly RelativeFieldSpan[] = COMMON_SPANS;
 
+export const BGP_FIELD_DOCS: Readonly<Record<string, FieldDoc>> = {
+  marker: {
+    summary:
+      '16-byte synchronization field that must be set to all ones (0xff × 16) in BGP-4 for message framing compatibility.',
+    reference: 'RFC 4271 §4.1',
+  },
+  length: {
+    summary:
+      'Total length of the BGP message in bytes, including the 19-byte common header. Standard BGP-4 allows 19 to 4,096 bytes, or up to 65,535 bytes when both peers negotiate RFC 8654 Extended Messages.',
+    reference: 'RFC 4271 §4.1 / RFC 8654 §3',
+  },
+  bgpType: {
+    summary:
+      '1-byte code identifying the BGP message type: 1 (OPEN), 2 (UPDATE), 3 (NOTIFICATION), or 4 (KEEPALIVE).',
+    reference: 'RFC 4271 §4.1',
+  },
+  version: {
+    summary:
+      '1-byte protocol version advertised during session setup. Always 4 for BGP-4.',
+    reference: 'RFC 4271 §4.2',
+  },
+  myAs: {
+    summary:
+      '16-bit Autonomous System Number (ASN) of the BGP speaker sending the OPEN message (use 23456 when carrying a 4-byte ASN in capabilities).',
+    reference: 'RFC 4271 §4.2 / RFC 6793 §3',
+  },
+  holdTime: {
+    summary:
+      'Maximum seconds allowed between successive KEEPALIVE or UPDATE messages before tearing down the session. Must be 0 (disabled) or at least 3 (commonly 90 or 180).',
+    reference: 'RFC 4271 §4.2',
+  },
+  bgpIdentifier: {
+    summary:
+      '32-bit router ID formatted like an IPv4 address that uniquely identifies the BGP speaker within its Autonomous System.',
+    reference: 'RFC 4271 §4.2',
+  },
+  optParamLength: {
+    summary:
+      '1-byte length of the Optional Parameters (such as Capabilities) following the fixed OPEN header. Zero when no optional parameters are sent.',
+    reference: 'RFC 4271 §4.2',
+  },
+  withdrawnRoutesLength: {
+    summary:
+      '2-byte length of the Withdrawn Routes section listing IPv4 prefixes being removed from service. Zero when no routes are withdrawn.',
+    reference: 'RFC 4271 §4.3',
+  },
+  totalPathAttrLength: {
+    summary:
+      '2-byte length of the Path Attributes section (such as ORIGIN, AS_PATH, and NEXT_HOP) describing announced routes.',
+    reference: 'RFC 4271 §4.3',
+  },
+  errorCode: {
+    summary:
+      '1-byte category explaining why a BGP session is being closed (1-6 in RFC 4271, such as 2 = OPEN Message Error or 4 = Hold Timer Expired; 7 = Route Refresh Error).',
+    reference: 'RFC 4271 §4.5 / RFC 7313 §5',
+  },
+  errorSubcode: {
+    summary:
+      '1-byte detail code refining the Error Code in a NOTIFICATION message, or 0 for an unspecific error.',
+    reference: 'RFC 4271 §4.5',
+  },
+};
+
+export function createDefaultBGP(): BGPLayer {
+  return {
+    type: 'bgp',
+    bgpType: 1,
+    marker: autoValue(),
+    length: autoValue(),
+    version: autoValue(),
+    myAs: 65001,
+    holdTime: 180,
+    bgpIdentifier: '192.168.0.1',
+    optParamLength: autoValue(),
+    withdrawnRoutesLength: autoValue(),
+    totalPathAttrLength: autoValue(),
+    errorCode: 6,
+    errorSubcode: 4,
+  };
+}
+
 export function getBGPHeaderLength(bgpType: BGPMessageType): number {
   switch (bgpType) {
     case BGP_TYPE_OPEN:
@@ -68,10 +179,7 @@ export function getBGPHeaderLength(bgpType: BGPMessageType): number {
   }
 }
 
-export type BGPUnderlyingTCPContext =
-  | { readonly status: 'valid'; readonly srcPort: number; readonly dstPort: number }
-  | { readonly status: 'invalid' }
-  | { readonly status: 'absent' };
+export type BGPUnderlyingTCPContext = TCPTransportContext;
 
 export interface EncodeBGPContext {
   readonly layerIndex: number;
@@ -408,3 +516,248 @@ export function encodeBGP(layer: BGPLayer, ctx: EncodeBGPContext): LayerEncodeRe
     resolvedAutoValues,
   };
 }
+
+function isBGPMessageType(value: number): value is BGPMessageType {
+  return (
+    value === BGP_TYPE_OPEN ||
+    value === BGP_TYPE_UPDATE ||
+    value === BGP_TYPE_NOTIFICATION ||
+    value === BGP_TYPE_KEEPALIVE
+  );
+}
+
+function validateBGPPermalink(raw: Record<string, unknown>, ctx: string): Result<BGPLayer> {
+  const checked = validateExactKeys(
+    raw,
+    [
+      'type',
+      'bgpType',
+      'marker',
+      'length',
+      'version',
+      'myAs',
+      'holdTime',
+      'bgpIdentifier',
+      'optParamLength',
+      'withdrawnRoutesLength',
+      'totalPathAttrLength',
+      'errorCode',
+      'errorSubcode',
+    ],
+    ctx,
+  );
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const bgpTypeRaw = obj.bgpType;
+  if (bgpTypeRaw !== 1 && bgpTypeRaw !== 2 && bgpTypeRaw !== 3 && bgpTypeRaw !== 4) {
+    return err(`${ctx}.bgpType must be 1, 2, 3, or 4.`);
+  }
+  const bgpType: BGPMessageType = bgpTypeRaw;
+  const marker = validateAutoOrManualString(obj.marker, `${ctx}.marker`);
+  if (!marker.ok) return marker;
+  const length = validateAutoOrManualNumber(obj.length, `${ctx}.length`);
+  if (!length.ok) return length;
+  const version = validateAutoOrManualNumber(obj.version, `${ctx}.version`);
+  if (!version.ok) return version;
+  const myAs = expectNumber(obj, 'myAs', ctx);
+  if (!myAs.ok) return myAs;
+  const holdTime = expectNumber(obj, 'holdTime', ctx);
+  if (!holdTime.ok) return holdTime;
+  const bgpIdentifier = expectString(obj, 'bgpIdentifier', ctx);
+  if (!bgpIdentifier.ok) return bgpIdentifier;
+  const optParamLength = validateAutoOrManualNumber(obj.optParamLength, `${ctx}.optParamLength`);
+  if (!optParamLength.ok) return optParamLength;
+  const withdrawnRoutesLength = validateAutoOrManualNumber(
+    obj.withdrawnRoutesLength,
+    `${ctx}.withdrawnRoutesLength`,
+  );
+  if (!withdrawnRoutesLength.ok) return withdrawnRoutesLength;
+  const totalPathAttrLength = validateAutoOrManualNumber(
+    obj.totalPathAttrLength,
+    `${ctx}.totalPathAttrLength`,
+  );
+  if (!totalPathAttrLength.ok) return totalPathAttrLength;
+  const errorCode = expectNumber(obj, 'errorCode', ctx);
+  if (!errorCode.ok) return errorCode;
+  const errorSubcode = expectNumber(obj, 'errorSubcode', ctx);
+  if (!errorSubcode.ok) return errorSubcode;
+  return ok({
+    type: 'bgp',
+    bgpType,
+    marker: marker.value,
+    length: length.value,
+    version: version.value,
+    myAs: myAs.value,
+    holdTime: holdTime.value,
+    bgpIdentifier: bgpIdentifier.value,
+    optParamLength: optParamLength.value,
+    withdrawnRoutesLength: withdrawnRoutesLength.value,
+    totalPathAttrLength: totalPathAttrLength.value,
+    errorCode: errorCode.value,
+    errorSubcode: errorSubcode.value,
+  });
+}
+
+export const bgpDefinition: LayerDefinition<BGPLayer, 'bgp'> = {
+  type: 'bgp',
+  minHeaderLength: BGP_COMMON_HEADER_LENGTH,
+  createDefault: createDefaultBGP,
+  headerLength: (layer) => getBGPHeaderLength(layer.bgpType),
+  encode: (layer, ctx) =>
+    encodeBGP(layer, {
+      layerIndex: ctx.layerIndex,
+      upperBytesLength: ctx.upperBytesLength,
+      tcp: ctx.tcp,
+    }),
+  decode(bytes, offset, ctx) {
+    const tcpPayload = bytes.subarray(offset);
+    if (tcpPayload.length === 0) {
+      return null;
+    }
+
+    if (ctx.tcpDataOffsetAuto === false) {
+      if (
+        ctx.tcpDataOffsetValue !== undefined &&
+        ctx.tcpDataOffsetValue < MIN_VALID_TCP_DATA_OFFSET
+      ) {
+        ctx.notes.push(
+          `TCP segment on port ${BGP_PORT} has invalid Data Offset (${ctx.tcpDataOffsetValue}); BGP-4 decoding skipped.`,
+        );
+      }
+      return null;
+    }
+
+    // RFC 4271 §4.1: BGP messages begin with a 16-octet all-ones Marker (0xff * 16).
+    if (tcpPayload.length < 16 || !isAllFF(tcpPayload.subarray(0, 16))) {
+      return null;
+    }
+
+    if (tcpPayload.length < BGP_COMMON_HEADER_LENGTH) {
+      ctx.notes.push(
+        `BGP-4 message on TCP port ${BGP_PORT} is truncated (${tcpPayload.length} bytes, need at least ${BGP_COMMON_HEADER_LENGTH}); remaining bytes kept as Payload.`,
+      );
+      return null;
+    }
+
+    const bgpLength = readUint16BE(tcpPayload, 16);
+    const rawType = tcpPayload[18];
+
+    if (!isBGPMessageType(rawType)) {
+      ctx.notes.push(
+        `BGP message Type ${rawType} is not decoded into a layer (supported: 1=OPEN, 2=UPDATE, 3=NOTIFICATION, 4=KEEPALIVE); remaining bytes kept as Payload.`,
+      );
+      return null;
+    }
+
+    const headerLen = getBGPHeaderLength(rawType);
+    if (tcpPayload.length < headerLen) {
+      ctx.notes.push(
+        `BGP-4 ${BGP_TYPE_NAMES[rawType]} message on TCP port ${BGP_PORT} is truncated (${tcpPayload.length} bytes, need at least ${headerLen}); remaining bytes kept as Payload.`,
+      );
+      return null;
+    }
+
+    if (bgpLength < headerLen) {
+      ctx.notes.push(
+        `BGP Length (${bgpLength}) is smaller than the ${headerLen}-byte ${BGP_TYPE_NAMES[rawType]} header; kept as manual Length.`,
+      );
+    } else if (bgpLength < tcpPayload.length) {
+      ctx.notes.push(
+        `BGP Length (${bgpLength}) is smaller than TCP payload (${tcpPayload.length} bytes); additional bytes (e.g., pipelined BGP messages) are preserved in Payload.`,
+      );
+    } else if (bgpLength > tcpPayload.length) {
+      ctx.notes.push(
+        `BGP Length (${bgpLength}) exceeds available TCP payload (${tcpPayload.length} bytes); kept as manual Length.`,
+      );
+    }
+
+    const baseLayer: BGPLayer = {
+      type: 'bgp',
+      bgpType: rawType,
+      marker: autoValue<string>(),
+      length: bgpLength === tcpPayload.length ? autoValue() : manualValue(bgpLength),
+      version: autoValue(),
+      myAs: 65001,
+      holdTime: 180,
+      bgpIdentifier: '192.0.2.1',
+      optParamLength: autoValue(),
+      withdrawnRoutesLength: autoValue(),
+      totalPathAttrLength: autoValue(),
+      errorCode: 6,
+      errorSubcode: 0,
+    };
+
+    if (rawType === BGP_TYPE_OPEN) {
+      const versionByte = tcpPayload[19];
+      const myAs = readUint16BE(tcpPayload, 20);
+      const holdTime = readUint16BE(tcpPayload, 22);
+      const bgpIdentifier = formatIPv4(tcpPayload.subarray(24, 28));
+      const optParamLen = tcpPayload[28];
+      const remainingPayload = tcpPayload.slice(headerLen);
+
+      return {
+        layers: [
+          {
+            ...baseLayer,
+            version: versionByte === BGP_VERSION_4 ? autoValue() : manualValue(versionByte),
+            myAs,
+            holdTime,
+            bgpIdentifier,
+            optParamLength:
+              optParamLen === remainingPayload.length ? autoValue() : manualValue(optParamLen),
+          },
+        ],
+        payload: remainingPayload,
+      };
+    }
+
+    if (rawType === BGP_TYPE_UPDATE) {
+      const withdrawnLen = readUint16BE(tcpPayload, 19);
+      const attrLen = readUint16BE(tcpPayload, 21);
+      const remainingPayload = tcpPayload.slice(headerLen);
+
+      if (withdrawnLen > 0) {
+        ctx.notes.push(
+          `BGP UPDATE has non-zero Withdrawn Routes Length (${withdrawnLen}); RFC 4271 §4.3 places Withdrawn Routes before Total Path Attribute Length, so bytes 21..22 were preserved in Total Path Attribute Length for lossless round-trip.`,
+        );
+      }
+
+      return {
+        layers: [
+          {
+            ...baseLayer,
+            withdrawnRoutesLength: withdrawnLen === 0 ? autoValue() : manualValue(withdrawnLen),
+            totalPathAttrLength: attrLen === 0 ? autoValue() : manualValue(attrLen),
+          },
+        ],
+        payload: remainingPayload,
+      };
+    }
+
+    if (rawType === BGP_TYPE_NOTIFICATION) {
+      const errorCode = tcpPayload[19];
+      const errorSubcode = tcpPayload[20];
+      return {
+        layers: [
+          {
+            ...baseLayer,
+            errorCode,
+            errorSubcode,
+          },
+        ],
+        payload: tcpPayload.slice(headerLen),
+      };
+    }
+
+    // Type 4: KEEPALIVE
+    return {
+      layers: [baseLayer],
+      payload: tcpPayload.slice(headerLen),
+    };
+  },
+  validatePermalink: validateBGPPermalink,
+  fieldDocs: BGP_FIELD_DOCS,
+  protocols: {
+    tcpPort: BGP_PORT,
+  },
+};

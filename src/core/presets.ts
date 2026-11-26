@@ -1,20 +1,33 @@
 import { encodeUtf8 } from './bytes';
-import type {
-  ARPLayer,
-  BGPLayer,
-  EthernetLayer,
-  GRELayer,
-  ICMPLayer,
-  ICMPv6Layer,
-  IPv4Layer,
-  IPv6Layer,
-  Layer,
-  TCPLayer,
-  UDPLayer,
-  VLANLayer,
-  VXLANLayer,
-} from './layers/types';
-import { autoValue, manualValue } from './layers/types';
+import { createDefaultARP } from './layers/arp';
+import { createDefaultBGP } from './layers/bgp';
+import { createDefaultEthernet } from './layers/ethernet';
+import { createDefaultGRE } from './layers/gre';
+import { createDefaultICMP } from './layers/icmp';
+import { createDefaultICMPv6 } from './layers/icmpv6';
+import { createDefaultIPv4 } from './layers/ipv4';
+import { createDefaultIPv6 } from './layers/ipv6';
+import { createDefaultTCP } from './layers/tcp';
+import type { Layer } from './layers/types';
+import { manualValue } from './layers/types';
+import { createDefaultUDP } from './layers/udp';
+import { createDefaultVLAN } from './layers/vlan';
+import { createDefaultVXLAN } from './layers/vxlan';
+
+export {
+  createDefaultARP,
+  createDefaultBGP,
+  createDefaultEthernet,
+  createDefaultGRE,
+  createDefaultICMP,
+  createDefaultICMPv6,
+  createDefaultIPv4,
+  createDefaultIPv6,
+  createDefaultTCP,
+  createDefaultUDP,
+  createDefaultVLAN,
+  createDefaultVXLAN,
+};
 
 export type PresetId =
   | 'udp'
@@ -37,178 +50,6 @@ export interface PacketPreset {
   readonly payloadMode?: 'text' | 'hex';
   readonly payloadText: string;
   readonly payloadBytes: Uint8Array;
-}
-
-export function createDefaultEthernet(): EthernetLayer {
-  return {
-    type: 'ethernet',
-    dstMac: '00:11:22:33:44:55',
-    srcMac: '66:77:88:99:aa:bb',
-    etherType: autoValue(),
-  };
-}
-
-/** Creates a default IEEE 802.1Q VLAN tag (PCP 0, DEI 0, VID 100). */
-export function createDefaultVLAN(): VLANLayer {
-  return {
-    type: 'vlan',
-    pcp: 0,
-    dei: false,
-    vid: 100,
-    etherType: autoValue(),
-  };
-}
-
-export function createDefaultARP(): ARPLayer {
-  return {
-    type: 'arp',
-    hardwareType: autoValue(),
-    protocolType: autoValue(),
-    hardwareLength: autoValue(),
-    protocolLength: autoValue(),
-    operation: 1,
-    senderMac: '66:77:88:99:aa:bb',
-    senderIp: '192.168.0.1',
-    targetMac: '00:00:00:00:00:00',
-    targetIp: '192.168.0.2',
-  };
-}
-
-export function createDefaultIPv4(): IPv4Layer {
-  return {
-    type: 'ipv4',
-    ihl: autoValue(),
-    tos: 0,
-    totalLength: autoValue(),
-    identification: 0x1234,
-    flags: { reserved: false, df: true, mf: false },
-    fragmentOffset: 0,
-    ttl: 64,
-    protocol: autoValue(),
-    headerChecksum: autoValue(),
-    srcIp: '192.168.0.1',
-    dstIp: '192.168.0.2',
-    options: [],
-  };
-}
-
-/** Creates a default IPv6 header using the RFC 3849 documentation prefix (2001:db8::/32). */
-export function createDefaultIPv6(): IPv6Layer {
-  return {
-    type: 'ipv6',
-    trafficClass: 0,
-    flowLabel: 0,
-    payloadLength: autoValue(),
-    nextHeader: autoValue(),
-    hopLimit: 64,
-    srcIp: '2001:db8::1',
-    dstIp: '2001:db8::2',
-  };
-}
-
-export function createDefaultUDP(): UDPLayer {
-  return {
-    type: 'udp',
-    srcPort: 12345,
-    dstPort: 8080,
-    length: autoValue(),
-    checksum: autoValue(),
-  };
-}
-
-export function createDefaultTCP(): TCPLayer {
-  return {
-    type: 'tcp',
-    srcPort: 54321,
-    dstPort: 443,
-    seqNumber: 1000,
-    ackNumber: 0,
-    dataOffset: autoValue(),
-    flags: {
-      cwr: false,
-      ece: false,
-      urg: false,
-      ack: false,
-      psh: false,
-      rst: false,
-      syn: true,
-      fin: false,
-    },
-    windowSize: 65535,
-    checksum: autoValue(),
-    urgentPointer: 0,
-    options: [],
-  };
-}
-
-export function createDefaultICMP(): ICMPLayer {
-  return {
-    type: 'icmp',
-    icmpType: 8,
-    code: 0,
-    checksum: autoValue(),
-    identifier: 1,
-    sequenceNumber: 1,
-  };
-}
-
-/** Creates a default ICMPv6 Echo Request header (Type 128, Code 0, RFC 4443 §4.1). */
-export function createDefaultICMPv6(): ICMPv6Layer {
-  return {
-    type: 'icmpv6',
-    icmpType: 128,
-    code: 0,
-    checksum: autoValue(),
-    rest: {
-      kind: 'echo',
-      identifier: 1,
-      sequence: 1,
-    },
-  };
-}
-
-/** Creates a default GRE header (4-byte base header, Version 0, auto Protocol Type, RFC 2784). */
-export function createDefaultGRE(): GRELayer {
-  return {
-    type: 'gre',
-    checksumPresent: false,
-    keyPresent: false,
-    sequencePresent: false,
-    version: autoValue(),
-    protocolType: autoValue(),
-    checksum: autoValue(),
-    key: 0,
-    sequenceNumber: 0,
-  };
-}
-
-/** Creates a default VXLAN header (I-flag auto 0x08, VNI 100, reserved fields 0, RFC 7348 §5). */
-export function createDefaultVXLAN(): VXLANLayer {
-  return {
-    type: 'vxlan',
-    flags: autoValue(),
-    vni: 100,
-    reserved1: 0,
-    reserved2: 0,
-  };
-}
-
-export function createDefaultBGP(): BGPLayer {
-  return {
-    type: 'bgp',
-    bgpType: 1,
-    marker: autoValue(),
-    length: autoValue(),
-    version: autoValue(),
-    myAs: 65001,
-    holdTime: 180,
-    bgpIdentifier: '192.168.0.1',
-    optParamLength: autoValue(),
-    withdrawnRoutesLength: autoValue(),
-    totalPathAttrLength: autoValue(),
-    errorCode: 6,
-    errorSubcode: 4,
-  };
 }
 
 /** Creates the built-in packet presets for quick exploration */

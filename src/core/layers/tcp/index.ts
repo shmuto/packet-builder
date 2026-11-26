@@ -1,22 +1,27 @@
-import { concatBytes, parseHexBytes, writeUint16BE, writeUint32BE } from '../bytes';
-import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum';
-import { IP_PROTOCOL_TCP } from './ipv4';
-import type { IPPseudoContext } from './udp';
-import type {
-  LayerEncodeResult,
-  PacketError,
-  PacketWarning,
-  RelativeFieldSpan,
-  TCPLayer,
-  TCPOption,
-} from './types';
-import { validateUintRange } from './types';
+import { concatBytes, parseHexBytes, writeUint16BE, writeUint32BE } from '../../bytes';
+import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../../checksum';
+import type { IPPseudoContext, LayerDefinition } from '../definition';
+import {
+  autoValue,
+  validateUintRange,
+  type LayerEncodeResult,
+  type PacketError,
+  type PacketWarning,
+  type RelativeFieldSpan,
+  type TCPLayer,
+  type TCPOption,
+} from '../types';
+import { decodeTCPLayer } from './decode';
+import { TCP_FIELD_DOCS } from './fieldDocs';
+import { validateTCPPermalink } from './permalink';
 
 /** Base TCP header length without options (20 bytes, RFC 9293 Section 3.1) */
 export const TCP_HEADER_LENGTH = 20;
 export const TCP_DEFAULT_DATA_OFFSET = 5;
 export const TCP_MAX_DATA_OFFSET = 15;
 export const TCP_MAX_OPTIONS_LENGTH = (TCP_MAX_DATA_OFFSET - TCP_DEFAULT_DATA_OFFSET) * 4; // 40 bytes
+/** IANA IP Protocol / IPv6 Next Header number for TCP (RFC 9293) */
+export const IP_PROTOCOL_TCP = 6;
 
 /** Standard TCP Option Kind numbers (IANA / RFC 9293, RFC 7323, RFC 2018) */
 export const TCP_OPT_EOL = 0;
@@ -47,6 +52,31 @@ export interface EncodeTCPContext {
   readonly upperBytes: Uint8Array;
   /** Immediately preceding IPv4 or IPv6 layer state used for pseudo-header checksum calculation */
   readonly ip: IPPseudoContext;
+}
+
+export function createDefaultTCP(): TCPLayer {
+  return {
+    type: 'tcp',
+    srcPort: 54321,
+    dstPort: 443,
+    seqNumber: 1000,
+    ackNumber: 0,
+    dataOffset: autoValue(),
+    flags: {
+      cwr: false,
+      ece: false,
+      urg: false,
+      ack: false,
+      psh: false,
+      rst: false,
+      syn: true,
+      fin: false,
+    },
+    windowSize: 65535,
+    checksum: autoValue(),
+    urgentPointer: 0,
+    options: [],
+  };
 }
 
 /**
@@ -583,3 +613,35 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
     resolvedAutoValues,
   };
 }
+
+export const tcpDefinition: LayerDefinition<TCPLayer, 'tcp'> = {
+  type: 'tcp',
+  minHeaderLength: TCP_HEADER_LENGTH,
+  createDefault: createDefaultTCP,
+  headerLength: (layer) => getTCPHeaderLength(layer),
+  encode: (layer, ctx) =>
+    encodeTCP(layer, {
+      layerIndex: ctx.layerIndex,
+      upperBytes: ctx.upperBytes,
+      ip: ctx.ip,
+    }),
+  provideLowerContext(layer) {
+    if (
+      Number.isInteger(layer.srcPort) &&
+      layer.srcPort >= 0 &&
+      layer.srcPort <= 0xffff &&
+      Number.isInteger(layer.dstPort) &&
+      layer.dstPort >= 0 &&
+      layer.dstPort <= 0xffff
+    ) {
+      return { tcp: { status: 'valid', srcPort: layer.srcPort, dstPort: layer.dstPort } };
+    }
+    return { tcp: { status: 'invalid' } };
+  },
+  decode: decodeTCPLayer,
+  validatePermalink: validateTCPPermalink,
+  fieldDocs: TCP_FIELD_DOCS,
+  protocols: {
+    ipProtocol: IP_PROTOCOL_TCP,
+  },
+};

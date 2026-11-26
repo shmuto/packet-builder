@@ -1,15 +1,20 @@
-import { parseHexBytes, parseIPv4, writeUint16BE } from '../bytes';
-import { internetChecksum } from '../checksum';
-import type {
-  IPv4Layer,
-  IPv4Option,
-  LayerEncodeResult,
-  LayerType,
-  PacketError,
-  PacketWarning,
-  RelativeFieldSpan,
-} from './types';
-import { validateUintRange } from './types';
+import { parseHexBytes, parseIPv4, writeUint16BE } from '../../bytes';
+import { internetChecksum } from '../../checksum';
+import type { LayerDefinition, ProtocolTables } from '../definition';
+import { getDefaultProtocolTables } from '../registry';
+import {
+  autoValue,
+  validateUintRange,
+  type IPv4Layer,
+  type IPv4Option,
+  type LayerEncodeResult,
+  type PacketError,
+  type PacketWarning,
+  type RelativeFieldSpan,
+} from '../types';
+import { decodeIPv4Layer, decodeIPv4Start } from './decode';
+import { IPV4_FIELD_DOCS } from './fieldDocs';
+import { validateIPv4Permalink } from './permalink';
 
 /** Base IPv4 header length without options (IHL=5, 20 bytes, RFC 791 §3.1) */
 export const IPV4_HEADER_LENGTH = 20;
@@ -19,14 +24,12 @@ export const IPV4_MAX_IHL = 15;
 export const IPV4_MAX_OPTIONS_LENGTH = (IPV4_MAX_IHL - IPV4_IHL) * 4; // 40 bytes
 export const IPV4_MAX_TOTAL_LENGTH = 0xffff;
 
-/** IP protocol numbers (IANA / RFC 792, 2003, 9293, 768, 4213, 2784) */
-export const IP_PROTOCOL_ICMP = 1;
-export const IP_PROTOCOL_IGMP = 2;
+/** EtherType for IPv4 (RFC 894) */
+export const ETHERTYPE_IPV4 = 0x0800;
+/** IANA IP Protocol number for IP-in-IP (IPv4 encapsulation, RFC 2003) */
 export const IP_PROTOCOL_IPIP = 4;
-export const IP_PROTOCOL_TCP = 6;
-export const IP_PROTOCOL_UDP = 17;
-export const IP_PROTOCOL_IPV6 = 41;
-export const IP_PROTOCOL_GRE = 47;
+/** IANA IP Protocol number for IGMP (RFC 2236) */
+export const IP_PROTOCOL_IGMP = 2;
 
 /** IPv4 Option Type bytes (RFC 791 §3.1, RFC 2113 §2.1) */
 export const IPV4_OPT_EOL = 0;
@@ -99,8 +102,27 @@ export const IPV4_FIELD_SPANS: readonly RelativeFieldSpan[] = [
 
 export interface EncodeIPv4Context {
   readonly layerIndex: number;
-  readonly upperLayerType: LayerType | null;
+  readonly upperLayerType: string | null;
   readonly upperBytesLength: number;
+  readonly tables?: ProtocolTables;
+}
+
+export function createDefaultIPv4(): IPv4Layer {
+  return {
+    type: 'ipv4',
+    ihl: autoValue(),
+    tos: 0,
+    totalLength: autoValue(),
+    identification: 0x1234,
+    flags: { reserved: false, df: true, mf: false },
+    fragmentOffset: 0,
+    ttl: 64,
+    protocol: autoValue(),
+    headerChecksum: autoValue(),
+    srcIp: '192.168.0.1',
+    dstIp: '192.168.0.2',
+    options: [],
+  };
 }
 
 /**
@@ -154,25 +176,6 @@ export function getIPv4OptionsMetrics(options: readonly IPv4Option[]): {
 export function getIPv4HeaderLength(layer: IPv4Layer): number {
   const { paddedBytes } = getIPv4OptionsMetrics(layer.options);
   return IPV4_HEADER_LENGTH + Math.min(paddedBytes, IPV4_MAX_OPTIONS_LENGTH);
-}
-
-function protocolNumberForUpperLayer(upperLayerType: LayerType | null): number | null {
-  switch (upperLayerType) {
-    case 'icmp':
-      return IP_PROTOCOL_ICMP;
-    case 'ipv4':
-      return IP_PROTOCOL_IPIP;
-    case 'tcp':
-      return IP_PROTOCOL_TCP;
-    case 'udp':
-      return IP_PROTOCOL_UDP;
-    case 'ipv6':
-      return IP_PROTOCOL_IPV6;
-    case 'gre':
-      return IP_PROTOCOL_GRE;
-    default:
-      return null;
-  }
 }
 
 /**
@@ -632,7 +635,8 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     }
   }
 
-  const inferredProtocol = protocolNumberForUpperLayer(ctx.upperLayerType);
+  const tables = ctx.tables ?? getDefaultProtocolTables();
+  const inferredProtocol = tables.resolveIPv4Protocol(ctx.upperLayerType);
   const autoProtocol = inferredProtocol ?? 0;
   let protocolValue = autoProtocol;
   if (layer.protocol.mode === 'manual') {
@@ -723,3 +727,34 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     resolvedAutoValues,
   };
 }
+
+export const ipv4Definition: LayerDefinition<IPv4Layer, 'ipv4'> = {
+  type: 'ipv4',
+  minHeaderLength: IPV4_HEADER_LENGTH,
+  createDefault: createDefaultIPv4,
+  headerLength: (layer) => getIPv4HeaderLength(layer),
+  encode: (layer, ctx) =>
+    encodeIPv4(layer, {
+      layerIndex: ctx.layerIndex,
+      upperLayerType: ctx.upperLayerType,
+      upperBytesLength: ctx.upperBytesLength,
+      tables: ctx.tables,
+    }),
+  provideLowerContext(layer) {
+    const src = parseIPv4(layer.srcIp);
+    const dst = parseIPv4(layer.dstIp);
+    if (src.ok && dst.ok) {
+      return { ip: { status: 'valid', version: 4, srcIp: src.value, dstIp: dst.value } };
+    }
+    return { ip: { status: 'invalid', version: 4 } };
+  },
+  decodeStart: decodeIPv4Start,
+  decode: decodeIPv4Layer,
+  validatePermalink: validateIPv4Permalink,
+  fieldDocs: IPV4_FIELD_DOCS,
+  protocols: {
+    etherType: ETHERTYPE_IPV4,
+    etherTypeLabel: 'IPv4',
+    ipProtocol: IP_PROTOCOL_IPIP,
+  },
+};

@@ -1,11 +1,25 @@
-import type {
-  LayerEncodeResult,
-  PacketError,
-  PacketWarning,
-  RelativeFieldSpan,
-  VXLANLayer,
-} from './types';
-import { validateUintRange } from './types';
+import { ok, type Result } from '../../result';
+import {
+  MAX_IP_LAYERS,
+  type FieldDoc,
+  type LayerDefinition,
+  type UDPTransportContext,
+} from '../definition';
+import {
+  expectNumber,
+  validateAutoOrManualNumber,
+  validateExactKeys,
+} from '../permalinkHelpers';
+import {
+  autoValue,
+  manualValue,
+  validateUintRange,
+  type LayerEncodeResult,
+  type PacketError,
+  type PacketWarning,
+  type RelativeFieldSpan,
+  type VXLANLayer,
+} from '../types';
 
 /** Fixed VXLAN header length (8 bytes, RFC 7348 §5) */
 export const VXLAN_HEADER_LENGTH = 8;
@@ -27,15 +41,46 @@ export const VXLAN_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'reserved2', label: 'Reserved (8b)', bitOffset: 56, bitLength: 8 },
 ];
 
-export type VXLANUnderlyingUDPContext =
-  | { readonly status: 'valid'; readonly srcPort: number; readonly dstPort: number }
-  | { readonly status: 'invalid' }
-  | { readonly status: 'absent' };
+export const VXLAN_FIELD_DOCS: Readonly<Record<string, FieldDoc>> = {
+  flags: {
+    summary:
+      '8-bit VXLAN Flags (RRRRIRRR). Bit 4 (I-flag, 0x08) must be set to 1 for a valid VNI, and all other 7 bits are reserved (0). Per RFC 7348 §5, the outer UDP checksum SHOULD be transmitted as zero over IPv4, and a non-zero checksum MAY be used.',
+    reference: 'RFC 7348 §5',
+  },
+  reserved1: {
+    summary:
+      '24-bit reserved field following Flags; must be set to 0 on transmission and ignored on receipt.',
+    reference: 'RFC 7348 §5',
+  },
+  vni: {
+    summary:
+      '24-bit VXLAN Network Identifier (0-16,777,215) isolating virtual Layer 2 overlay segments across an IP/UDP (port 4789) underlay.',
+    reference: 'RFC 7348 §5',
+  },
+  reserved2: {
+    summary:
+      '8-bit reserved field following the 24-bit VNI; must be set to 0 on transmission and ignored on receipt.',
+    reference: 'RFC 7348 §5',
+  },
+};
+
+export type VXLANUnderlyingUDPContext = UDPTransportContext;
 
 export interface EncodeVXLANContext {
   readonly layerIndex: number;
   /** Immediately preceding UDP layer state for RFC 7348 §5 transport / port 4789 hints */
   readonly udp: VXLANUnderlyingUDPContext;
+}
+
+/** Creates a default VXLAN header (I-flag auto 0x08, VNI 100, reserved fields 0, RFC 7348 §5). */
+export function createDefaultVXLAN(): VXLANLayer {
+  return {
+    type: 'vxlan',
+    flags: autoValue(),
+    vni: 100,
+    reserved1: 0,
+    reserved2: 0,
+  };
 }
 
 /**
@@ -133,3 +178,90 @@ export function encodeVXLAN(layer: VXLANLayer, ctx: EncodeVXLANContext): LayerEn
     resolvedAutoValues: { flags: VXLAN_FLAG_I },
   };
 }
+
+function validateVXLANPermalink(raw: Record<string, unknown>, ctx: string): Result<VXLANLayer> {
+  const checked = validateExactKeys(raw, ['type', 'flags', 'vni', 'reserved1', 'reserved2'], ctx);
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const flags = validateAutoOrManualNumber(obj.flags, `${ctx}.flags`);
+  if (!flags.ok) return flags;
+  const vni = expectNumber(obj, 'vni', ctx);
+  if (!vni.ok) return vni;
+  const reserved1 = expectNumber(obj, 'reserved1', ctx);
+  if (!reserved1.ok) return reserved1;
+  const reserved2 = expectNumber(obj, 'reserved2', ctx);
+  if (!reserved2.ok) return reserved2;
+
+  return ok({
+    type: 'vxlan',
+    flags: flags.value,
+    vni: vni.value,
+    reserved1: reserved1.value,
+    reserved2: reserved2.value,
+  });
+}
+
+export const vxlanDefinition: LayerDefinition<VXLANLayer, 'vxlan'> = {
+  type: 'vxlan',
+  minHeaderLength: VXLAN_HEADER_LENGTH,
+  createDefault: createDefaultVXLAN,
+  headerLength: () => VXLAN_HEADER_LENGTH,
+  encode: (layer, ctx) =>
+    encodeVXLAN(layer, {
+      layerIndex: ctx.layerIndex,
+      udp: ctx.udp,
+    }),
+  decode(bytes, offset, ctx) {
+    const remaining = bytes.length - offset;
+    if (remaining < VXLAN_HEADER_LENGTH) {
+      if (remaining > 0) {
+        ctx.notes.push(
+          `UDP payload on port ${VXLAN_PORT} is too short for a VXLAN header (${remaining} bytes, need at least ${VXLAN_HEADER_LENGTH}); remaining bytes kept as Payload.`,
+        );
+      }
+      return null;
+    }
+
+    const flags = bytes[offset];
+    if ((flags & VXLAN_FLAG_I) === 0) {
+      ctx.notes.push(
+        `UDP payload on port ${VXLAN_PORT} does not have the VXLAN I-flag (0x08) set (Flags 0x${flags.toString(16).padStart(2, '0')}); per RFC 7348 §5 remaining bytes are kept as Payload.`,
+      );
+      return null;
+    }
+
+    const reserved1 =
+      (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+    const vni =
+      (bytes[offset + 4] << 16) | (bytes[offset + 5] << 8) | bytes[offset + 6];
+    const reserved2 = bytes[offset + 7];
+
+    const vxlanLayer: VXLANLayer = {
+      type: 'vxlan',
+      flags: flags === VXLAN_FLAG_I ? autoValue() : manualValue(flags),
+      vni,
+      reserved1,
+      reserved2,
+    };
+
+    const innerOffset = offset + VXLAN_HEADER_LENGTH;
+    if (ctx.tunnelDepth + 1 >= MAX_IP_LAYERS) {
+      ctx.notes.push(
+        `VXLAN tunnel depth limit (${MAX_IP_LAYERS}) exceeded; remaining bytes kept as Payload.`,
+      );
+      return { layers: [vxlanLayer], payload: bytes.slice(innerOffset) };
+    }
+
+    const inner = ctx.decodeLinkFrame(bytes, innerOffset, ctx.tunnelDepth + 1, 'VXLAN');
+    return {
+      layers: [vxlanLayer, ...inner.layers],
+      payload: inner.payload,
+    };
+  },
+  validatePermalink: validateVXLANPermalink,
+  fieldDocs: VXLAN_FIELD_DOCS,
+  protocols: {
+    udpPort: VXLAN_PORT,
+    allowsZeroUdpChecksumOverIPv4: true,
+  },
+};
