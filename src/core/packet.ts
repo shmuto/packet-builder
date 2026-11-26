@@ -17,16 +17,6 @@ import type {
 } from './layers/types';
 import { UDP_HEADER_LENGTH, encodeUDP, type IPv4PseudoContext } from './layers/udp';
 
-const LAYER_LABELS: Readonly<Record<LayerType, string>> = {
-  ethernet: 'Ethernet II',
-  arp: 'ARP',
-  ipv4: 'IPv4',
-  icmp: 'ICMP',
-  udp: 'UDP',
-  tcp: 'TCP',
-  bgp: 'BGP-4',
-};
-
 function getLayerHeaderLength(layer: Layer): number {
   switch (layer.type) {
     case 'ethernet':
@@ -46,87 +36,53 @@ function getLayerHeaderLength(layer: Layer): number {
   }
 }
 
-function isValidTransition(lower: LayerType, upper: LayerType): boolean {
-  if (lower === 'ethernet') {
-    return upper === 'ipv4' || upper === 'arp';
+/**
+ * Resolves the immediately preceding IPv4 layer for UDP/TCP pseudo-header checksum calculation.
+ * Checking only `layers[layerIndex - 1]` avoids mistakenly inheriting an outer tunnel's IPv4
+ * addresses across intermediate headers (e.g., Outer IPv4 -> UDP -> Inner Ethernet -> UDP).
+ */
+function resolveIPv4ContextBefore(layers: readonly Layer[], layerIndex: number): IPv4PseudoContext {
+  const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
+  if (!prev || prev.type !== 'ipv4') {
+    return { status: 'absent' };
   }
-  if (lower === 'ipv4') {
-    return upper === 'ipv4' || upper === 'icmp' || upper === 'udp' || upper === 'tcp';
+  const src = parseIPv4(prev.srcIp);
+  const dst = parseIPv4(prev.dstIp);
+  if (src.ok && dst.ok) {
+    return { status: 'valid', srcIp: src.value, dstIp: dst.value };
   }
-  if (lower === 'tcp') {
-    return upper === 'bgp';
-  }
-  return false;
+  return { status: 'invalid' };
 }
 
 /**
- * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> IPv4(IP-in-IP)/ICMP/UDP/TCP -> BGP）になっているか検証する。
+ * Resolves the immediately preceding TCP layer's ports for BGP port-179 convention hints.
  */
-export function validateLayerOrder(layers: readonly Layer[]): PacketError[] {
-  const errors: PacketError[] = [];
-
-  for (let i = 1; i < layers.length; i++) {
-    const lower = layers[i - 1].type;
-    const upper = layers[i].type;
-    if (!isValidTransition(lower, upper)) {
-      errors.push({
-        layerIndex: i,
-        message: `${LAYER_LABELS[upper]} cannot be stacked directly on top of ${LAYER_LABELS[lower]}.`,
-      });
-    }
-  }
-
-  return errors;
-}
-
-function resolveIPv4ContextBefore(layers: readonly Layer[], layerIndex: number): IPv4PseudoContext {
-  for (let i = layerIndex - 1; i >= 0; i--) {
-    const candidate = layers[i];
-    if (candidate.type === 'ipv4') {
-      const src = parseIPv4(candidate.srcIp);
-      const dst = parseIPv4(candidate.dstIp);
-      if (src.ok && dst.ok) {
-        return { status: 'valid', srcIp: src.value, dstIp: dst.value };
-      }
-      return { status: 'invalid' };
-    }
-  }
-  return { status: 'absent' };
-}
-
 function resolveTCPPortsBefore(
   layers: readonly Layer[],
   layerIndex: number,
 ): { readonly srcPort: number; readonly dstPort: number } | null {
-  for (let i = layerIndex - 1; i >= 0; i--) {
-    const candidate = layers[i];
-    if (candidate.type === 'tcp') {
-      if (
-        Number.isInteger(candidate.srcPort) &&
-        candidate.srcPort >= 0 &&
-        candidate.srcPort <= 0xffff &&
-        Number.isInteger(candidate.dstPort) &&
-        candidate.dstPort >= 0 &&
-        candidate.dstPort <= 0xffff
-      ) {
-        return { srcPort: candidate.srcPort, dstPort: candidate.dstPort };
-      }
-      return null;
-    }
+  const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
+  if (!prev || prev.type !== 'tcp') {
+    return null;
+  }
+  if (
+    Number.isInteger(prev.srcPort) &&
+    prev.srcPort >= 0 &&
+    prev.srcPort <= 0xffff &&
+    Number.isInteger(prev.dstPort) &&
+    prev.dstPort >= 0 &&
+    prev.dstPort <= 0xffff
+  ) {
+    return { srcPort: prev.srcPort, dstPort: prev.dstPort };
   }
   return null;
 }
 
 /**
- * レイヤー配列（下位層から上位層の順）とペイロードから、
- * パケット全体のバイト列およびフィールドごとのビット範囲対応表を組み立てる。
+ * Builds raw packet bytes and contiguous per-field bit spans from an arbitrary stack
+ * of protocol layers (outer to inner) and a payload.
  */
 export function buildPacket(layers: readonly Layer[], payload: Uint8Array): BuildPacketResult {
-  const orderErrors = validateLayerOrder(layers);
-  if (orderErrors.length > 0) {
-    return { ok: false, errors: orderErrors, warnings: [] };
-  }
-
   const count = layers.length;
   const encodedHeaders: (Uint8Array | null)[] = new Array(count).fill(null);
   const relativeSpans: (readonly RelativeFieldSpan[] | null)[] = new Array(count).fill(null);

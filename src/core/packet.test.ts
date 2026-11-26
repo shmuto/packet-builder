@@ -415,8 +415,47 @@ describe('buildPacket', () => {
     expectExactBitCoverage(result.spans, expected.length);
   });
 
-  it('対応していないレイヤー順序はエラーを返す', () => {
-    const invalidOrders: Layer[][] = [
+  it('allows arbitrary header stacking orders for tunneling, ICMP error quoting, and experimental packets', () => {
+    // 1) L2-over-UDP encapsulation: Ethernet -> Outer IPv4 -> UDP -> Inner Ethernet -> Inner IPv4 -> TCP
+    const l2OverUdp = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+        createDefaultUDP(),
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        createDefaultTCP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(l2OverUdp.ok).toBe(true);
+    if (l2OverUdp.ok) {
+      // 14 + 20 + 8 + 14 + 20 + 20 = 96 bytes
+      expect(l2OverUdp.bytes.length).toBe(96);
+      expectExactBitCoverage(l2OverUdp.spans, l2OverUdp.bytes.length);
+    }
+
+    // 2) RFC 792 ICMP Error quoting an original IPv4 + UDP packet (zero warnings, >= 60B)
+    const icmpQuoted = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...createDefaultICMP(), icmpType: 11, code: 0 }, // Time Exceeded
+        createDefaultIPv4(),
+        createDefaultUDP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(icmpQuoted.ok).toBe(true);
+    if (icmpQuoted.ok) {
+      // 14 + 20 + 8 + 20 + 8 = 70 bytes
+      expect(icmpQuoted.bytes.length).toBe(70);
+      expect(icmpQuoted.warnings).toHaveLength(0);
+      expectExactBitCoverage(icmpQuoted.spans, icmpQuoted.bytes.length);
+    }
+
+    // 3) Arbitrary / non-standard orders all encode cleanly with exact bit coverage
+    const arbitraryStacks: Layer[][] = [
       [createDefaultUDP(), createDefaultIPv4()],
       [createDefaultEthernet(), createDefaultUDP()],
       [createDefaultTCP(), createDefaultUDP()],
@@ -425,23 +464,55 @@ describe('buildPacket', () => {
       [createDefaultIPv4(), createDefaultARP()],
       [createDefaultARP(), createDefaultIPv4()],
       [createDefaultARP(), createDefaultUDP()],
-      [createDefaultARP(), createDefaultARP()],
       [createDefaultUDP(), createDefaultBGP()],
-      [createDefaultIPv4(), createDefaultBGP()],
-      [createDefaultEthernet(), createDefaultBGP()],
-      [createDefaultARP(), createDefaultBGP()],
-      [createDefaultICMP(), createDefaultBGP()],
       [createDefaultBGP(), createDefaultIPv4()],
-      [createDefaultBGP(), createDefaultTCP()],
       [createDefaultBGP(), createDefaultBGP()],
     ];
-
-    for (const layers of invalidOrders) {
+    for (const layers of arbitraryStacks) {
       const result = buildPacket(layers, new Uint8Array(0));
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expectExactBitCoverage(result.spans, result.bytes.length);
       }
+    }
+  });
+
+  it('scopes UDP/TCP IPv4 pseudo-header and BGP TCP port lookup strictly to the immediately preceding layer', () => {
+    // Outer IPv4 -> UDP -> Inner Ethernet -> Inner UDP (no inner IPv4 directly before inner UDP)
+    const result = buildPacket(
+      [
+        createDefaultIPv4(),
+        createDefaultUDP(),
+        createDefaultEthernet(),
+        createDefaultUDP(),
+      ],
+      encodeUtf8('ok'),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Inner UDP (index 3) must NOT inherit outer IPv4 (index 0): checksum defaults to 0x0000 with warning
+    expect(result.resolvedAutoValues[3].checksum).toBe(0);
+    expect(
+      result.warnings.some(
+        (w) => w.layerIndex === 3 && w.fieldId === 'checksum' && w.message.includes('No underlying IPv4'),
+      ),
+    ).toBe(true);
+
+    // Non-adjacent TCP (port 80) -> Ethernet -> BGP must NOT trigger a TCP non-179 port warning on BGP
+    const bgpNonAdj = buildPacket(
+      [
+        { ...createDefaultTCP(), srcPort: 1000, dstPort: 80 },
+        createDefaultEthernet(),
+        createDefaultBGP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(bgpNonAdj.ok).toBe(true);
+    if (bgpNonAdj.ok) {
+      expect(
+        bgpNonAdj.warnings.some((w) => w.layerIndex === 2 && w.message.includes('179')),
+      ).toBe(false);
     }
   });
 
