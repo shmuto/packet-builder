@@ -464,8 +464,14 @@ describe('buildPacket', () => {
       [createDefaultIPv4(), createDefaultARP()],
       [createDefaultARP(), createDefaultIPv4()],
       [createDefaultARP(), createDefaultUDP()],
+      [createDefaultARP(), createDefaultARP()],
       [createDefaultUDP(), createDefaultBGP()],
+      [createDefaultIPv4(), createDefaultBGP()],
+      [createDefaultEthernet(), createDefaultBGP()],
+      [createDefaultARP(), createDefaultBGP()],
+      [createDefaultICMP(), createDefaultBGP()],
       [createDefaultBGP(), createDefaultIPv4()],
+      [createDefaultBGP(), createDefaultTCP()],
       [createDefaultBGP(), createDefaultBGP()],
     ];
     for (const layers of arbitraryStacks) {
@@ -475,9 +481,20 @@ describe('buildPacket', () => {
         expectExactBitCoverage(result.spans, result.bytes.length);
       }
     }
+
+    // Non-TCP-backed BGP (e.g., ICMP -> BGP) emits a non-blocking RFC 4271 missing-TCP warning
+    const icmpBgp = buildPacket([createDefaultICMP(), createDefaultBGP()], new Uint8Array(0));
+    expect(icmpBgp.ok).toBe(true);
+    if (icmpBgp.ok) {
+      expect(
+        icmpBgp.warnings.some(
+          (w) => w.layerIndex === 1 && w.message.includes('No underlying TCP layer'),
+        ),
+      ).toBe(true);
+    }
   });
 
-  it('scopes UDP/TCP IPv4 pseudo-header and BGP TCP port lookup strictly to the immediately preceding layer', () => {
+  it('scopes UDP/TCP IPv4 pseudo-header and BGP TCP context strictly to the immediately preceding layer', () => {
     // Outer IPv4 -> UDP -> Inner Ethernet -> Inner UDP (no inner IPv4 directly before inner UDP)
     const result = buildPacket(
       [
@@ -499,7 +516,7 @@ describe('buildPacket', () => {
       ),
     ).toBe(true);
 
-    // Non-adjacent TCP (port 80) -> Ethernet -> BGP must NOT trigger a TCP non-179 port warning on BGP
+    // Non-adjacent TCP (port 80) -> Ethernet -> BGP must NOT inherit outer TCP ports (warns absent TCP, not ports 1000->80)
     const bgpNonAdj = buildPacket(
       [
         { ...createDefaultTCP(), srcPort: 1000, dstPort: 80 },
@@ -511,7 +528,14 @@ describe('buildPacket', () => {
     expect(bgpNonAdj.ok).toBe(true);
     if (bgpNonAdj.ok) {
       expect(
-        bgpNonAdj.warnings.some((w) => w.layerIndex === 2 && w.message.includes('179')),
+        bgpNonAdj.warnings.some(
+          (w) => w.layerIndex === 2 && w.message.includes('No underlying TCP layer'),
+        ),
+      ).toBe(true);
+      expect(
+        bgpNonAdj.warnings.some(
+          (w) => w.layerIndex === 2 && w.message.includes('Underlying TCP ports'),
+        ),
       ).toBe(false);
     }
   });

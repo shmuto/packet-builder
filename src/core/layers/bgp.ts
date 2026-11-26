@@ -68,11 +68,16 @@ export function getBGPHeaderLength(bgpType: BGPMessageType): number {
   }
 }
 
+export type BGPUnderlyingTCPContext =
+  | { readonly status: 'valid'; readonly srcPort: number; readonly dstPort: number }
+  | { readonly status: 'invalid' }
+  | { readonly status: 'absent' };
+
 export interface EncodeBGPContext {
   readonly layerIndex: number;
   readonly upperBytesLength: number;
-  /** Underlying TCP ports if stacked over TCP (for port 179 convention hint) */
-  readonly tcpPorts: { readonly srcPort: number; readonly dstPort: number } | null;
+  /** Immediately preceding TCP layer state for RFC 4271 transport / port 179 hints */
+  readonly tcp: BGPUnderlyingTCPContext;
 }
 
 export function isAllFF(bytes: Uint8Array): boolean {
@@ -89,14 +94,19 @@ export function encodeBGP(layer: BGPLayer, ctx: EncodeBGPContext): LayerEncodeRe
   const errors: PacketError[] = [];
   const warnings: PacketWarning[] = [];
 
-  if (
-    ctx.tcpPorts !== null &&
-    ctx.tcpPorts.srcPort !== BGP_PORT &&
-    ctx.tcpPorts.dstPort !== BGP_PORT
+  if (ctx.tcp.status === 'absent') {
+    warnings.push({
+      layerIndex: ctx.layerIndex,
+      message: 'No underlying TCP layer; BGP-4 runs over TCP port 179 (RFC 4271).',
+    });
+  } else if (
+    ctx.tcp.status === 'valid' &&
+    ctx.tcp.srcPort !== BGP_PORT &&
+    ctx.tcp.dstPort !== BGP_PORT
   ) {
     warnings.push({
       layerIndex: ctx.layerIndex,
-      message: `Underlying TCP ports are ${ctx.tcpPorts.srcPort} -> ${ctx.tcpPorts.dstPort}; BGP-4 normally uses TCP port 179 (RFC 4271).`,
+      message: `Underlying TCP ports are ${ctx.tcp.srcPort} -> ${ctx.tcp.dstPort}; BGP-4 normally uses TCP port 179 (RFC 4271).`,
     });
   }
 

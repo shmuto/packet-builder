@@ -1,6 +1,10 @@
 import { concatBytes, parseIPv4 } from './bytes';
 import { ARP_HEADER_LENGTH, encodeARP } from './layers/arp';
-import { encodeBGP, getBGPHeaderLength } from './layers/bgp';
+import {
+  encodeBGP,
+  getBGPHeaderLength,
+  type BGPUnderlyingTCPContext,
+} from './layers/bgp';
 import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
@@ -55,15 +59,15 @@ function resolveIPv4ContextBefore(layers: readonly Layer[], layerIndex: number):
 }
 
 /**
- * Resolves the immediately preceding TCP layer's ports for BGP port-179 convention hints.
+ * Resolves the immediately preceding TCP layer state for BGP RFC 4271 transport / port-179 hints.
  */
-function resolveTCPPortsBefore(
+function resolveTCPContextBefore(
   layers: readonly Layer[],
   layerIndex: number,
-): { readonly srcPort: number; readonly dstPort: number } | null {
+): BGPUnderlyingTCPContext {
   const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
   if (!prev || prev.type !== 'tcp') {
-    return null;
+    return { status: 'absent' };
   }
   if (
     Number.isInteger(prev.srcPort) &&
@@ -73,9 +77,9 @@ function resolveTCPPortsBefore(
     prev.dstPort >= 0 &&
     prev.dstPort <= 0xffff
   ) {
-    return { srcPort: prev.srcPort, dstPort: prev.dstPort };
+    return { status: 'valid', srcPort: prev.srcPort, dstPort: prev.dstPort };
   }
-  return null;
+  return { status: 'invalid' };
 }
 
 /**
@@ -140,7 +144,7 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
         result = encodeBGP(layer, {
           layerIndex: i,
           upperBytesLength: currentUpperBytes.length,
-          tcpPorts: resolveTCPPortsBefore(layers, i),
+          tcp: resolveTCPContextBefore(layers, i),
         });
         break;
     }
