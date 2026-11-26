@@ -827,7 +827,7 @@ body {
   background: var(--bg-code);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 0.65rem 0.65rem;
+  padding: 0.65rem;
   overflow-x: auto;
   font-size: 0.75rem;
   line-height: 1.65;

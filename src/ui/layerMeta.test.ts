@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ADDABLE_LAYER_TYPES, formatSupportedLayersList, LAYER_META } from './layerMeta';
+import { formatSupportedLayersList } from './layerMeta';
 
 describe('formatSupportedLayersList', () => {
-  it('generates the header protocol list dynamically from ADDABLE_LAYER_TYPES and LAYER_META', () => {
-    const formatted = formatSupportedLayersList();
-    const expectedNames = ADDABLE_LAYER_TYPES.map((type) => LAYER_META[type].name);
-
-    for (const name of expectedNames) {
-      expect(formatted).toContain(name);
-    }
-    expect(formatted).toBe(
-      `${expectedNames.slice(0, -1).join(', ')}, and ${expectedNames[expectedNames.length - 1]}`,
+  it('generates the header protocol list in stack-toolbar order', () => {
+    expect(formatSupportedLayersList()).toBe(
+      'Ethernet II, VLAN (802.1Q), ARP, IPv4, IPv6, ICMP, ICMPv6, GRE, UDP, TCP, VXLAN, and BGP-4',
     );
   });
 });
