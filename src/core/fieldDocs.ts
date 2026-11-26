@@ -270,7 +270,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     myAs: {
       summary:
         '16-bit Autonomous System Number (ASN) of the BGP speaker sending the OPEN message (use 23456 when carrying a 4-byte ASN in capabilities).',
-      reference: 'RFC 4271 §4.2 / RFC 6793 §2',
+      reference: 'RFC 4271 §4.2 / RFC 6793 §3',
     },
     holdTime: {
       summary:
