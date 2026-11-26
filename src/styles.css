@@ -817,10 +817,17 @@ body {
 
 /* 16 進ダンプビューア */
 .hexdump-box {
+  --hex-byte-pad-x: 0.04rem;
+  --hex-bytes-gap: 0.12rem;
+  --hex-mid-gap: 0.24rem;
+  /* Exact 16-byte column width for non-subgrid fallback: 16*(2ch + 2*padX) + 15*gap + midGap */
+  --hex-bytes-col-width: calc(
+    32ch + 32 * var(--hex-byte-pad-x) + 15 * var(--hex-bytes-gap) + var(--hex-mid-gap)
+  );
   background: var(--bg-code);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 0.65rem 0.7rem;
+  padding: 0.65rem 0.65rem;
   overflow-x: auto;
   font-size: 0.75rem;
   line-height: 1.65;
@@ -829,7 +836,7 @@ body {
 .hexdump-grid {
   display: grid;
   grid-template-columns: max-content max-content minmax(max-content, 1fr);
-  column-gap: 0.55rem;
+  column-gap: 0.45rem;
   width: max-content;
   min-width: 100%;
 }
@@ -838,8 +845,8 @@ body {
 .hexdump-row {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 6ch minmax(38ch, max-content) max-content;
-  column-gap: 0.55rem;
+  grid-template-columns: 6ch var(--hex-bytes-col-width) max-content;
+  column-gap: 0.45rem;
   align-items: baseline;
   white-space: nowrap;
 }
@@ -870,25 +877,25 @@ body {
 .hexdump-bytes-col {
   display: inline-flex;
   flex-wrap: nowrap;
-  gap: 0.16rem;
+  gap: var(--hex-bytes-gap);
 }
 
 .hex-byte,
 .hex-byte-head {
   display: inline-block;
-  padding: 0 0.06rem;
+  padding: 0 var(--hex-byte-pad-x);
   border-radius: 3px;
   font-weight: 500;
 }
 
 .hex-byte.is-mid-gap,
 .hex-byte-head.is-mid-gap {
-  margin-right: 0.28rem;
+  margin-right: var(--hex-mid-gap);
 }
 
 .hexdump-ascii-col {
   border-left: 1px solid var(--border-subtle);
-  padding-left: 0.5rem;
+  padding-left: 0.4rem;
   letter-spacing: 0.02em;
 }
 
@@ -1520,7 +1527,7 @@ body {
 }
 
 /* レスポンシブ */
-@media (max-width: 1040px) {
+@media (max-width: 1199px) {
   .workbench {
     grid-template-columns: minmax(0, 1fr);
   }

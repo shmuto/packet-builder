@@ -92,8 +92,8 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     targetMac: {
       summary:
-        'Hardware (MAC) address of the intended target. Set to 00:00:00:00:00:00 in requests because the address is unknown.',
-      reference: 'RFC 826 "Packet format"',
+        'Hardware (MAC) address of the intended target. Usually set to 00:00:00:00:00:00 in requests (ignored by receivers; RFC 5227 §2.1.1 recommends all zeros for ARP Probes).',
+      reference: 'RFC 826 "Packet format" / RFC 5227 §2.1.1',
     },
     targetIp: {
       summary:
@@ -340,8 +340,8 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     checksum: {
       summary:
-        '16-bit checksum over the IPv4/IPv6 pseudo-header, UDP header, and payload. A computed zero is sent as 0xffff; 0x0000 disables the checksum over IPv4 but is invalid over IPv6 where checksums are mandatory.',
-      reference: 'RFC 768 "Fields" / RFC 8200 §8.1',
+        '16-bit checksum over the IPv4/IPv6 pseudo-header, UDP header, and payload. A computed zero is sent as 0xffff; 0x0000 disables the checksum over IPv4, while IPv6 normally requires a non-zero checksum (except for specific tunnel protocols permitted under RFC 6935 / RFC 6936).',
+      reference: 'RFC 768 "Fields" / RFC 8200 §8.1 / RFC 6935',
     },
   },
 
@@ -429,8 +429,8 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
     length: {
       summary:
-        'Total length of the BGP message in bytes, including the 19-byte common header. Standard BGP-4 allows 19 to 4,096 bytes.',
-      reference: 'RFC 4271 §4.1',
+        'Total length of the BGP message in bytes, including the 19-byte common header. Standard BGP-4 allows 19 to 4,096 bytes, or up to 65,535 bytes when both peers negotiate RFC 8654 Extended Messages.',
+      reference: 'RFC 4271 §4.1 / RFC 8654 §3',
     },
     bgpType: {
       summary:

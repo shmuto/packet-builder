@@ -21,7 +21,12 @@ import { analyzeBuiltBytesRoundTrip, type RoundTripReport } from './core/roundtr
 import { HexDumpInspector } from './ui/HexDumpInspector';
 import { ImportHexPanel } from './ui/ImportHexPanel';
 import { LayerCard } from './ui/LayerCard';
-import { ADDABLE_LAYER_TYPES, createLayerByType, LAYER_META } from './ui/layerMeta';
+import {
+  ADDABLE_LAYER_TYPES,
+  createLayerByType,
+  formatSupportedLayersList,
+  LAYER_META,
+} from './ui/layerMeta';
 import { PayloadCard, type PayloadMode } from './ui/PayloadCard';
 
 interface LayerItem {
@@ -406,7 +411,7 @@ export function App() {
             <span className="brand-sub">packet builder</span>
           </div>
           <p className="brand-desc">
-            Stack Ethernet II, VLAN (802.1Q), ARP, IPv4, IPv6, ICMP, ICMPv6, GRE, UDP, TCP, VXLAN, and BGP-4 layers like building blocks to inspect, decode, and export raw network packets.
+            Stack {formatSupportedLayersList()} layers like building blocks to inspect, decode, and export raw network packets.
           </p>
         </div>
 

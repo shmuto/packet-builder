@@ -168,7 +168,7 @@ export function encodeBGP(layer: BGPLayer, ctx: EncodeBGPContext): LayerEncodeRe
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'length',
-          message: `Manual BGP Length (${lengthValue}) exceeds the RFC 4271 §4.1 limit of 4096 bytes.`,
+          message: `Manual BGP Length (${lengthValue}) exceeds the RFC 4271 §4.1 limit of 4096 bytes (requires RFC 8654 Extended Messages).`,
         });
       } else if (actualLength <= 0xffff && lengthValue !== actualLength) {
         warnings.push({

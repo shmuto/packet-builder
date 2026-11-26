@@ -181,7 +181,22 @@ describe('encodeBGP', () => {
     });
     expect(over4096.ok).toBe(true);
     if (over4096.ok) {
-      expect(over4096.warnings.some((w) => w.fieldId === 'length')).toBe(true);
+      expect(
+        over4096.warnings.some((w) => w.fieldId === 'length' && w.message.includes('RFC 8654')),
+      ).toBe(true);
+    }
+
+    const manualOver4096 = encodeBGP(
+      makeBaseBGP({ bgpType: BGP_TYPE_UPDATE, length: manualValue(4097) }),
+      { layerIndex: 0, upperBytesLength: 0, tcp: bgpTcp },
+    );
+    expect(manualOver4096.ok).toBe(true);
+    if (manualOver4096.ok) {
+      expect(
+        manualOver4096.warnings.some(
+          (w) => w.fieldId === 'length' && w.message.includes('RFC 8654'),
+        ),
+      ).toBe(true);
     }
 
     const over65535 = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_UPDATE }), {
