@@ -29,13 +29,13 @@ function makeBaseBGP(overrides: Partial<BGPLayer> = {}): BGPLayer {
 }
 
 describe('encodeBGP', () => {
-  const bgpTcpPorts = { srcPort: 54321, dstPort: 179 };
+  const bgpTcp = { status: 'valid' as const, srcPort: 54321, dstPort: 179 };
 
   it('encodes a 29-byte BGP-4 OPEN message per RFC 4271 §4.2', () => {
     const result = encodeBGP(makeBaseBGP(), {
       layerIndex: 0,
       upperBytesLength: 0,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
 
     expect(result.ok).toBe(true);
@@ -66,7 +66,7 @@ describe('encodeBGP', () => {
     const keepalive = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_KEEPALIVE }), {
       layerIndex: 0,
       upperBytesLength: 0,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(keepalive.ok).toBe(true);
     if (keepalive.ok) {
@@ -78,7 +78,7 @@ describe('encodeBGP', () => {
     // NOTIFICATION (21B: Error Code=6 Cease, Subcode=4 Administrative Reset)
     const notif = encodeBGP(
       makeBaseBGP({ bgpType: BGP_TYPE_NOTIFICATION, errorCode: 6, errorSubcode: 4 }),
-      { layerIndex: 0, upperBytesLength: 0, tcpPorts: bgpTcpPorts },
+      { layerIndex: 0, upperBytesLength: 0, tcp: bgpTcp },
     );
     expect(notif.ok).toBe(true);
     if (notif.ok) {
@@ -91,7 +91,7 @@ describe('encodeBGP', () => {
     const update = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_UPDATE }), {
       layerIndex: 0,
       upperBytesLength: 0,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(update.ok).toBe(true);
     if (update.ok) {
@@ -108,7 +108,7 @@ describe('encodeBGP', () => {
       const res = encodeBGP(makeBaseBGP({ holdTime: validHold }), {
         layerIndex: 0,
         upperBytesLength: 0,
-        tcpPorts: bgpTcpPorts,
+        tcp: bgpTcp,
       });
       expect(res.ok && res.warnings).toEqual([]);
     }
@@ -117,7 +117,7 @@ describe('encodeBGP', () => {
       const res = encodeBGP(makeBaseBGP({ holdTime: badHold }), {
         layerIndex: 0,
         upperBytesLength: 0,
-        tcpPorts: bgpTcpPorts,
+        tcp: bgpTcp,
       });
       expect(res.ok).toBe(true);
       if (res.ok) {
@@ -126,11 +126,11 @@ describe('encodeBGP', () => {
     }
   });
 
-  it('warns on KEEPALIVE payload, non-179 TCP ports, non-all-ff marker, and length > 4096', () => {
+  it('warns on KEEPALIVE payload, absent/non-179 TCP, non-all-ff marker, and length > 4096', () => {
     const kaPayload = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_KEEPALIVE }), {
       layerIndex: 0,
       upperBytesLength: 4,
-      tcpPorts: { srcPort: 1000, dstPort: 80 },
+      tcp: { status: 'valid', srcPort: 1000, dstPort: 80 },
     });
     expect(kaPayload.ok).toBe(true);
     if (kaPayload.ok) {
@@ -138,9 +138,27 @@ describe('encodeBGP', () => {
       expect(kaPayload.warnings.some((w) => w.message.includes('KEEPALIVE'))).toBe(true);
     }
 
+    // Absent underlying TCP emits RFC 4271 transport warning; invalid TCP suppresses redundant absent warning
+    const noTcp = encodeBGP(makeBaseBGP(), {
+      layerIndex: 0,
+      upperBytesLength: 0,
+      tcp: { status: 'absent' },
+    });
+    expect(noTcp.ok).toBe(true);
+    if (noTcp.ok) {
+      expect(noTcp.warnings.some((w) => w.message.includes('No underlying TCP layer'))).toBe(true);
+    }
+
+    const invalidTcp = encodeBGP(makeBaseBGP(), {
+      layerIndex: 0,
+      upperBytesLength: 0,
+      tcp: { status: 'invalid' },
+    });
+    expect(invalidTcp.ok && invalidTcp.warnings).toEqual([]);
+
     const customMarker = encodeBGP(
       makeBaseBGP({ marker: manualValue('00'.repeat(16)) }),
-      { layerIndex: 0, upperBytesLength: 0, tcpPorts: bgpTcpPorts },
+      { layerIndex: 0, upperBytesLength: 0, tcp: bgpTcp },
     );
     expect(customMarker.ok).toBe(true);
     if (customMarker.ok) {
@@ -152,14 +170,14 @@ describe('encodeBGP', () => {
     const exact4096 = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_UPDATE }), {
       layerIndex: 0,
       upperBytesLength: 4096 - 23,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(exact4096.ok && exact4096.warnings).toEqual([]);
 
     const over4096 = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_UPDATE }), {
       layerIndex: 0,
       upperBytesLength: 4097 - 23,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(over4096.ok).toBe(true);
     if (over4096.ok) {
@@ -169,7 +187,7 @@ describe('encodeBGP', () => {
     const over65535 = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_UPDATE }), {
       layerIndex: 0,
       upperBytesLength: 65536 - 23,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(over65535.ok).toBe(false);
   });
@@ -179,7 +197,7 @@ describe('encodeBGP', () => {
     const optExact255 = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_OPEN }), {
       layerIndex: 0,
       upperBytesLength: 255,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(optExact255.ok && optExact255.warnings).toEqual([]);
     if (optExact255.ok) {
@@ -189,7 +207,7 @@ describe('encodeBGP', () => {
     const optOverflow = encodeBGP(makeBaseBGP({ bgpType: BGP_TYPE_OPEN }), {
       layerIndex: 0,
       upperBytesLength: 256,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(optOverflow.ok).toBe(false);
     if (!optOverflow.ok) {
@@ -202,7 +220,7 @@ describe('encodeBGP', () => {
         myAs: 70000,
         bgpIdentifier: 'invalid-ip',
       }),
-      { layerIndex: 0, upperBytesLength: 0, tcpPorts: bgpTcpPorts },
+      { layerIndex: 0, upperBytesLength: 0, tcp: bgpTcp },
     );
     expect(badFields.ok).toBe(false);
     if (!badFields.ok) {
@@ -212,7 +230,7 @@ describe('encodeBGP', () => {
     // Valid all-ff manual marker produces zero warnings
     const validManualMarker = encodeBGP(
       makeBaseBGP({ marker: manualValue(BGP_DEFAULT_MARKER_HEX) }),
-      { layerIndex: 0, upperBytesLength: 0, tcpPorts: bgpTcpPorts },
+      { layerIndex: 0, upperBytesLength: 0, tcp: bgpTcp },
     );
     expect(validManualMarker.ok && validManualMarker.warnings).toEqual([]);
 
@@ -220,7 +238,7 @@ describe('encodeBGP', () => {
     const shortLen = encodeBGP(makeBaseBGP({ length: manualValue(18) }), {
       layerIndex: 0,
       upperBytesLength: 0,
-      tcpPorts: bgpTcpPorts,
+      tcp: bgpTcp,
     });
     expect(shortLen.ok).toBe(true);
     if (shortLen.ok) {
@@ -233,7 +251,7 @@ describe('encodeBGP', () => {
         bgpType: BGP_TYPE_UPDATE,
         withdrawnRoutesLength: manualValue(4),
       }),
-      { layerIndex: 0, upperBytesLength: 4, tcpPorts: bgpTcpPorts },
+      { layerIndex: 0, upperBytesLength: 4, tcp: bgpTcp },
     );
     expect(withdrawnWarn.ok).toBe(true);
     if (withdrawnWarn.ok) {

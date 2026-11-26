@@ -7,13 +7,13 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
 ## Features
 
 - **Building-Block Layer Stack**
-  - Stack, reorder, add, or remove Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4 headers alongside UTF-8 text or hexadecimal payloads.
+  - Stack, reorder, add, or remove Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4 headers in any order (supporting tunneling/encapsulation such as IP-in-IP, L2-over-UDP, ICMP-quoted headers, or experimental stacks) alongside UTF-8 text or hexadecimal payloads.
   - Switch between built-in presets (**UDP Packet**, **TCP SYN**, **ICMP Ping**, **ARP Request**, **BGP OPEN**) to inspect real, valid packets immediately.
 - **Auto Calculation + Manual Overrides**
   - EtherType (`0x0800` for IPv4, `0x0806` for ARP), ARP hardware/protocol metadata, IPv4 Total Length / Protocol / Header Checksum, ICMP Checksum, UDP Length / Checksum, TCP Data Offset / Checksum, and BGP-4 Marker / Length / Version / Optional Parameters Length are automatically calculated per RFC specifications.
   - Toggle any auto-calculated field to **Manual** mode to intentionally craft malformed checksums, lengths, or flags and observe how the raw bytes change.
 - **Errors vs. Learning Warnings**
-  - Impossible inputs (invalid MAC/IPv4 addresses, out-of-range integers, >65535-byte IPv4/UDP/TCP/BGP lengths, >255-byte BGP OPEN Optional Parameters, invalid layer ordering) are reported inline per field without breaking the UI.
+  - Impossible inputs (invalid MAC/IPv4 addresses, out-of-range integers, >65535-byte IPv4/UDP/TCP/BGP lengths, >255-byte BGP OPEN Optional Parameters) are reported inline per field without breaking the UI.
   - Protocol edge cases (Ethernet frames under IEEE 802.3's 60-byte minimum, IPv4 Reserved bit set, UDP checksum `0x0000` disabled per RFC 768, BGP Hold Time `1` or `2` seconds, BGP KEEPALIVE with payload, BGP over non-179 TCP ports) surface as non-blocking warnings.
 - **Bit-Accurate Inspection & Export**
   - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), layer segment summaries, and a **unified, color-coded 32-bit header bit diagram** showing all stacked headers continuously in wire order with header-range emphasis—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
@@ -51,7 +51,7 @@ npm run check      # Run typecheck, tests, and production build
   - `bytes.ts` — MAC / IPv4 / hex / hex-dump parsing, UTF-8 encode & strict BOM-preserving decode, big-endian readers/writers, hex string & dump formatters
   - `checksum.ts` — RFC 1071 Internet Checksum and IPv4 pseudo-header checksum
   - `layers/` — Types and encoders for Ethernet II, ARP, IPv4, ICMP, UDP, TCP, and BGP-4
-  - `packet.ts` — Layer order validation and `buildPacket` producing raw bytes and contiguous `FieldSpan[]` bit mappings
+  - `packet.ts` — `buildPacket` assembling arbitrary protocol header stacks into raw bytes and contiguous `FieldSpan[]` bit mappings
   - `decode.ts` — Raw byte decoder (`decodePacket`) reconstructing layer stacks & payload from Ethernet II or Raw IPv4 packets (including BGP-4 over TCP port 179)
   - `presets.ts` — Default layer factories and UDP / TCP SYN / ICMP Ping / ARP Request / BGP OPEN presets
   - `inspector.ts` — Form integer parsing, hex dump rows, layer summaries, bidirectional highlight matching, and 32-bit bit diagram layout
