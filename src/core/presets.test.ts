@@ -129,4 +129,22 @@ describe('presets', () => {
     // Ethernet TPID = 0x8100, VLAN TCI = 0x0064 (VID 100), Inner EtherType = 0x0800
     expect(result.bytes.slice(12, 18)).toEqual(new Uint8Array([0x81, 0x00, 0x00, 0x64, 0x08, 0x00]));
   });
+
+  it('GRE Tunnel preset builds a 74-byte RFC 2784 frame (Outer IPv4 Proto 47 + GRE + Inner IPv4 + ICMP) with zero warnings', () => {
+    const grePreset = createPresets().find((p) => p.id === 'gre-ipv4');
+    expect(grePreset).toBeDefined();
+    if (!grePreset) return;
+
+    const result = buildPacket(grePreset.layers, grePreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Eth) + 20(Outer IPv4) + 4(GRE) + 20(Inner IPv4) + 8(ICMP) + 8("gre-ping") = 74 bytes
+    expect(result.bytes.length).toBe(74);
+    expect(result.warnings).toHaveLength(0);
+    // Outer IPv4 Protocol = 47 (GRE) at offset 23
+    expect(result.bytes[23]).toBe(47);
+    // GRE base header at offset 34..37: 00 00 08 00 (IPv4)
+    expect(result.bytes.slice(34, 38)).toEqual(new Uint8Array([0x00, 0x00, 0x08, 0x00]));
+  });
 });

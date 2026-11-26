@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { encodeUtf8 } from './bytes';
 import { manualValue } from './layers/types';
 import {
+  createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultIPv4,
   createDefaultIPv6,
   createDefaultTCP,
@@ -22,7 +24,7 @@ describe('analyzeDecodeRoundTrip', () => {
     }
   });
 
-  it('reports reproducible for IP-in-IP, 6in4, 4in6, QinQ, Raw IPv4, and Raw IPv6 stacks', () => {
+  it('reports reproducible for IP-in-IP, 6in4, 4in6, QinQ, GRETAP, Raw IPv4, and Raw IPv6 stacks', () => {
     const qinq = [
       createDefaultEthernet(),
       { ...createDefaultVLAN(), vid: 200 },
@@ -33,6 +35,18 @@ describe('analyzeDecodeRoundTrip', () => {
     expect(analyzeDecodeRoundTrip(qinq, encodeUtf8('qinq-ok'))).toEqual({
       kind: 'reproducible',
     });
+
+    const gretap = [
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      createDefaultGRE(),
+      createDefaultEthernet(),
+      createDefaultARP(),
+    ];
+    expect(analyzeDecodeRoundTrip(gretap, new Uint8Array(0))).toEqual({
+      kind: 'reproducible',
+    });
+
     const ipInIp = [
       createDefaultEthernet(),
       createDefaultIPv4(),

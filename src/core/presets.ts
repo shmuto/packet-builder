@@ -3,6 +3,7 @@ import type {
   ARPLayer,
   BGPLayer,
   EthernetLayer,
+  GRELayer,
   ICMPLayer,
   ICMPv6Layer,
   IPv4Layer,
@@ -22,6 +23,7 @@ export type PresetId =
   | 'icmpv6-echo'
   | 'arp-request'
   | 'vlan-udp'
+  | 'gre-ipv4'
   | 'bgp-open';
 
 export interface PacketPreset {
@@ -158,6 +160,21 @@ export function createDefaultICMPv6(): ICMPv6Layer {
   };
 }
 
+/** Creates a default GRE header (4-byte base header, Version 0, auto Protocol Type, RFC 2784). */
+export function createDefaultGRE(): GRELayer {
+  return {
+    type: 'gre',
+    checksumPresent: false,
+    keyPresent: false,
+    sequencePresent: false,
+    version: autoValue(),
+    protocolType: autoValue(),
+    checksum: autoValue(),
+    key: 0,
+    sequenceNumber: 0,
+  };
+}
+
 export function createDefaultBGP(): BGPLayer {
   return {
     type: 'bgp',
@@ -183,6 +200,7 @@ export function createPresets(): readonly PacketPreset[] {
   const icmpText = 'tsumiki-icmp-ping!';
   const icmpv6Text = 'ping';
   const vlanUdpText = 'Hello, VLAN!!!';
+  const grePingText = 'gre-ping';
 
   return [
     {
@@ -248,6 +266,29 @@ export function createPresets(): readonly PacketPreset[] {
       ],
       payloadText: vlanUdpText,
       payloadBytes: encodeUtf8(vlanUdpText),
+    },
+    {
+      id: 'gre-ipv4',
+      name: 'GRE Tunnel',
+      description: 'Ethernet II + Outer IPv4 (Proto 47) + GRE + Inner IPv4 + ICMP Echo Request',
+      layers: [
+        createDefaultEthernet(),
+        {
+          ...createDefaultIPv4(),
+          srcIp: '198.51.100.1',
+          dstIp: '198.51.100.2',
+        },
+        createDefaultGRE(),
+        {
+          ...createDefaultIPv4(),
+          identification: 0x5678,
+          srcIp: '10.0.1.1',
+          dstIp: '10.0.2.1',
+        },
+        createDefaultICMP(),
+      ],
+      payloadText: grePingText,
+      payloadBytes: encodeUtf8(grePingText),
     },
     {
       id: 'bgp-open',

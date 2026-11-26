@@ -5,6 +5,7 @@ import type {
   BGPLayer,
   BGPMessageType,
   EthernetLayer,
+  GRELayer,
   ICMPLayer,
   ICMPv6Layer,
   ICMPv6Rest,
@@ -663,6 +664,54 @@ function validateBGPLayer(raw: Record<string, unknown>, ctx: string): Result<BGP
   });
 }
 
+function validateGRELayer(raw: unknown, ctx: string): Result<GRELayer> {
+  const checked = validateExactKeys(
+    raw,
+    [
+      'type',
+      'checksumPresent',
+      'keyPresent',
+      'sequencePresent',
+      'version',
+      'protocolType',
+      'checksum',
+      'key',
+      'sequenceNumber',
+    ],
+    ctx,
+  );
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const checksumPresent = expectBoolean(obj, 'checksumPresent', ctx);
+  if (!checksumPresent.ok) return checksumPresent;
+  const keyPresent = expectBoolean(obj, 'keyPresent', ctx);
+  if (!keyPresent.ok) return keyPresent;
+  const sequencePresent = expectBoolean(obj, 'sequencePresent', ctx);
+  if (!sequencePresent.ok) return sequencePresent;
+  const version = validateAutoOrManualNumber(obj.version, `${ctx}.version`);
+  if (!version.ok) return version;
+  const protocolType = validateAutoOrManualNumber(obj.protocolType, `${ctx}.protocolType`);
+  if (!protocolType.ok) return protocolType;
+  const checksum = validateAutoOrManualNumber(obj.checksum, `${ctx}.checksum`);
+  if (!checksum.ok) return checksum;
+  const key = expectNumber(obj, 'key', ctx);
+  if (!key.ok) return key;
+  const sequenceNumber = expectNumber(obj, 'sequenceNumber', ctx);
+  if (!sequenceNumber.ok) return sequenceNumber;
+
+  return ok({
+    type: 'gre',
+    checksumPresent: checksumPresent.value,
+    keyPresent: keyPresent.value,
+    sequencePresent: sequencePresent.value,
+    version: version.value,
+    protocolType: protocolType.value,
+    checksum: checksum.value,
+    key: key.value,
+    sequenceNumber: sequenceNumber.value,
+  });
+}
+
 function validateLayer(raw: unknown, index: number): Result<Layer> {
   const ctx = `layers[${index}]`;
   if (!isPlainObject(raw)) {
@@ -687,6 +736,8 @@ function validateLayer(raw: unknown, index: number): Result<Layer> {
       return validateICMPLayer(raw, ctx);
     case 'icmpv6':
       return validateICMPv6Layer(raw, ctx);
+    case 'gre':
+      return validateGRELayer(raw, ctx);
     case 'udp':
       return validateUDPLayer(raw, ctx);
     case 'tcp':

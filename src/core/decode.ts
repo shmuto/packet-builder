@@ -39,6 +39,12 @@ import {
   ETHERTYPE_QINQ_LEGACY,
   ETHERTYPE_VLAN,
 } from './layers/ethernet';
+import {
+  getGREHeaderLength,
+  GRE_BASE_HEADER_LENGTH,
+  GRE_PROTOCOL_TEB,
+  greProtocolTypeForUpperLayer,
+} from './layers/gre';
 import { ICMP_HEADER_LENGTH } from './layers/icmp';
 import {
   ICMPV6_HEADER_LENGTH,
@@ -47,6 +53,7 @@ import {
   IP_PROTOCOL_ICMPV6,
 } from './layers/icmpv6';
 import {
+  IP_PROTOCOL_GRE,
   IP_PROTOCOL_ICMP,
   IP_PROTOCOL_IPIP,
   IP_PROTOCOL_IPV6,
@@ -65,6 +72,7 @@ import {
   type BGPLayer,
   type BGPMessageType,
   type EthernetLayer,
+  type GRELayer,
   type ICMPLayer,
   type ICMPv6Layer,
   type IPv4Layer,
@@ -505,6 +513,7 @@ function tryDecodeInnerIPv4(
   decodedUpperLayers: Layer[],
   notes: string[],
   depth: number,
+  enclosingLabel = `Protocol ${IP_PROTOCOL_IPIP}`,
 ): Uint8Array | null {
   if (depth + 1 >= MAX_IP_LAYERS) {
     notes.push(
@@ -517,7 +526,7 @@ function tryDecodeInnerIPv4(
   const innerTotalLength = readUint16BE(scopedBytes, upperOffset + 2);
   if (innerVersion !== IPV4_VERSION || innerIhl !== IPV4_IHL) {
     notes.push(
-      `Inner IPv4 header (Protocol ${IP_PROTOCOL_IPIP}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+      `Inner IPv4 header (${enclosingLabel}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
     );
     return null;
   }
@@ -537,6 +546,7 @@ function tryDecodeInnerIPv6(
   decodedUpperLayers: Layer[],
   notes: string[],
   depth: number,
+  enclosingLabel = `Protocol ${IP_PROTOCOL_IPV6}`,
 ): Uint8Array | null {
   if (depth + 1 >= MAX_IP_LAYERS) {
     notes.push(
@@ -548,7 +558,7 @@ function tryDecodeInnerIPv6(
   const innerPayloadLength = readUint16BE(scopedBytes, upperOffset + 4);
   if (innerVersion !== IPV6_VERSION) {
     notes.push(
-      `Inner IPv6 header (Protocol ${IP_PROTOCOL_IPV6}) has Version=${innerVersion} (expected Version=6); remaining bytes kept as Payload.`,
+      `Inner IPv6 header (${enclosingLabel}) has Version=${innerVersion} (expected Version=6); remaining bytes kept as Payload.`,
     );
     return null;
   }
@@ -642,6 +652,18 @@ function decodeIPv4Chain(
     if (innerPayload !== null) {
       payload = innerPayload;
     }
+  } else if (protocol === IP_PROTOCOL_GRE && upperRemaining >= GRE_BASE_HEADER_LENGTH) {
+    const innerPayload = decodeGREAt(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
+    }
   } else if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
     const res = decodeICMPAt(scopedBytes, upperOffset);
     decodedUpperLayers.push(res.layer);
@@ -655,6 +677,7 @@ function decodeIPv4Chain(
   } else if (
     protocol === IP_PROTOCOL_IPIP ||
     protocol === IP_PROTOCOL_IPV6 ||
+    protocol === IP_PROTOCOL_GRE ||
     protocol === IP_PROTOCOL_ICMP ||
     protocol === IP_PROTOCOL_UDP ||
     protocol === IP_PROTOCOL_TCP
@@ -776,6 +799,18 @@ function decodeIPv6Chain(
     if (innerPayload !== null) {
       payload = innerPayload;
     }
+  } else if (nextHeader === IP_PROTOCOL_GRE && upperRemaining >= GRE_BASE_HEADER_LENGTH) {
+    const innerPayload = decodeGREAt(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
+    }
   } else if (nextHeader === IP_PROTOCOL_ICMPV6 && upperRemaining >= ICMPV6_HEADER_LENGTH) {
     const res = decodeICMPv6At(scopedBytes, upperOffset, ipInfo);
     decodedUpperLayers.push(res.layer);
@@ -789,6 +824,7 @@ function decodeIPv6Chain(
   } else if (
     nextHeader === IP_PROTOCOL_IPIP ||
     nextHeader === IP_PROTOCOL_IPV6 ||
+    nextHeader === IP_PROTOCOL_GRE ||
     nextHeader === IP_PROTOCOL_ICMPV6 ||
     nextHeader === IP_PROTOCOL_UDP ||
     nextHeader === IP_PROTOCOL_TCP
@@ -818,7 +854,150 @@ function decodeIPv6Chain(
   return payload;
 }
 
+function decodeGREAt(
+  scopedBytes: Uint8Array,
+  upperOffset: number,
+  upperRemaining: number,
+  decodedUpperLayers: Layer[],
+  notes: string[],
+  depth: number,
+): Uint8Array | null {
+  const flagsAndVersion = readUint16BE(scopedBytes, upperOffset);
+  const protocolType = readUint16BE(scopedBytes, upperOffset + 2);
+
+  const checksumPresent = (flagsAndVersion & 0x8000) !== 0;
+  const reservedBit1 = (flagsAndVersion & 0x4000) !== 0;
+  const keyPresent = (flagsAndVersion & 0x2000) !== 0;
+  const sequencePresent = (flagsAndVersion & 0x1000) !== 0;
+  const reserved0 = (flagsAndVersion >>> 3) & 0x1ff;
+  const version = flagsAndVersion & 0x7;
+
+  if (version !== 0) {
+    notes.push(
+      `GRE header has Version=${version} (only Version=0 per RFC 2784 §2.3.1 is supported; e.g., Version=1 is PPTP enhanced GRE); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+
+  if (reservedBit1 || reserved0 !== 0) {
+    notes.push(
+      `GRE header has non-zero Reserved0 bits (flags word 0x${flagsAndVersion.toString(16).padStart(4, '0')}); remaining bytes kept as Payload to preserve exact bytes.`,
+    );
+    return null;
+  }
+
+  const headerLength = getGREHeaderLength({
+    checksumPresent,
+    keyPresent,
+    sequencePresent,
+  });
+
+  if (upperRemaining < headerLength) {
+    notes.push(
+      `GRE header is truncated (${upperRemaining} bytes available, ${headerLength} bytes required for C=${checksumPresent ? 1 : 0}/K=${keyPresent ? 1 : 0}/S=${sequencePresent ? 1 : 0}); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+
+  let cursor = upperOffset + GRE_BASE_HEADER_LENGTH;
+  let checksumField = 0;
+  let checksumOffsetInHeader = -1;
+  if (checksumPresent) {
+    checksumOffsetInHeader = cursor - upperOffset;
+    checksumField = readUint16BE(scopedBytes, cursor);
+    const reserved1 = readUint16BE(scopedBytes, cursor + 2);
+    if (reserved1 !== 0) {
+      notes.push(
+        `GRE header has non-zero Reserved1 field (0x${reserved1.toString(16).padStart(4, '0')}); remaining bytes kept as Payload to preserve exact bytes.`,
+      );
+      return null;
+    }
+    cursor += 4;
+  }
+
+  let key = 0;
+  if (keyPresent) {
+    key = readUint32BE(scopedBytes, cursor);
+    cursor += 4;
+  }
+
+  let sequenceNumber = 0;
+  if (sequencePresent) {
+    sequenceNumber = readUint32BE(scopedBytes, cursor);
+    cursor += 4;
+  }
+
+  let checksumAutoOrManual = autoValue<number>();
+  if (checksumPresent) {
+    const greCopy = new Uint8Array(scopedBytes.subarray(upperOffset));
+    greCopy[checksumOffsetInHeader] = 0;
+    greCopy[checksumOffsetInHeader + 1] = 0;
+    const computedChecksum = internetChecksum(greCopy);
+    checksumAutoOrManual =
+      checksumField === computedChecksum ? autoValue() : manualValue(checksumField);
+  }
+
+  const innerOffset = upperOffset + headerLength;
+  const innerRemaining = scopedBytes.length - innerOffset;
+  const innerLayers: Layer[] = [];
+  let innerPayload: Uint8Array;
+
+  if (depth + 1 >= MAX_IP_LAYERS) {
+    notes.push(
+      `GRE tunnel depth limit (${MAX_IP_LAYERS}) exceeded; remaining bytes kept as Payload.`,
+    );
+    innerPayload = scopedBytes.slice(innerOffset);
+  } else if (protocolType === GRE_PROTOCOL_TEB) {
+    if (innerRemaining < ETHERNET_HEADER_LENGTH) {
+      notes.push(
+        `Ethernet II frame after GRE (0x6558) is truncated (${innerRemaining} bytes); remaining bytes kept as Payload.`,
+      );
+      innerPayload = scopedBytes.slice(innerOffset);
+    } else {
+      innerPayload = decodeEthernetFrameAt(
+        scopedBytes,
+        innerOffset,
+        innerLayers,
+        notes,
+        depth + 1,
+      );
+    }
+  } else {
+    innerPayload = decodeEtherTypeChain(
+      scopedBytes,
+      innerOffset,
+      protocolType,
+      innerLayers,
+      notes,
+      0,
+      depth + 1,
+      'gre',
+    );
+  }
+
+  const expectedProto = greProtocolTypeForUpperLayer(innerLayers[0]?.type ?? null);
+  const greLayer: GRELayer = {
+    type: 'gre',
+    checksumPresent,
+    keyPresent,
+    sequencePresent,
+    version: autoValue(),
+    protocolType:
+      expectedProto !== null && protocolType === expectedProto
+        ? autoValue()
+        : manualValue(protocolType),
+    checksum: checksumPresent ? checksumAutoOrManual : autoValue(),
+    key,
+    sequenceNumber,
+  };
+
+  decodedUpperLayers.push(greLayer, ...innerLayers);
+  return innerPayload;
+}
+
 const MAX_VLAN_TAGS = 16;
+
+type EtherTypeParentKind = 'ethernet' | 'gre';
 
 function isVLANTpid(etherType: number): boolean {
   return (
@@ -835,6 +1014,8 @@ function decodeEtherTypeChain(
   layers: Layer[],
   notes: string[],
   vlanDepth = 0,
+  tunnelDepth = 0,
+  parentKind: EtherTypeParentKind = 'ethernet',
 ): Uint8Array {
   const remaining = bytes.length - offset;
 
@@ -866,6 +1047,8 @@ function decodeEtherTypeChain(
       decodedUpperLayers,
       notes,
       vlanDepth + 1,
+      tunnelDepth,
+      parentKind,
     );
 
     const expectedInner = vlanInnerEtherTypeForUpperLayer(decodedUpperLayers[0]?.type ?? null);
@@ -883,7 +1066,8 @@ function decodeEtherTypeChain(
     return payload;
   }
 
-  const enclosing = vlanDepth > 0 ? 'VLAN tag' : 'Ethernet II';
+  const enclosing =
+    vlanDepth > 0 ? 'VLAN tag' : parentKind === 'gre' ? 'GRE' : 'Ethernet II';
 
   if (etherType === ETHERTYPE_IPV4) {
     if (remaining < IPV4_HEADER_LENGTH) {
@@ -891,6 +1075,18 @@ function decodeEtherTypeChain(
         `IPv4 header after ${enclosing} is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
+    }
+    if (tunnelDepth > 0) {
+      const innerPayload = tryDecodeInnerIPv4(
+        bytes,
+        offset,
+        remaining,
+        layers,
+        notes,
+        tunnelDepth - 1,
+        `after ${enclosing}`,
+      );
+      return innerPayload ?? bytes.slice(offset);
     }
     const version = bytes[offset] >>> 4;
     const ihl = bytes[offset] & 0x0f;
@@ -909,6 +1105,18 @@ function decodeEtherTypeChain(
         `IPv6 header after ${enclosing} is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
+    }
+    if (tunnelDepth > 0) {
+      const innerPayload = tryDecodeInnerIPv6(
+        bytes,
+        offset,
+        remaining,
+        layers,
+        notes,
+        tunnelDepth - 1,
+        `after ${enclosing}`,
+      );
+      return innerPayload ?? bytes.slice(offset);
     }
     const version = bytes[offset] >>> 4;
     if (version !== IPV6_VERSION) {
@@ -937,10 +1145,51 @@ function decodeEtherTypeChain(
     return trailing;
   }
 
+  const label = vlanDepth === 0 && parentKind === 'gre' ? 'GRE Protocol Type' : 'EtherType';
   notes.push(
-    `EtherType 0x${etherType.toString(16).padStart(4, '0')} is not decoded into a layer; remaining bytes kept as Payload.`,
+    `${label} 0x${etherType.toString(16).padStart(4, '0')} is not decoded into a layer; remaining bytes kept as Payload.`,
   );
   return bytes.slice(offset);
+}
+
+function decodeEthernetFrameAt(
+  bytes: Uint8Array,
+  offset: number,
+  layers: Layer[],
+  notes: string[],
+  tunnelDepth = 0,
+): Uint8Array {
+  const dstMac = formatMac(bytes.subarray(offset, offset + 6));
+  const srcMac = formatMac(bytes.subarray(offset + 6, offset + 12));
+  const etherType = readUint16BE(bytes, offset + 12);
+
+  const decodedUpperLayers: Layer[] = [];
+  const payload = decodeEtherTypeChain(
+    bytes,
+    offset + ETHERNET_HEADER_LENGTH,
+    etherType,
+    decodedUpperLayers,
+    notes,
+    0,
+    tunnelDepth,
+    'ethernet',
+  );
+
+  const expectedEthEtherType = ethernetEtherTypeForUpperLayers(
+    decodedUpperLayers[0]?.type ?? null,
+    decodedUpperLayers[1]?.type ?? null,
+  );
+  const ethLayer: EthernetLayer = {
+    type: 'ethernet',
+    dstMac,
+    srcMac,
+    etherType:
+      expectedEthEtherType !== null && etherType === expectedEthEtherType
+        ? autoValue()
+        : manualValue(etherType),
+  };
+  layers.push(ethLayer, ...decodedUpperLayers);
+  return payload;
 }
 
 /**
@@ -1003,29 +1252,7 @@ export function decodePacket(
     );
   }
 
-  const dstMac = formatMac(bytes.subarray(0, 6));
-  const srcMac = formatMac(bytes.subarray(6, 12));
-  const etherType = readUint16BE(bytes, 12);
-  const afterEth = ETHERNET_HEADER_LENGTH;
-
-  const decodedUpperLayers: Layer[] = [];
-  const payload = decodeEtherTypeChain(bytes, afterEth, etherType, decodedUpperLayers, notes, 0);
-
-  const expectedEthEtherType = ethernetEtherTypeForUpperLayers(
-    decodedUpperLayers[0]?.type ?? null,
-    decodedUpperLayers[1]?.type ?? null,
-  );
-  const ethLayer: EthernetLayer = {
-    type: 'ethernet',
-    dstMac,
-    srcMac,
-    etherType:
-      expectedEthEtherType !== null && etherType === expectedEthEtherType
-        ? autoValue()
-        : manualValue(etherType),
-  };
-  layers.push(ethLayer, ...decodedUpperLayers);
-
+  const payload = decodeEthernetFrameAt(bytes, 0, layers, notes, 0);
   return ok({ layers, payload, notes });
 }
 

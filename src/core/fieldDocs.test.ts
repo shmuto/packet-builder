@@ -6,6 +6,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultGRE,
   createDefaultICMP,
   createDefaultICMPv6,
   createDefaultIPv4,
@@ -54,6 +55,7 @@ describe('FIELD_DOCS coverage and quality', () => {
     //    - IPv4 with all flag bits toggled
     //    - IPv6 fixed header
     //    - ICMPv6 Echo and Raw (Packet Too Big) variants
+    //    - GRE with all optional fields enabled (C=1, K=1, S=1)
     //    - TCP with all 8 control bits toggled
     //    - BGP OPEN (1), UPDATE (2), NOTIFICATION (3), and KEEPALIVE (4)
     collectSpans([
@@ -71,6 +73,14 @@ describe('FIELD_DOCS coverage and quality', () => {
         ...createDefaultICMPv6(),
         icmpType: 2,
         rest: { kind: 'raw', value: 1280 },
+      },
+      {
+        ...createDefaultGRE(),
+        checksumPresent: true,
+        keyPresent: true,
+        sequencePresent: true,
+        key: 0x11223344,
+        sequenceNumber: 1,
       },
       createDefaultUDP(),
       {
