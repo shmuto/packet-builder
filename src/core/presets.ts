@@ -14,7 +14,7 @@ import type {
   VLANLayer,
   VXLANLayer,
 } from './layers/types';
-import { autoValue } from './layers/types';
+import { autoValue, manualValue } from './layers/types';
 
 export type PresetId =
   | 'udp'
@@ -26,13 +26,15 @@ export type PresetId =
   | 'vlan-udp'
   | 'gre-ipv4'
   | 'vxlan'
-  | 'bgp-open';
+  | 'bgp-open'
+  | 'igmp-router-alert';
 
 export interface PacketPreset {
   readonly id: PresetId;
   readonly name: string;
   readonly description: string;
   readonly layers: readonly Layer[];
+  readonly payloadMode?: 'text' | 'hex';
   readonly payloadText: string;
   readonly payloadBytes: Uint8Array;
 }
@@ -75,6 +77,7 @@ export function createDefaultARP(): ARPLayer {
 export function createDefaultIPv4(): IPv4Layer {
   return {
     type: 'ipv4',
+    ihl: autoValue(),
     tos: 0,
     totalLength: autoValue(),
     identification: 0x1234,
@@ -85,6 +88,7 @@ export function createDefaultIPv4(): IPv4Layer {
     headerChecksum: autoValue(),
     srcIp: '192.168.0.1',
     dstIp: '192.168.0.2',
+    options: [],
   };
 }
 
@@ -368,6 +372,26 @@ export function createPresets(): readonly PacketPreset[] {
       ],
       payloadText: '',
       payloadBytes: new Uint8Array(0),
+    },
+    {
+      id: 'igmp-router-alert',
+      name: 'IGMPv2 (Router Alert)',
+      description:
+        'Ethernet II + IPv4 (TTL 1, Router Alert option 94 04 00 00, Protocol 2) + IGMPv2 General Query payload',
+      layers: [
+        { ...createDefaultEthernet(), dstMac: '01:00:5e:00:00:01' },
+        {
+          ...createDefaultIPv4(),
+          ttl: 1,
+          protocol: manualValue(2),
+          dstIp: '224.0.0.1',
+          options: [{ kind: 'routerAlert', value: 0 }],
+        },
+      ],
+      payloadMode: 'hex',
+      payloadText: '',
+      // IGMPv2 General Membership Query (RFC 2236 §2): Type 0x11, Max Resp Time 100 (0x64), Checksum 0xee9b, Group 0.0.0.0
+      payloadBytes: new Uint8Array([0x11, 0x64, 0xee, 0x9b, 0x00, 0x00, 0x00, 0x00]),
     },
   ];
 }

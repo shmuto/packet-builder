@@ -28,6 +28,8 @@ import {
   createPresets,
 } from './presets';
 
+import { formatSpacedHex } from './inspector';
+
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -45,7 +47,10 @@ describe('permalink', () => {
     for (const preset of createPresets()) {
       const state: PermalinkState = {
         layers: preset.layers,
-        payload: { mode: 'text', text: preset.payloadText },
+        payload:
+          preset.payloadMode === 'hex'
+            ? { mode: 'hex', hex: formatSpacedHex(preset.payloadBytes) }
+            : { mode: 'text', text: preset.payloadText },
       };
 
       const fragment = encodePermalink(state);
@@ -57,13 +62,16 @@ describe('permalink', () => {
 
       expect(decoded.value).toEqual(state);
 
-      const builtOriginal = buildPacket(state.layers, encodeUtf8(preset.payloadText));
-      const builtDecoded = buildPacket(
-        decoded.value.layers,
+      const builtOriginal = buildPacket(state.layers, preset.payloadBytes);
+      const decodedPayloadBytes =
         decoded.value.payload.mode === 'text'
           ? encodeUtf8(decoded.value.payload.text)
-          : new Uint8Array(0),
-      );
+          : (() => {
+              const p = parseHexBytes(decoded.value.payload.hex);
+              expect(p.ok).toBe(true);
+              return p.ok ? p.value : new Uint8Array(0);
+            })();
+      const builtDecoded = buildPacket(decoded.value.layers, decodedPayloadBytes);
       expect(builtOriginal.ok).toBe(true);
       expect(builtDecoded.ok).toBe(true);
       if (builtOriginal.ok && builtDecoded.ok) {
@@ -566,6 +574,79 @@ describe('permalink', () => {
 
     for (const badTcp of invalidOptionPayloads) {
       const raw = JSON.stringify({ layers: [badTcp], payload: { mode: 'text', text: '' } });
+      expect(decodePermalink(encodeRawJson(raw)).ok).toBe(false);
+    }
+  });
+
+  it('loads a fixed pre-Step-24 #p1= permalink without IPv4 ihl/options as ihl: auto, options: [] with identical bytes', () => {
+    // Fixed fragment created before IPv4 options and ihl AutoOrManual were added
+    const legacyFragment =
+      '#p1=eyJsYXllcnMiOlt7InR5cGUiOiJldGhlcm5ldCIsImRzdE1hYyI6IjAwOjExOjIyOjMzOjQ0OjU1Iiwic3JjTWFjIjoiNjY6Nzc6ODg6OTk6YWE6YmIiLCJldGhlclR5cGUiOnsibW9kZSI6ImF1dG8ifX0seyJ0eXBlIjoiaXB2NCIsInRvcyI6MCwidG90YWxMZW5ndGgiOnsibW9kZSI6ImF1dG8ifSwiaWRlbnRpZmljYXRpb24iOjQ2NjAsImZsYWdzIjp7InJlc2VydmVkIjpmYWxzZSwiZGYiOnRydWUsIm1mIjpmYWxzZX0sImZyYWdtZW50T2Zmc2V0IjowLCJ0dGwiOjY0LCJwcm90b2NvbCI6eyJtb2RlIjoiYXV0byJ9LCJoZWFkZXJDaGVja3N1bSI6eyJtb2RlIjoiYXV0byJ9LCJzcmNJcCI6IjE5Mi4xNjguMC4xIiwiZHN0SXAiOiIxOTIuMTY4LjAuMiJ9LHsidHlwZSI6InVkcCIsInNyY1BvcnQiOjEyMzQ1LCJkc3RQb3J0Ijo4MDgwLCJsZW5ndGgiOnsibW9kZSI6ImF1dG8ifSwiY2hlY2tzdW0iOnsibW9kZSI6ImF1dG8ifX1dLCJwYXlsb2FkIjp7Im1vZGUiOiJ0ZXh0IiwidGV4dCI6IkhlbGxvIn19';
+
+    const decoded = decodePermalink(legacyFragment);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+
+    const ipLayer = decoded.value.layers[1];
+    expect(ipLayer.type).toBe('ipv4');
+    if (ipLayer.type === 'ipv4') {
+      expect(ipLayer.ihl).toEqual(autoValue());
+      expect(ipLayer.options).toEqual([]);
+    }
+
+    const built = buildPacket(decoded.value.layers, encodeUtf8('Hello'));
+    const expected = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), createDefaultUDP()],
+      encodeUtf8('Hello'),
+    );
+    expect(built.ok && expected.ok).toBe(true);
+    if (built.ok && expected.ok) {
+      expect(built.bytes).toEqual(expected.bytes);
+    }
+  });
+
+  it('round-trips IPv4 options of every kind and strictly rejects malformed IPv4 option shapes', () => {
+    const state: PermalinkState = {
+      layers: [
+        createDefaultEthernet(),
+        {
+          ...createDefaultIPv4(),
+          ihl: manualValue(10),
+          options: [
+            { kind: 'routerAlert', value: 0 },
+            { kind: 'rr', pointer: autoValue(), addresses: ['192.0.2.1'] },
+            { kind: 'timestamp', pointer: 5, overflow: 0, flag: 1, dataHex: '00 00 00 01' },
+            { kind: 'lsrr', pointer: manualValue(8), addresses: ['198.51.100.1'] },
+            { kind: 'ssrr', pointer: autoValue(), addresses: ['203.0.113.1'] },
+            { kind: 'nop' },
+            { kind: 'raw', optionType: 134, length: autoValue(), dataHex: 'aa bb' },
+            { kind: 'raw', optionType: 135, length: { mode: 'none' }, dataHex: 'cc' },
+            { kind: 'eol' },
+          ],
+        },
+        createDefaultUDP(),
+      ],
+      payload: { mode: 'text', text: '' },
+    };
+
+    const decoded = decodePermalink(encodePermalink(state));
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      expect(decoded.value).toEqual(state);
+    }
+
+    const baseIp = createDefaultIPv4();
+    const invalidIpPayloads = [
+      { ...baseIp, options: 'not-an-array' },
+      { ...baseIp, options: [{ kind: 'unknown' }] },
+      { ...baseIp, options: [{ kind: 'routerAlert', value: '0' }] },
+      { ...baseIp, options: [{ kind: 'rr', pointer: autoValue(), addresses: [123] }] },
+      { ...baseIp, options: [{ kind: 'timestamp', pointer: 5, overflow: 0, flag: 0 }] },
+      { ...baseIp, ihl: { mode: 'invalid' } },
+    ];
+
+    for (const badIp of invalidIpPayloads) {
+      const raw = JSON.stringify({ layers: [badIp], payload: { mode: 'text', text: '' } });
       expect(decodePermalink(encodeRawJson(raw)).ok).toBe(false);
     }
   });

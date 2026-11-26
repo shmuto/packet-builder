@@ -9,7 +9,7 @@ import { ETHERNET_HEADER_LENGTH, encodeEthernet } from './layers/ethernet';
 import { encodeGRE, getGREHeaderLength } from './layers/gre';
 import { ICMP_HEADER_LENGTH, encodeICMP } from './layers/icmp';
 import { ICMPV6_HEADER_LENGTH, encodeICMPv6 } from './layers/icmpv6';
-import { IPV4_HEADER_LENGTH, encodeIPv4 } from './layers/ipv4';
+import { encodeIPv4, getIPv4HeaderLength } from './layers/ipv4';
 import { IPV6_HEADER_LENGTH, encodeIPv6 } from './layers/ipv6';
 import { encodeTCP, getTCPHeaderLength } from './layers/tcp';
 import type {
@@ -39,7 +39,7 @@ function getLayerHeaderLength(layer: Layer): number {
     case 'arp':
       return ARP_HEADER_LENGTH;
     case 'ipv4':
-      return IPV4_HEADER_LENGTH;
+      return getIPv4HeaderLength(layer);
     case 'ipv6':
       return IPV6_HEADER_LENGTH;
     case 'icmp':

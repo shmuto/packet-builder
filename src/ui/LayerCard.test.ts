@@ -26,7 +26,24 @@ describe('LayerCard per-field info controls', () => {
       createDefaultEthernet(),
       createDefaultVLAN(),
       createDefaultARP(),
-      createDefaultIPv4(),
+      {
+        ...createDefaultIPv4(),
+        options: [
+          { kind: 'routerAlert', value: 0 },
+          { kind: 'rr', pointer: autoValue(), addresses: ['192.0.2.1'] },
+          { kind: 'timestamp', pointer: 5, overflow: 0, flag: 0, dataHex: '00 00 00 01' },
+          { kind: 'nop' },
+          { kind: 'raw', optionType: 134, length: autoValue(), dataHex: 'aa bb' },
+          { kind: 'eol' },
+        ],
+      },
+      {
+        ...createDefaultIPv4(),
+        options: [
+          { kind: 'lsrr', pointer: autoValue(), addresses: ['192.0.2.1'] },
+          { kind: 'ssrr', pointer: autoValue(), addresses: ['192.0.2.2'] },
+        ],
+      },
       createDefaultIPv6(),
       createDefaultICMP(),
       createDefaultICMPv6(),
