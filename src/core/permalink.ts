@@ -17,6 +17,7 @@ import type {
   TCPLayer,
   UDPLayer,
   VLANLayer,
+  VXLANLayer,
 } from './layers/types';
 import { err, ok, type Result } from './result';
 
@@ -712,6 +713,28 @@ function validateGRELayer(raw: unknown, ctx: string): Result<GRELayer> {
   });
 }
 
+function validateVXLANLayer(raw: unknown, ctx: string): Result<VXLANLayer> {
+  const checked = validateExactKeys(raw, ['type', 'flags', 'vni', 'reserved1', 'reserved2'], ctx);
+  if (!checked.ok) return checked;
+  const obj = checked.value;
+  const flags = validateAutoOrManualNumber(obj.flags, `${ctx}.flags`);
+  if (!flags.ok) return flags;
+  const vni = expectNumber(obj, 'vni', ctx);
+  if (!vni.ok) return vni;
+  const reserved1 = expectNumber(obj, 'reserved1', ctx);
+  if (!reserved1.ok) return reserved1;
+  const reserved2 = expectNumber(obj, 'reserved2', ctx);
+  if (!reserved2.ok) return reserved2;
+
+  return ok({
+    type: 'vxlan',
+    flags: flags.value,
+    vni: vni.value,
+    reserved1: reserved1.value,
+    reserved2: reserved2.value,
+  });
+}
+
 function validateLayer(raw: unknown, index: number): Result<Layer> {
   const ctx = `layers[${index}]`;
   if (!isPlainObject(raw)) {
@@ -742,6 +765,8 @@ function validateLayer(raw: unknown, index: number): Result<Layer> {
       return validateUDPLayer(raw, ctx);
     case 'tcp':
       return validateTCPLayer(raw, ctx);
+    case 'vxlan':
+      return validateVXLANLayer(raw, ctx);
     case 'bgp':
       return validateBGPLayer(raw, ctx);
     default:

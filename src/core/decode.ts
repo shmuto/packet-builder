@@ -81,9 +81,11 @@ import {
   type TCPLayer,
   type UDPLayer,
   type VLANLayer,
+  type VXLANLayer,
 } from './layers/types';
 import { UDP_HEADER_LENGTH } from './layers/udp';
 import { VLAN_HEADER_LENGTH, vlanInnerEtherTypeForUpperLayer } from './layers/vlan';
+import { VXLAN_FLAG_I, VXLAN_HEADER_LENGTH, VXLAN_PORT } from './layers/vxlan';
 import { err, ok, type Result } from './result';
 
 export type DecodeStartLayer = 'ethernet' | 'ipv4' | 'ipv6';
@@ -506,6 +508,89 @@ function decodeTCPAndBGPAt(
   return res.payload;
 }
 
+function decodeUDPAndVXLANAt(
+  scopedBytes: Uint8Array,
+  upperOffset: number,
+  ipInfo: PseudoIPInfo,
+  decodedUpperLayers: Layer[],
+  notes: string[],
+  depth: number,
+): Uint8Array {
+  const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
+  decodedUpperLayers.push(res.layer);
+
+  if (res.layer.dstPort !== VXLAN_PORT) {
+    return res.payload;
+  }
+
+  if (res.payload.length < VXLAN_HEADER_LENGTH) {
+    if (res.payload.length > 0) {
+      notes.push(
+        `UDP payload on port ${VXLAN_PORT} is too short for a VXLAN header (${res.payload.length} bytes, need at least ${VXLAN_HEADER_LENGTH}); remaining bytes kept as Payload.`,
+      );
+    }
+    return res.payload;
+  }
+
+  const vxlanOffset = upperOffset + UDP_HEADER_LENGTH;
+  const flags = scopedBytes[vxlanOffset];
+  if ((flags & VXLAN_FLAG_I) === 0) {
+    notes.push(
+      `UDP payload on port ${VXLAN_PORT} does not have the VXLAN I-flag (0x08) set (Flags 0x${flags.toString(16).padStart(2, '0')}); per RFC 7348 §5 remaining bytes are kept as Payload.`,
+    );
+    return res.payload;
+  }
+
+  const reserved1 =
+    (scopedBytes[vxlanOffset + 1] << 16) |
+    (scopedBytes[vxlanOffset + 2] << 8) |
+    scopedBytes[vxlanOffset + 3];
+  const vni =
+    (scopedBytes[vxlanOffset + 4] << 16) |
+    (scopedBytes[vxlanOffset + 5] << 8) |
+    scopedBytes[vxlanOffset + 6];
+  const reserved2 = scopedBytes[vxlanOffset + 7];
+
+  const vxlanLayer: VXLANLayer = {
+    type: 'vxlan',
+    flags: flags === VXLAN_FLAG_I ? autoValue() : manualValue(flags),
+    vni,
+    reserved1,
+    reserved2,
+  };
+  decodedUpperLayers.push(vxlanLayer);
+
+  const innerOffset = vxlanOffset + VXLAN_HEADER_LENGTH;
+  const innerRemaining = scopedBytes.length - innerOffset;
+
+  if (depth + 1 >= MAX_IP_LAYERS) {
+    notes.push(
+      `VXLAN tunnel depth limit (${MAX_IP_LAYERS}) exceeded; remaining bytes kept as Payload.`,
+    );
+    return scopedBytes.slice(innerOffset);
+  }
+
+  if (innerRemaining < ETHERNET_HEADER_LENGTH) {
+    if (innerRemaining > 0) {
+      notes.push(
+        `Inner Ethernet II frame after VXLAN is truncated (${innerRemaining} bytes); remaining bytes kept as Payload.`,
+      );
+    }
+    return scopedBytes.slice(innerOffset);
+  }
+
+  const innerLayers: Layer[] = [];
+  const innerPayload = decodeEthernetFrameAt(
+    scopedBytes,
+    innerOffset,
+    innerLayers,
+    notes,
+    depth + 1,
+  );
+  decodedUpperLayers.push(...innerLayers);
+  return innerPayload;
+}
+
 function tryDecodeInnerIPv4(
   scopedBytes: Uint8Array,
   upperOffset: number,
@@ -669,9 +754,14 @@ function decodeIPv4Chain(
     decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
-    const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
-    decodedUpperLayers.push(res.layer);
-    payload = res.payload;
+    payload = decodeUDPAndVXLANAt(
+      scopedBytes,
+      upperOffset,
+      ipInfo,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
   } else if (protocol === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
     payload = decodeTCPAndBGPAt(scopedBytes, upperOffset, ipInfo, decodedUpperLayers, notes);
   } else if (
@@ -816,9 +906,14 @@ function decodeIPv6Chain(
     decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (nextHeader === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
-    const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
-    decodedUpperLayers.push(res.layer);
-    payload = res.payload;
+    payload = decodeUDPAndVXLANAt(
+      scopedBytes,
+      upperOffset,
+      ipInfo,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
   } else if (nextHeader === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
     payload = decodeTCPAndBGPAt(scopedBytes, upperOffset, ipInfo, decodedUpperLayers, notes);
   } else if (

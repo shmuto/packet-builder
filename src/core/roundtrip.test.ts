@@ -11,6 +11,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
   createPresets,
 } from './presets';
 import { analyzeBuiltBytesRoundTrip, analyzeDecodeRoundTrip } from './roundtrip';
@@ -24,7 +25,7 @@ describe('analyzeDecodeRoundTrip', () => {
     }
   });
 
-  it('reports reproducible for IP-in-IP, 6in4, 4in6, QinQ, GRETAP, Raw IPv4, and Raw IPv6 stacks', () => {
+  it('reports reproducible for IP-in-IP, 6in4, 4in6, QinQ, GRETAP, VXLAN, Raw IPv4, and Raw IPv6 stacks', () => {
     const qinq = [
       createDefaultEthernet(),
       { ...createDefaultVLAN(), vid: 200 },
@@ -44,6 +45,19 @@ describe('analyzeDecodeRoundTrip', () => {
       createDefaultARP(),
     ];
     expect(analyzeDecodeRoundTrip(gretap, new Uint8Array(0))).toEqual({
+      kind: 'reproducible',
+    });
+
+    const vxlanV6 = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      { ...createDefaultUDP(), srcPort: 49152, dstPort: 4789 },
+      createDefaultVXLAN(),
+      createDefaultEthernet(),
+      createDefaultIPv4(),
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(vxlanV6, encodeUtf8('vxlan-ok'))).toEqual({
       kind: 'reproducible',
     });
 

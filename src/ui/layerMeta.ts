@@ -11,6 +11,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
 } from '../core/presets';
 
 export interface LayerMetaInfo {
@@ -92,6 +93,13 @@ export const LAYER_META: Readonly<Record<LayerType, LayerMetaInfo>> = {
     rfc: 'RFC 9293',
     osiLabel: 'L4',
   },
+  vxlan: {
+    type: 'vxlan',
+    name: 'VXLAN',
+    shortName: 'VXLAN',
+    rfc: 'RFC 7348',
+    osiLabel: 'L4.5',
+  },
   bgp: {
     type: 'bgp',
     name: 'BGP-4',
@@ -112,6 +120,7 @@ export const ADDABLE_LAYER_TYPES: readonly LayerType[] = [
   'gre',
   'udp',
   'tcp',
+  'vxlan',
   'bgp',
 ];
 
@@ -137,6 +146,8 @@ export function createLayerByType(type: LayerType): Layer {
       return createDefaultUDP();
     case 'tcp':
       return createDefaultTCP();
+    case 'vxlan':
+      return createDefaultVXLAN();
     case 'bgp':
       return createDefaultBGP();
   }

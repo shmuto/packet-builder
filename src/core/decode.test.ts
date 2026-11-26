@@ -15,6 +15,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
   createPresets,
 } from './presets';
 
@@ -1532,6 +1533,165 @@ describe('decodePacket', () => {
       expect(dec.ok).toBe(true);
       if (dec.ok) {
         expect(dec.value.notes.some((n) => n.includes('GRE tunnel depth limit'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(deepBuilt.bytes);
+      }
+    }
+  });
+
+  it('losslessly round-trips VXLAN overlay (RFC 7348), manual outer UDP checksum 0x0000, IPv6 underlay, and non-zero reserved/flag bits', () => {
+    // 1. Standard VXLAN overlay with outer UDP checksum manually set to 0x0000 (RFC 7348 §5)
+    const zeroUdpCsum = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '198.51.100.1', dstIp: '198.51.100.2' },
+        { ...createDefaultUDP(), srcPort: 49152, dstPort: 4789, checksum: manualValue(0x0000) },
+        createDefaultVXLAN(),
+        { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+        createDefaultARP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(zeroUdpCsum.ok).toBe(true);
+    if (zeroUdpCsum.ok) {
+      const dec = decodePacket(zeroUdpCsum.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv4',
+          'udp',
+          'vxlan',
+          'ethernet',
+          'arp',
+        ]);
+        const udp = dec.value.layers[2];
+        const vxlan = dec.value.layers[3];
+        if (udp.type === 'udp') {
+          expect(udp.checksum).toEqual(manualValue(0x0000));
+        }
+        if (vxlan.type === 'vxlan') {
+          expect(vxlan.flags).toEqual(autoValue());
+          expect(vxlan.vni).toBe(100);
+          expect(vxlan.reserved1).toBe(0);
+          expect(vxlan.reserved2).toBe(0);
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(zeroUdpCsum.bytes);
+      }
+    }
+
+    // 2. VXLAN over IPv6 + non-zero reserved1/reserved2 + extra flag bit (0x0c, I=1 still set)
+    const v6Custom = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv6(),
+        { ...createDefaultUDP(), srcPort: 50000, dstPort: 4789 },
+        {
+          ...createDefaultVXLAN(),
+          flags: manualValue(0x0c),
+          vni: 0xabcdef,
+          reserved1: 0x123456,
+          reserved2: 0x78,
+        },
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        createDefaultICMP(),
+      ],
+      encodeUtf8('vxlan-v6'),
+    );
+    expect(v6Custom.ok).toBe(true);
+    if (v6Custom.ok) {
+      const dec = decodePacket(v6Custom.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv6',
+          'udp',
+          'vxlan',
+          'ethernet',
+          'ipv4',
+          'icmp',
+        ]);
+        const vxlan = dec.value.layers[3];
+        if (vxlan.type === 'vxlan') {
+          expect(vxlan.flags).toEqual(manualValue(0x0c));
+          expect(vxlan.vni).toBe(0xabcdef);
+          expect(vxlan.reserved1).toBe(0x123456);
+          expect(vxlan.reserved2).toBe(0x78);
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(v6Custom.bytes);
+      }
+    }
+  });
+
+  it('keeps VXLAN I=0 frames, truncated port-4789 payloads, and overly deep VXLAN tunnels in Payload safely', () => {
+    // 1. I-flag = 0 (0x00): kept as UDP Payload with a note and round-trips identically
+    const iZero = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...createDefaultUDP(), srcPort: 49152, dstPort: 4789 },
+        { ...createDefaultVXLAN(), flags: manualValue(0x00), vni: 100 },
+        createDefaultEthernet(),
+        createDefaultARP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(iZero.ok).toBe(true);
+    if (iZero.ok) {
+      const dec = decodePacket(iZero.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'udp']);
+        expect(dec.value.payload).toHaveLength(8 + 14 + 28);
+        expect(dec.value.notes.some((n) => n.includes('I-flag'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(iZero.bytes);
+      }
+    }
+
+    // 2. UDP port 4789 payload shorter than 8 bytes stays in Payload with a note
+    const shortPayload = buildPacket(
+      [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultUDP(), dstPort: 4789 }],
+      new Uint8Array([0x08, 0x00, 0x00, 0x00]),
+    );
+    expect(shortPayload.ok).toBe(true);
+    if (shortPayload.ok) {
+      const dec = decodePacket(shortPayload.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'udp']);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x08, 0x00, 0x00, 0x00]));
+        expect(dec.value.notes.some((n) => n.includes('too short for a VXLAN header'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(shortPayload.bytes);
+      }
+    }
+
+    // 3. Depth guard on nested VXLAN tunnels (> MAX_IP_LAYERS = 16)
+    const deepVxlan: Layer[] = [];
+    for (let i = 0; i < 17; i++) {
+      deepVxlan.push(
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...createDefaultUDP(), srcPort: 49152, dstPort: 4789 },
+        createDefaultVXLAN(),
+      );
+    }
+    deepVxlan.push(createDefaultEthernet(), createDefaultARP());
+
+    const deepBuilt = buildPacket(deepVxlan, new Uint8Array(0));
+    expect(deepBuilt.ok).toBe(true);
+    if (deepBuilt.ok) {
+      const dec = decodePacket(deepBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes.some((n) => n.includes('VXLAN tunnel depth limit'))).toBe(true);
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(deepBuilt.bytes);
       }

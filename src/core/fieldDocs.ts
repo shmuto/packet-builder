@@ -398,6 +398,29 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     },
   },
 
+  vxlan: {
+    flags: {
+      summary:
+        '8-bit VXLAN Flags (RRRRIRRR). Bit 4 (I-flag, 0x08) must be set to 1 for a valid VNI, and all other 7 bits are reserved (0). Per RFC 7348 §5, the outer UDP checksum SHOULD be transmitted as zero over IPv4, and a non-zero checksum MAY be used.',
+      reference: 'RFC 7348 §5',
+    },
+    reserved1: {
+      summary:
+        '24-bit reserved field following Flags; must be set to 0 on transmission and ignored on receipt.',
+      reference: 'RFC 7348 §5',
+    },
+    vni: {
+      summary:
+        '24-bit VXLAN Network Identifier (0-16,777,215) isolating virtual Layer 2 overlay segments across an IP/UDP (port 4789) underlay. Per RFC 7348 §5, the outer UDP checksum over IPv4 SHOULD be zero, though a non-zero checksum MAY be used.',
+      reference: 'RFC 7348 §5',
+    },
+    reserved2: {
+      summary:
+        '8-bit reserved field following the 24-bit VNI; must be set to 0 on transmission and ignored on receipt.',
+      reference: 'RFC 7348 §5',
+    },
+  },
+
   bgp: {
     marker: {
       summary:

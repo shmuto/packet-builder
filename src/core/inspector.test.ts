@@ -31,6 +31,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
 } from './presets';
 import { ok } from './result';
 
@@ -961,5 +962,45 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     expect(unified[5].cells[0].span.layerType).toBe('gre');
     expect(unified[8].cells[0]).toMatchObject({ isLayerStart: false, isLayerEnd: true });
     expect(unified[8].cells[0].span.fieldId).toBe('sequenceNumber');
+  });
+
+  it('covers 8-byte VXLAN header (Flags 8b + Reserved 24b + VNI 24b + Reserved 8b) in per-layer and unified bit diagrams', () => {
+    const draft = evaluatePacketDraft(
+      [
+        createDefaultIPv4(),
+        { ...createDefaultUDP(), srcPort: 49152, dstPort: 4789 },
+        createDefaultVXLAN(),
+        createDefaultEthernet(),
+      ],
+      ok(new Uint8Array(0)),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Per-layer VXLAN diagram (64 bits = 2 rows)
+    const vxlanRows = buildBitDiagramRows(draft.spans, 2);
+    expect(vxlanRows).toHaveLength(2);
+    expectContiguousBitDiagram(vxlanRows, 64);
+    expect(vxlanRows[0].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['flags', 0, 8],
+      ['reserved1', 8, 24],
+    ]);
+    expect(vxlanRows[1].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['vni', 0, 24],
+      ['reserved2', 24, 8],
+    ]);
+
+    // Unified diagram: IPv4 (5 rows) + UDP (2 rows) + VXLAN (2 rows) + Ethernet (3.5 rows) = 13 rows
+    const unified = buildUnifiedBitDiagramRows(draft.spans);
+    expect(unified).toHaveLength(13);
+    expect(unified[7].cells.map((c) => [c.span.layerType, c.span.fieldId, c.isLayerStart])).toEqual(
+      [
+        ['vxlan', 'flags', true],
+        ['vxlan', 'reserved1', false],
+      ],
+    );
+    expect(unified[8].cells.map((c) => [c.span.layerType, c.span.fieldId, c.isLayerEnd])).toEqual([
+      ['vxlan', 'vni', false],
+      ['vxlan', 'reserved2', true],
+    ]);
   });
 });

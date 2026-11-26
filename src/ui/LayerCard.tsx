@@ -1586,6 +1586,71 @@ export function LayerCard({
             </div>
           )}
 
+          {layer.type === 'vxlan' && (
+            <div className="field-grid">
+              <AutoManualField
+                id={`${id}-flags`}
+                label="Flags"
+                hint="0x08 = I-flag (RFC 7348 §5)"
+                doc={fieldDoc('flags')}
+                allowHex
+                hexDigits={2}
+                value={layer.flags}
+                resolvedAutoValue={resolvedAutoValues?.flags}
+                error={fieldError('flags')}
+                warning={fieldWarning('flags')}
+                isHighlighted={isHighlighted('flags')}
+                onHoverStart={hoverStart('flags')}
+                onHoverEnd={hoverEnd}
+                onChange={(flags) => onChange({ ...layer, flags })}
+              />
+              <NumberField
+                id={`${id}-vni`}
+                label="VNI"
+                hint="0-16777215 (24 bit, hex ok)"
+                doc={fieldDoc('vni')}
+                allowHex
+                value={layer.vni}
+                error={fieldError('vni')}
+                warning={fieldWarning('vni')}
+                isHighlighted={isHighlighted('vni')}
+                onHoverStart={hoverStart('vni')}
+                onHoverEnd={hoverEnd}
+                onChange={(vni) => onChange({ ...layer, vni })}
+              />
+              <NumberField
+                id={`${id}-reserved1`}
+                label="Reserved (24-bit)"
+                hint="0x000000 (24 bit)"
+                doc={fieldDoc('reserved1')}
+                allowHex
+                hexDigits={6}
+                value={layer.reserved1}
+                error={fieldError('reserved1')}
+                warning={fieldWarning('reserved1')}
+                isHighlighted={isHighlighted('reserved1')}
+                onHoverStart={hoverStart('reserved1')}
+                onHoverEnd={hoverEnd}
+                onChange={(reserved1) => onChange({ ...layer, reserved1 })}
+              />
+              <NumberField
+                id={`${id}-reserved2`}
+                label="Reserved (8-bit)"
+                hint="0x00 (8 bit)"
+                doc={fieldDoc('reserved2')}
+                allowHex
+                hexDigits={2}
+                value={layer.reserved2}
+                error={fieldError('reserved2')}
+                warning={fieldWarning('reserved2')}
+                isHighlighted={isHighlighted('reserved2')}
+                onHoverStart={hoverStart('reserved2')}
+                onHoverEnd={hoverEnd}
+                onChange={(reserved2) => onChange({ ...layer, reserved2 })}
+              />
+            </div>
+          )}
+
           {layer.type === 'bgp' && (
             <div className="field-grid">
               <div

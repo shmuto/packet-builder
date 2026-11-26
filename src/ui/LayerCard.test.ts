@@ -16,6 +16,7 @@ import {
   createDefaultTCP,
   createDefaultUDP,
   createDefaultVLAN,
+  createDefaultVXLAN,
 } from '../core/presets';
 import { LayerCard } from './LayerCard';
 
@@ -44,6 +45,7 @@ describe('LayerCard per-field info controls', () => {
       },
       createDefaultUDP(),
       createDefaultTCP(),
+      createDefaultVXLAN(),
       { ...createDefaultBGP(), bgpType: 1 },
       { ...createDefaultBGP(), bgpType: 2 },
       { ...createDefaultBGP(), bgpType: 3 },

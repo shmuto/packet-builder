@@ -24,6 +24,11 @@ import type {
 } from './layers/types';
 import { UDP_HEADER_LENGTH, encodeUDP, type IPPseudoContext } from './layers/udp';
 import { VLAN_HEADER_LENGTH, encodeVLAN } from './layers/vlan';
+import {
+  VXLAN_HEADER_LENGTH,
+  encodeVXLAN,
+  type VXLANUnderlyingUDPContext,
+} from './layers/vxlan';
 
 function getLayerHeaderLength(layer: Layer): number {
   switch (layer.type) {
@@ -47,6 +52,8 @@ function getLayerHeaderLength(layer: Layer): number {
       return UDP_HEADER_LENGTH;
     case 'tcp':
       return TCP_HEADER_LENGTH;
+    case 'vxlan':
+      return VXLAN_HEADER_LENGTH;
     case 'bgp':
       return getBGPHeaderLength(layer.bgpType);
   }
@@ -90,6 +97,31 @@ function resolveTCPContextBefore(
 ): BGPUnderlyingTCPContext {
   const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
   if (!prev || prev.type !== 'tcp') {
+    return { status: 'absent' };
+  }
+  if (
+    Number.isInteger(prev.srcPort) &&
+    prev.srcPort >= 0 &&
+    prev.srcPort <= 0xffff &&
+    Number.isInteger(prev.dstPort) &&
+    prev.dstPort >= 0 &&
+    prev.dstPort <= 0xffff
+  ) {
+    return { status: 'valid', srcPort: prev.srcPort, dstPort: prev.dstPort };
+  }
+  return { status: 'invalid' };
+}
+
+/**
+ * Resolves the immediately preceding UDP layer state for VXLAN RFC 7348 §5 transport / port-4789 hints.
+ * Checking only `layers[layerIndex - 1]` avoids inheriting an outer tunnel's UDP header across intermediate layers.
+ */
+function resolveUDPContextBefore(
+  layers: readonly Layer[],
+  layerIndex: number,
+): VXLANUnderlyingUDPContext {
+  const prev = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
+  if (!prev || prev.type !== 'udp') {
     return { status: 'absent' };
   }
   if (
@@ -190,6 +222,12 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
           layerIndex: i,
           upperBytes: currentUpperBytes,
           ip: resolveIPContextBefore(layers, i),
+        });
+        break;
+      case 'vxlan':
+        result = encodeVXLAN(layer, {
+          layerIndex: i,
+          udp: resolveUDPContextBefore(layers, i),
         });
         break;
       case 'bgp':

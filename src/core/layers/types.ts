@@ -27,6 +27,7 @@ export type LayerType =
   | 'gre'
   | 'udp'
   | 'tcp'
+  | 'vxlan'
   | 'bgp';
 
 export interface EthernetLayer {
@@ -275,6 +276,18 @@ export interface GRELayer {
   readonly sequenceNumber: number;
 }
 
+export interface VXLANLayer {
+  readonly type: 'vxlan';
+  /** 8-bit Flags (auto = 0x08 with I-flag set for valid VNI, RFC 7348 §5) */
+  readonly flags: AutoOrManual<number>;
+  /** 24-bit VXLAN Network Identifier (0-16777215, RFC 7348 §5) */
+  readonly vni: number;
+  /** 24-bit Reserved field following Flags (0-16777215, default 0, RFC 7348 §5) */
+  readonly reserved1: number;
+  /** 8-bit Reserved field following VNI (0-255, default 0, RFC 7348 §5) */
+  readonly reserved2: number;
+}
+
 export type Layer =
   | EthernetLayer
   | VLANLayer
@@ -286,6 +299,7 @@ export type Layer =
   | GRELayer
   | UDPLayer
   | TCPLayer
+  | VXLANLayer
   | BGPLayer;
 
 /** レイヤー内の相対フィールド定義（エンコーダ内部で使用） */

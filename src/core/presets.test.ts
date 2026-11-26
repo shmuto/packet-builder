@@ -147,4 +147,25 @@ describe('presets', () => {
     // GRE base header at offset 34..37: 00 00 08 00 (IPv4)
     expect(result.bytes.slice(34, 38)).toEqual(new Uint8Array([0x00, 0x00, 0x08, 0x00]));
   });
+
+  it('VXLAN Overlay preset builds a 92-byte RFC 7348 frame (UDP 4789 + VXLAN VNI 100 + Inner Ethernet + ARP) with zero VXLAN warnings', () => {
+    const vxlanPreset = createPresets().find((p) => p.id === 'vxlan');
+    expect(vxlanPreset).toBeDefined();
+    if (!vxlanPreset) return;
+
+    const result = buildPacket(vxlanPreset.layers, vxlanPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Eth) + 20(IPv4) + 8(UDP) + 8(VXLAN) + 14(Inner Eth) + 28(ARP) = 92 bytes
+    expect(result.bytes.length).toBe(92);
+    expect(result.warnings.filter((w) => w.layerIndex === 3)).toHaveLength(0);
+    expect(result.warnings.filter((w) => w.layerIndex !== 4)).toHaveLength(0);
+    // Outer UDP dstPort = 4789 (0x12b5) at offset 36..37
+    expect(result.bytes.slice(36, 38)).toEqual(new Uint8Array([0x12, 0xb5]));
+    // VXLAN header at offset 42..49: 08 00 00 00 00 00 64 00
+    expect(result.bytes.slice(42, 50)).toEqual(
+      new Uint8Array([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00]),
+    );
+  });
 });

@@ -1110,4 +1110,105 @@ describe('buildPacket', () => {
       expect(ipv6Gre.warnings).toHaveLength(0);
     }
   });
+
+  it('matches known Ethernet + IPv4 + UDP(4789) + VXLAN(VNI 100) + Ethernet + ARP frame byte-for-byte and checks adjacent-only UDP context', () => {
+    // Hand-verified checksums (92-byte VXLAN overlay frame, RFC 7348 §5):
+    // 1) Outer IPv4 (198.51.100.1 -> 198.51.100.2, id=0x1234, DF, ttl=64, proto=17, totalLen=78=0x004e):
+    //    4500 + 004e + 1234 + 4000 + 4011 = d793
+    //    d793 + c633 = 19dc6 -> 9dc7; 9dc7 + 6401 = 101c8 -> 01c9
+    //    01c9 + c633 = c7fc; c7fc + 6402 = 12bfe -> 2bff -> ~0x2bff = 0xd400
+    // 2) Outer UDP (49152=0xc000 -> 4789=0x12b5, len=58=0x003a):
+    //    pseudo: (c633+6401=2a35) + (c633+6402=2a36) + 0011 + 003a = 54b6
+    //    UDP hdr: c000 + 12b5 + 003a = d2ef; 54b6 + d2ef = 127a5 -> 27a6
+    //    VXLAN (08 00 00 00 00 00 64 00): 0800 + 6400 = 6c00; 27a6 + 6c00 = 93a6
+    //    Inner Eth (ff..ff, 66..bb, 0806): 6677+8899+aabb=99cc; 99cc+0806=a1d2; 93a6+a1d2=13578 -> 3579
+    //    Inner ARP (28B): (0001+0800+0604+0001=0e06) + 99cc + c0a9 + c0aa = 2927
+    //    total = 3579 + 2927 = 5ea0 -> ~0x5ea0 = 0xa15f
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      {
+        ...createDefaultIPv4(),
+        srcIp: '198.51.100.1',
+        dstIp: '198.51.100.2',
+      },
+      {
+        ...createDefaultUDP(),
+        srcPort: 49152,
+        dstPort: 4789,
+      },
+      {
+        type: 'vxlan',
+        flags: autoValue(),
+        vni: 100,
+        reserved1: 0,
+        reserved2: 0,
+      },
+      { ...createDefaultEthernet(), dstMac: 'ff:ff:ff:ff:ff:ff' },
+      createDefaultARP(),
+    ];
+
+    const result = buildPacket(layers, new Uint8Array(0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Outer Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // Outer IPv4 (20B): TotalLen=78(0x004e), Proto=17(0x11), Checksum=0xd400
+      0x45, 0x00, 0x00, 0x4e,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x11, 0xd4, 0x00,
+      0xc6, 0x33, 0x64, 0x01,
+      0xc6, 0x33, 0x64, 0x02,
+      // Outer UDP (8B): 49152 -> 4789, Len=58(0x003a), Checksum=0xa15f
+      0xc0, 0x00, 0x12, 0xb5,
+      0x00, 0x3a, 0xa1, 0x5f,
+      // VXLAN (8B): Flags=0x08 (I=1), Reserved1=0, VNI=100 (0x000064), Reserved2=0
+      0x08, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x64, 0x00,
+      // Inner Ethernet II (14B): broadcast -> ARP (0x0806)
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x06,
+      // Inner ARP Request (28B)
+      0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0xc0, 0xa8, 0x00, 0x01,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xc0, 0xa8, 0x00, 0x02,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    // Zero warnings on outer Ethernet/IPv4/UDP and VXLAN (layer 3); only the 42-byte inner Ethernet+ARP emits the IEEE 802.3 60B note
+    expect(result.warnings.filter((w) => w.layerIndex !== 4)).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+
+    // Adjacent-only UDP context: VXLAN separated from UDP(4789) by an intermediate layer warns about missing UDP
+    const nonAdjacent = buildPacket(
+      [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        { ...createDefaultUDP(), dstPort: 4789 },
+        createDefaultEthernet(),
+        {
+          type: 'vxlan',
+          flags: autoValue(),
+          vni: 100,
+          reserved1: 0,
+          reserved2: 0,
+        },
+      ],
+      new Uint8Array(0),
+    );
+    expect(nonAdjacent.ok).toBe(true);
+    if (nonAdjacent.ok) {
+      expect(
+        nonAdjacent.warnings.some(
+          (w) => w.layerIndex === 4 && w.message.includes('No underlying UDP layer'),
+        ),
+      ).toBe(true);
+    }
+  });
 });
