@@ -29,7 +29,13 @@ describe('decodePacket', () => {
       const decoded = decodePacket(built.bytes, 'ethernet');
       expect(decoded.ok).toBe(true);
       if (!decoded.ok) continue;
-      expect(decoded.value.notes).toEqual([]);
+      if (preset.id === 'igmp-router-alert') {
+        expect(decoded.value.notes).toEqual([
+          'IPv4 Protocol 2 is not decoded into a layer; remaining bytes kept as Payload.',
+        ]);
+      } else {
+        expect(decoded.value.notes).toEqual([]);
+      }
       expect(decoded.value.layers.map((l) => l.type)).toEqual(preset.layers.map((l) => l.type));
 
       // Re-encoding decoded layers + payload must match the original bytes identically
@@ -166,10 +172,15 @@ describe('decodePacket', () => {
     wrongVer[0] = 0x65;
     expect(decodePacket(wrongVer, 'ipv4').ok).toBe(false);
 
-    // IHL = 6 (IPv4 options) passed to Raw IPv4 decoder
-    const withOptions = new Uint8Array(24);
-    withOptions[0] = 0x46;
-    expect(decodePacket(withOptions, 'ipv4').ok).toBe(false);
+    // IHL < 5 passed to Raw IPv4 decoder -> error
+    const tooSmallIhl = new Uint8Array(20);
+    tooSmallIhl[0] = 0x44;
+    expect(decodePacket(tooSmallIhl, 'ipv4').ok).toBe(false);
+
+    // IHL = 6 (24B header) truncated to 22 bytes -> error
+    const truncatedOptions = new Uint8Array(22);
+    truncatedOptions[0] = 0x46;
+    expect(decodePacket(truncatedOptions, 'ipv4').ok).toBe(false);
   });
 
   it('strips Ethernet zero-padding on 60-byte TCP SYN and UDP frames and keeps checksums auto', () => {
@@ -582,21 +593,21 @@ describe('decodePacket', () => {
       }
     }
 
-    const innerWithOptions = new Uint8Array(24);
-    innerWithOptions[0] = 0x46; // Version=4, IHL=6
-    const optInner = buildPacket(
+    const innerInvalidIhl = new Uint8Array(20);
+    innerInvalidIhl[0] = 0x44; // Version=4, IHL=4 (< 5)
+    const invalidInner = buildPacket(
       [{ ...createDefaultIPv4(), protocol: manualValue(4) }],
-      innerWithOptions,
+      innerInvalidIhl,
     );
-    expect(optInner.ok).toBe(true);
-    if (optInner.ok) {
-      const dec = decodePacket(optInner.bytes, 'ipv4');
+    expect(invalidInner.ok).toBe(true);
+    if (invalidInner.ok) {
+      const dec = decodePacket(invalidInner.bytes, 'ipv4');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
         expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv4']);
-        expect(dec.value.notes.some((n) => n.includes('Inner IPv4 header') && n.includes('IHL=6'))).toBe(true);
+        expect(dec.value.notes.some((n) => n.includes('Inner IPv4 header') && n.includes('IHL=4'))).toBe(true);
         const r = buildPacket(dec.value.layers, dec.value.payload);
-        expect(r.ok && r.bytes).toEqual(optInner.bytes);
+        expect(r.ok && r.bytes).toEqual(invalidInner.bytes);
       }
     }
 
@@ -1958,6 +1969,280 @@ describe('decodePacket', () => {
         expect(tcpLayer.options.some((o) => o.kind === 'raw'), mc.name).toBe(true);
       }
       expect(dec.value.payload.length, mc.name).toBe(0);
+
+      const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+      expect(rebuilt.ok, mc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, mc.name).toEqual(wire);
+      }
+    }
+  });
+
+  it('losslessly decodes and round-trips every IPv4 option kind, Raw IPv4 IHL 6, tunnels (IP-in-IP, GRE, 4in6, VLAN, VXLAN), and Ethernet padding stripping with IHL 6', () => {
+    const cases: readonly {
+      name: string;
+      startLayer: 'ethernet' | 'ipv4';
+      layers: Layer[];
+      payload?: Uint8Array;
+    }[] = [
+      {
+        name: 'EOL alone',
+        startLayer: 'ethernet',
+        layers: [createDefaultEthernet(), { ...createDefaultIPv4(), options: [{ kind: 'eol' }] }, createDefaultUDP()],
+      },
+      {
+        name: 'NOP alone',
+        startLayer: 'ethernet',
+        layers: [createDefaultEthernet(), { ...createDefaultIPv4(), options: [{ kind: 'nop' }] }, createDefaultUDP()],
+      },
+      {
+        name: 'Record Route (2 hops, auto pointer)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'rr', pointer: autoValue(), addresses: ['192.0.2.1', '0.0.0.0'] }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Record Route (manual pointer = 8)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'rr', pointer: manualValue(8), addresses: ['192.0.2.1', '0.0.0.0'] }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Internet Timestamp',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'timestamp', pointer: 9, overflow: 1, flag: 1, dataHex: 'c0 00 02 01 00 00 12 34' }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Loose Source and Record Route (LSRR)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'lsrr', pointer: autoValue(), addresses: ['198.51.100.1', '203.0.113.1'] }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Strict Source and Record Route (SSRR)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'ssrr', pointer: autoValue(), addresses: ['198.51.100.1'] }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Router Alert',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Unknown IPv4 option type (CIPSO Type 134)',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'raw', optionType: 134, length: autoValue(), dataHex: '00 00 00 01' }],
+          },
+          createDefaultUDP(),
+        ],
+      },
+      {
+        name: 'Raw IPv4 import with IHL 6 (Router Alert)',
+        startLayer: 'ipv4',
+        layers: [
+          { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('raw-ipv4-ihl6'),
+      },
+      {
+        name: 'Inner IPv4 with options inside IP-in-IP',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+          {
+            ...createDefaultIPv4(),
+            options: [{ kind: 'rr', pointer: autoValue(), addresses: ['10.0.0.1'] }],
+          },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('ipip-opts'),
+      },
+      {
+        name: 'Inner IPv4 with options inside GRE',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          createDefaultGRE(),
+          { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+          createDefaultICMP(),
+        ],
+        payload: encodeUtf8('gre-opts'),
+      },
+      {
+        name: 'Inner IPv4 with options inside 4in6 + VLAN + VXLAN',
+        startLayer: 'ethernet',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultVLAN(),
+          createDefaultIPv6(),
+          { ...createDefaultUDP(), dstPort: 4789 },
+          createDefaultVXLAN(),
+          createDefaultEthernet(),
+          { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+          createDefaultUDP(),
+        ],
+        payload: encodeUtf8('vxlan-opts'),
+      },
+    ];
+
+    for (const c of cases) {
+      const built = buildPacket(c.layers, c.payload ?? new Uint8Array(0));
+      expect(built.ok, c.name).toBe(true);
+      if (!built.ok) continue;
+
+      const dec = decodePacket(built.bytes, c.startLayer);
+      expect(dec.ok, c.name).toBe(true);
+      if (!dec.ok) continue;
+
+      expect(dec.value.layers.map((l) => l.type), c.name).toEqual(c.layers.map((l) => l.type));
+      expect(dec.value.notes, c.name).toHaveLength(0);
+
+      const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+      expect(rebuilt.ok, c.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, c.name).toEqual(built.bytes);
+      }
+    }
+
+    // Ethernet padding stripping must use the actual IPv4 header length (IHL=6 -> 24B)
+    const raFrame = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), options: [{ kind: 'routerAlert', value: 0 }] },
+        createDefaultUDP(),
+      ],
+      encodeUtf8('hi'),
+    );
+    expect(raFrame.ok).toBe(true);
+    if (raFrame.ok) {
+      // 14 + 24 + 8 + 2 = 48 bytes -> pad to 60 bytes on wire
+      expect(raFrame.bytes.length).toBe(48);
+      const wire60 = new Uint8Array(60);
+      wire60.set(raFrame.bytes, 0);
+      const dec = decodePacket(wire60, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes.some((n) => n.includes('Stripped 12 trailing zero byte'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(raFrame.bytes);
+      }
+    }
+  });
+
+  it('losslessly preserves malformed IPv4 options and non-zero bytes after EOL as a raw block with notes', () => {
+    const buildRawIPv4WithOptBytes = (optBytes: Uint8Array) => {
+      // Build a valid IHL=5 IPv4 header, then manually inject options and update IHL/TotalLength/Checksum
+      const base = buildPacket(
+        [{ ...createDefaultIPv4(), protocol: manualValue(17) }],
+        new Uint8Array(0),
+      );
+      expect(base.ok).toBe(true);
+      if (!base.ok) throw new Error('failed to build base IPv4');
+      const headerLen = 20 + optBytes.length;
+      const packet = new Uint8Array(headerLen);
+      packet.set(base.bytes, 0);
+      packet.set(optBytes, 20);
+      packet[0] = 0x40 | (headerLen / 4);
+      packet[2] = (headerLen >>> 8) & 0xff;
+      packet[3] = headerLen & 0xff;
+      packet[10] = 0;
+      packet[11] = 0;
+      return packet;
+    };
+
+    const malformedCases: readonly { name: string; optBytes: Uint8Array; noteMatch: string }[] = [
+      {
+        name: 'Length < 2 (Length = 1)',
+        optBytes: new Uint8Array([0x86, 0x01, 0xaa, 0xbb]),
+        noteMatch: '(< 2)',
+      },
+      {
+        name: 'Length running past header',
+        optBytes: new Uint8Array([0x94, 0x0a, 0x00, 0x00]),
+        noteMatch: 'exceeding remaining',
+      },
+      {
+        name: 'Truncated option missing Length byte at end',
+        optBytes: new Uint8Array([0x01, 0x01, 0x01, 0x94]),
+        noteMatch: 'missing Length byte',
+      },
+      {
+        name: 'Wrong length for Router Alert (Length = 6)',
+        optBytes: new Uint8Array([0x94, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        noteMatch: 'expected 4',
+      },
+      {
+        name: 'Wrong length for Record Route (Length = 5, not 3+4n)',
+        optBytes: new Uint8Array([0x07, 0x05, 0x04, 0x01, 0x02, 0x00, 0x00, 0x00]),
+        noteMatch: 'expected 3 + 4n',
+      },
+      {
+        name: 'Wrong length for Timestamp (Length = 3, < 4)',
+        optBytes: new Uint8Array([0x44, 0x03, 0x05, 0x00]),
+        noteMatch: 'expected >= 4',
+      },
+      {
+        name: 'Non-zero bytes after EOL',
+        optBytes: new Uint8Array([0x00, 0xaa, 0xbb, 0xcc]),
+        noteMatch: 'End of Option List',
+      },
+    ];
+
+    for (const mc of malformedCases) {
+      const wire = buildRawIPv4WithOptBytes(mc.optBytes);
+      const dec = decodePacket(wire, 'ipv4');
+      expect(dec.ok, mc.name).toBe(true);
+      if (!dec.ok) continue;
+
+      expect(dec.value.notes.some((n) => n.includes(mc.noteMatch)), mc.name).toBe(true);
+      const ipLayer = dec.value.layers[0];
+      expect(ipLayer.type, mc.name).toBe('ipv4');
+      if (ipLayer.type === 'ipv4') {
+        expect(ipLayer.options.some((o) => o.kind === 'raw'), mc.name).toBe(true);
+      }
 
       const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
       expect(rebuilt.ok, mc.name).toBe(true);

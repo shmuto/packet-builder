@@ -31,6 +31,7 @@ import {
   NumberField,
   TextField,
 } from './FieldControls';
+import { IPv4OptionsEditor } from './IPv4OptionsEditor';
 import { LAYER_META } from './layerMeta';
 import { TCPOptionsEditor } from './TCPOptionsEditor';
 
@@ -491,16 +492,6 @@ export function LayerCard({
                   onHoverStart={hoverStart('version')}
                   onHoverEnd={hoverEnd}
                 />
-                <FixedFieldChip
-                  id={`${id}-ihl`}
-                  label="IHL"
-                  value="5 (20B)"
-                  bits="4b"
-                  doc={fieldDoc('ihl')}
-                  isHighlighted={isHighlighted('ihl')}
-                  onHoverStart={hoverStart('ihl')}
-                  onHoverEnd={hoverEnd}
-                />
               </div>
 
               <TextField
@@ -671,6 +662,20 @@ export function LayerCard({
               </div>
 
               <AutoManualField
+                id={`${id}-ihl`}
+                label="IHL"
+                hint="4 bit (5-15 words)"
+                doc={fieldDoc('ihl')}
+                value={layer.ihl}
+                resolvedAutoValue={resolvedAutoValues?.ihl}
+                error={fieldError('ihl')}
+                warning={fieldWarning('ihl')}
+                isHighlighted={isHighlighted('ihl')}
+                onHoverStart={hoverStart('ihl')}
+                onHoverEnd={hoverEnd}
+                onChange={(ihl) => onChange({ ...layer, ihl })}
+              />
+              <AutoManualField
                 id={`${id}-totalLength`}
                 label="Total Length"
                 hint="bytes"
@@ -687,7 +692,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-protocol`}
                 label="Protocol"
-                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP / 41=IPv6 / 47=GRE"
+                hint="1=ICMP / 2=IGMP / 4=IP-in-IP / 6=TCP / 17=UDP / 41=IPv6 / 47=GRE"
                 doc={fieldDoc('protocol')}
                 value={layer.protocol}
                 resolvedAutoValue={resolvedAutoValues?.protocol}
@@ -713,6 +718,19 @@ export function LayerCard({
                 onHoverStart={hoverStart('headerChecksum')}
                 onHoverEnd={hoverEnd}
                 onChange={(headerChecksum) => onChange({ ...layer, headerChecksum })}
+              />
+
+              <IPv4OptionsEditor
+                cardId={id}
+                options={layer.options}
+                resolvedAutoValues={resolvedAutoValues}
+                fieldError={fieldError}
+                fieldWarning={fieldWarning}
+                fieldDoc={fieldDoc}
+                isHighlighted={isHighlighted}
+                hoverStart={hoverStart}
+                hoverEnd={hoverEnd}
+                onChange={(options) => onChange({ ...layer, options })}
               />
             </div>
           )}

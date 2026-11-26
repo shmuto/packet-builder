@@ -54,7 +54,7 @@ function fieldsFromPreset(preset: PacketPreset): EditorFields {
   return {
     activePresetId: preset.id,
     layers: preset.layers,
-    payloadMode: 'text',
+    payloadMode: preset.payloadMode ?? 'text',
     payloadText: preset.payloadText,
     payloadHex: formatSpacedHex(preset.payloadBytes),
   };

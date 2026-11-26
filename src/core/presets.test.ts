@@ -194,4 +194,29 @@ describe('presets', () => {
       ]),
     );
   });
+
+  it('IGMPv2 (Router Alert) preset builds a 46-byte frame with IHL 6, TTL 1, Protocol 2, Router Alert 94 04 00 00, and IGMPv2 payload', () => {
+    const igmpPreset = createPresets().find((p) => p.id === 'igmp-router-alert');
+    expect(igmpPreset).toBeDefined();
+    if (!igmpPreset) return;
+
+    const result = buildPacket(igmpPreset.layers, igmpPreset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Eth) + 24(IPv4 IHL=6 with Router Alert) + 8(IGMPv2 General Query) = 46 bytes
+    expect(result.bytes.length).toBe(46);
+    // IPv4 starts at offset 14: Version=4, IHL=6 (0x46), Total Length=32 (0x0020), TTL=1, Protocol=2, Checksum=0x31f9
+    expect(result.bytes[14]).toBe(0x46);
+    expect(result.bytes.slice(16, 18)).toEqual(new Uint8Array([0x00, 0x20]));
+    expect(result.bytes[22]).toBe(1);
+    expect(result.bytes[23]).toBe(2);
+    expect(result.bytes.slice(24, 26)).toEqual(new Uint8Array([0x31, 0xf9]));
+    // Router Alert option at offset 34..37: 94 04 00 00
+    expect(result.bytes.slice(34, 38)).toEqual(new Uint8Array([0x94, 0x04, 0x00, 0x00]));
+    // IGMPv2 General Query payload at offset 38..45
+    expect(result.bytes.slice(38, 46)).toEqual(
+      new Uint8Array([0x11, 0x64, 0xee, 0x9b, 0x00, 0x00, 0x00, 0x00]),
+    );
+  });
 });
