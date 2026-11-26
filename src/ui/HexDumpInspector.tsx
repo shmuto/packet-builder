@@ -10,6 +10,7 @@ import {
 import type { Layer, LayerType } from '../core/layers/types';
 import { buildPcap, selectPcapLinkType } from '../core/pcap';
 import { PERMALINK_LONG_URL_THRESHOLD } from '../core/permalink';
+import type { RoundTripReport } from '../core/roundtrip';
 import { BitDiagram } from './BitDiagram';
 import { LAYER_META } from './layerMeta';
 
@@ -18,6 +19,7 @@ export interface HexDumpInspectorProps {
   readonly draft: EvaluatedPacketDraft;
   readonly highlight: HighlightTarget | null;
   readonly permalinkUrl?: string | null;
+  readonly roundTripReport?: RoundTripReport;
   readonly onHighlightChange: (target: HighlightTarget | null) => void;
 }
 
@@ -82,11 +84,35 @@ const HexDumpRowView = memo(function HexDumpRowView({
   );
 });
 
+function formatRoundTripNotice(report: RoundTripReport | undefined): string | null {
+  if (!report || report.kind === 'reproducible' || report.kind === 'not-built') {
+    return null;
+  }
+  if (report.kind === 'unsupported-start') {
+    if (report.outerLayerType === null) {
+      return 'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.';
+    }
+    return `Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this stack starts with ${LAYER_META[report.outerLayerType].shortName}. Use Copy Link to keep the exact stack.`;
+  }
+  if (report.decodedLayerTypes.length === 0) {
+    return 'Import Hex cannot decode these bytes back into the same layer stack. Use Copy Link to keep the exact stack.';
+  }
+  const stackText = report.decodedLayerTypes
+    .map((type) => LAYER_META[type].shortName)
+    .join(' -> ');
+  const payloadSuffix =
+    report.decodedPayloadLength > 0
+      ? ` + Payload (${report.decodedPayloadLength} ${report.decodedPayloadLength === 1 ? 'byte' : 'bytes'})`
+      : '';
+  return `Import Hex will read these bytes as ${stackText}${payloadSuffix}. Use Copy Link to keep the exact stack.`;
+}
+
 export function HexDumpInspector({
   layers,
   draft,
   highlight,
   permalinkUrl,
+  roundTripReport,
   onHighlightChange,
 }: HexDumpInspectorProps) {
   const { ok: isSuccess, bytes, spans, rows, segments, errors, warnings, payloadError } = draft;
@@ -211,6 +237,8 @@ export function HexDumpInspector({
     };
   })();
 
+  const roundTripNotice = formatRoundTripNotice(roundTripReport);
+
   return (
     <aside className="inspector-panel" aria-label="Packet output inspector">
       <div className="inspector-header">
@@ -288,6 +316,12 @@ export function HexDumpInspector({
           This shareable link is {permalinkUrl.length.toLocaleString()} characters long (over{' '}
           {PERMALINK_LONG_URL_THRESHOLD.toLocaleString()}); some apps or browsers may truncate long
           links.
+        </p>
+      )}
+
+      {roundTripNotice && (
+        <p className="export-status-info" role="status">
+          {roundTripNotice}
         </p>
       )}
 

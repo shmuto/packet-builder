@@ -18,7 +18,7 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
 - **Bit-Accurate Inspection & Export**
   - **Bidirectional hover/focus highlighting** links editor fields, hexadecimal dump bytes (+ ASCII), layer segment summaries, and a **unified, color-coded 32-bit header bit diagram** showing all stacked headers continuously in wire order with header-range emphasis—including sub-byte fields such as IPv4 Version (4b) / IHL (4b), Flags (3b) / Fragment Offset (13b), and TCP Data Offset (4b) / Reserved (4b).
   - **One-click export & shareable permalinks**: copy continuous hex strings (**Copy Hex**), formatted hex dumps (**Copy Dump**), download Wireshark-compatible `.pcap` files (**Download .pcap**), or copy a shareable URL (**Copy Link**). Permalinks use a versioned URL fragment (`#p1=<base64url(UTF-8 JSON)>`) that works under GitHub Pages sub-paths and restores the exact layer stack, auto/manual overrides, and payload—including intentionally broken packets.
-  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets, including BGP-4 over TCP port 179) to decode them back into editable layers while preserving auto vs. manual checksum/length states.
+  - **Import & Decode Hex**: paste raw hex streams or offset-prefixed hex dumps (Ethernet II frames or Raw IPv4 packets, including BGP-4 over TCP port 179) to decode them back into editable layers while preserving auto vs. manual checksum/length states. Because raw bytes only carry standard encapsulations (Ethernet II or Raw IPv4 outermost headers and recognized protocol numbers/ports), custom or non-standard stacks cannot always be reconstructed from exported bytes alone—the inspector flags these mismatches automatically and recommends **Copy Link** to preserve the exact stack.
 
 ## Supported Protocols & Specifications
 
@@ -54,6 +54,7 @@ npm run check      # Run typecheck, tests, and production build
   - `packet.ts` — `buildPacket` assembling arbitrary protocol header stacks into raw bytes and contiguous `FieldSpan[]` bit mappings
   - `decode.ts` — Raw byte decoder (`decodePacket`) reconstructing layer stacks & payload from Ethernet II or Raw IPv4 packets (including BGP-4 over TCP port 179)
   - `permalink.ts` — Versioned shareable permalink encoder/decoder (`#p1=<base64url(UTF-8 JSON)>`) with strict shape validation
+  - `roundtrip.ts` — Decode round-trip analyzer (`analyzeDecodeRoundTrip`) detecting when exported bytes will not decode back into the same layer stack
   - `presets.ts` — Default layer factories and UDP / TCP SYN / ICMP Ping / ARP Request / BGP OPEN presets
   - `inspector.ts` — Form integer parsing, hex dump rows, layer summaries, bidirectional highlight matching, and 32-bit bit diagram layout
   - `pcap.ts` — Classic libpcap (v2.4) encoder and link-layer type selector for Wireshark export

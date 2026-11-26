@@ -89,4 +89,66 @@ describe('HexDumpInspector', () => {
     );
     expect(longHtml).toContain('export-status-note');
   });
+
+  it('shows round-trip info note only for differs and unsupported-start reports', () => {
+    const preset = createPresets()[0];
+    const draft = evaluatePacketDraft(preset.layers, ok(preset.payloadBytes));
+
+    const reproducibleHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: { kind: 'reproducible' },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(reproducibleHtml).not.toContain('export-status-info');
+
+    const notBuiltHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: { kind: 'not-built' },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(notBuiltHtml).not.toContain('export-status-info');
+
+    const differsHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'differs',
+          decodedLayerTypes: ['ethernet', 'ipv4', 'udp'],
+          decodedPayloadLength: 42,
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(differsHtml).toContain('export-status-info');
+    expect(differsHtml).toContain(
+      'Import Hex will read these bytes as ETH -&gt; IPv4 -&gt; UDP + Payload (42 bytes). Use Copy Link to keep the exact stack.',
+    );
+
+    const unsupportedHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'unsupported-start',
+          outerLayerType: 'udp',
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(unsupportedHtml).toContain('export-status-info');
+    expect(unsupportedHtml).toContain(
+      'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this stack starts with UDP. Use Copy Link to keep the exact stack.',
+    );
+  });
 });
