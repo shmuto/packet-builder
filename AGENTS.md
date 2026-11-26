@@ -1,7 +1,5 @@
 # packet-builder 開発ルール
 
-このファイルは、実装担当の AI（Antigravity CLI）とレビュー担当の AI（Claude）の両方が読みます。
-
 ## 概要
 
 - パケットを組み立てる学習用の Web アプリです。
