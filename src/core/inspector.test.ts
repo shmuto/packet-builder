@@ -29,6 +29,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
 } from './presets';
 import { ok } from './result';
 
@@ -833,5 +834,69 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     expect(unified[11].cells.map((c) => [c.span.fieldId, c.span.label, c.isLayerEnd])).toEqual([
       ['restValue', 'MTU', true],
     ]);
+  });
+
+  it('covers VLAN tag 3b PCP / 1b DEI / 12b VID / 16b EtherType split in per-layer and unified bit diagrams', () => {
+    const draft = evaluatePacketDraft(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultVLAN(), pcp: 5, dei: false, vid: 100 },
+        createDefaultIPv4(),
+      ],
+      ok(new Uint8Array(0)),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Per-layer VLAN diagram (32 bits = 1 row)
+    const vlanRows = buildBitDiagramRows(draft.spans, 1);
+    expect(vlanRows).toHaveLength(1);
+    expectContiguousBitDiagram(vlanRows, 32);
+    expect(vlanRows[0].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['pcp', 0, 3],
+      ['dei', 3, 1],
+      ['vid', 4, 12],
+      ['etherType', 16, 16],
+    ]);
+
+    // Unified bit diagram: Ethernet (112b) + VLAN (32b) + IPv4 (160b) = 304 bits (10 rows: 9x32 + 16)
+    const unified = buildUnifiedBitDiagramRows(draft.spans);
+    expect(unified).toHaveLength(10);
+    // Row 3 (bits 96..127): Ethernet EtherType (16b) + VLAN PCP (3b) + DEI (1b) + VID (12b)
+    expect(
+      unified[3].cells.map((c) => [
+        c.span.layerType,
+        c.span.fieldId,
+        c.colSpan,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      ['ethernet', 'etherType', 16, false, true],
+      ['vlan', 'pcp', 3, true, false],
+      ['vlan', 'dei', 1, false, false],
+      ['vlan', 'vid', 12, false, false],
+    ]);
+    // Row 4 (bits 128..159): VLAN EtherType (16b, layerEnd) + IPv4 Version (4b, layerStart) + IHL (4b) + TOS (8b)
+    expect(
+      unified[4].cells.map((c) => [
+        c.span.layerType,
+        c.span.fieldId,
+        c.colSpan,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      ['vlan', 'etherType', 16, false, true],
+      ['ipv4', 'version', 4, true, false],
+      ['ipv4', 'ihl', 4, false, false],
+      ['ipv4', 'tos', 8, false, false],
+    ]);
+
+    // Sub-byte hover on VLAN byte 0 (packet byte 14): PCP (3b) + DEI (1b) + upper 4b of VID
+    const pktByte14 = { kind: 'byte' as const, byteIndex: 14 };
+    expect(isFieldHighlighted(1, 'pcp', draft.spans, pktByte14)).toBe(true);
+    expect(isFieldHighlighted(1, 'dei', draft.spans, pktByte14)).toBe(true);
+    expect(isFieldHighlighted(1, 'vid', draft.spans, pktByte14)).toBe(true);
+    expect(isFieldHighlighted(1, 'etherType', draft.spans, pktByte14)).toBe(false);
   });
 });

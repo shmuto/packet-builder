@@ -22,11 +22,14 @@ import type {
   RelativeFieldSpan,
 } from './layers/types';
 import { UDP_HEADER_LENGTH, encodeUDP, type IPPseudoContext } from './layers/udp';
+import { VLAN_HEADER_LENGTH, encodeVLAN } from './layers/vlan';
 
 function getLayerHeaderLength(layer: Layer): number {
   switch (layer.type) {
     case 'ethernet':
       return ETHERNET_HEADER_LENGTH;
+    case 'vlan':
+      return VLAN_HEADER_LENGTH;
     case 'arp':
       return ARP_HEADER_LENGTH;
     case 'ipv4':
@@ -117,6 +120,7 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
   for (let i = count - 1; i >= 0; i--) {
     const layer = layers[i];
     const upperLayerType: LayerType | null = i + 1 < count ? layers[i + 1].type : null;
+    const upperNextLayerType: LayerType | null = i + 2 < count ? layers[i + 2].type : null;
     let result: LayerEncodeResult;
 
     switch (layer.type) {
@@ -124,7 +128,14 @@ export function buildPacket(layers: readonly Layer[], payload: Uint8Array): Buil
         result = encodeEthernet(layer, {
           layerIndex: i,
           upperLayerType,
+          upperNextLayerType,
           upperBytesLength: currentUpperBytes.length,
+        });
+        break;
+      case 'vlan':
+        result = encodeVLAN(layer, {
+          layerIndex: i,
+          upperLayerType,
         });
         break;
       case 'arp':

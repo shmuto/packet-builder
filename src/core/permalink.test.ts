@@ -22,6 +22,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
   createPresets,
 } from './presets';
 
@@ -155,10 +156,11 @@ describe('permalink', () => {
     }
   });
 
-  it('round-trips all 9 layer types including ARP, IPv6, ICMP, and ICMPv6 (Echo & Raw)', () => {
+  it('round-trips all 10 layer types including VLAN, ARP, IPv6, ICMP, and ICMPv6 (Echo & Raw)', () => {
     const state: PermalinkState = {
       layers: [
         createDefaultEthernet(),
+        { ...createDefaultVLAN(), pcp: 5, dei: true, vid: 200, etherType: manualValue(0x8100) },
         {
           ...createDefaultARP(),
           hardwareType: manualValue(1),

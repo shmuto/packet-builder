@@ -12,6 +12,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
   createPresets,
 } from './presets';
 
@@ -49,6 +50,7 @@ describe('FIELD_DOCS coverage and quality', () => {
     }
 
     // 2) All layer types and variants:
+    //    - VLAN tag
     //    - IPv4 with all flag bits toggled
     //    - IPv6 fixed header
     //    - ICMPv6 Echo and Raw (Packet Too Big) variants
@@ -56,6 +58,7 @@ describe('FIELD_DOCS coverage and quality', () => {
     //    - BGP OPEN (1), UPDATE (2), NOTIFICATION (3), and KEEPALIVE (4)
     collectSpans([
       createDefaultEthernet(),
+      createDefaultVLAN(),
       createDefaultARP(),
       {
         ...createDefaultIPv4(),

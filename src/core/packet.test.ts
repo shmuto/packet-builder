@@ -12,6 +12,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
 } from './presets';
 
 /** FieldSpan[] が 0 〜 totalBits まで隙間なく・重なりなく覆っていることを検証する */
@@ -840,5 +841,103 @@ describe('buildPacket', () => {
     // 0x4571 - 8 = 0x4569
     expect(changedSrc.bytes.slice(56, 58)).toEqual(new Uint8Array([0x45, 0x69]));
     expect(changedSrc.bytes.slice(56, 58)).not.toEqual(result.bytes.slice(56, 58));
+  });
+
+  it('matches known 802.1Q single-tagged frame (PCP 5, DEI 0, VID 100 -> TPID 0x8100, TCI 0xa064) byte-for-byte', () => {
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      { ...createDefaultVLAN(), pcp: 5, dei: false, vid: 100 },
+      createDefaultIPv4(),
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): TPID = 0x8100 (802.1Q)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x81, 0x00,
+      // VLAN tag body (4B): TCI = 0xa064 (PCP=5, DEI=0, VID=100), Inner EtherType = 0x0800 (IPv4)
+      0xa0, 0x64, 0x08, 0x00,
+      // IPv4 (20B): TotalLen=33(0x0021), ID=0x1234, DF=0x4000, TTL=64, Proto=17, Checksum=0xa744
+      0x45, 0x00, 0x00, 0x21,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x11, 0xa7, 0x44,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // UDP (8B): 12345 -> 80, Len=13(0x000d), Checksum=0x2a25
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x2a, 0x25,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known 802.1ad QinQ double-tagged frame (outer TPID 0x88a8 VID 200, inner TPID 0x8100 VID 100) byte-for-byte', () => {
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      { ...createDefaultVLAN(), vid: 200 },
+      { ...createDefaultVLAN(), vid: 100 },
+      createDefaultIPv4(),
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): outer S-tag TPID = 0x88a8 (IEEE 802.1ad)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x88, 0xa8,
+      // Outer VLAN S-tag (4B): VID=200 (0x00c8), inner C-tag TPID = 0x8100
+      0x00, 0xc8, 0x81, 0x00,
+      // Inner VLAN C-tag (4B): VID=100 (0x0064), inner EtherType = 0x0800 (IPv4)
+      0x00, 0x64, 0x08, 0x00,
+      // IPv4 (20B)
+      0x45, 0x00, 0x00, 0x21,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x11, 0xa7, 0x44,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // UDP (8B)
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x2a, 0x25,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expectExactBitCoverage(result.spans, expected.length);
+
+    // Frames exceeding 1518 / 1522 bytes are NOT rejected (no max Ethernet frame size error)
+    const largeTagged = buildPacket(
+      [createDefaultEthernet(), createDefaultVLAN(), createDefaultIPv4(), createDefaultUDP()],
+      new Uint8Array(1500), // 14 + 4 + 20 + 8 + 1500 = 1546 bytes
+    );
+    expect(largeTagged.ok).toBe(true);
+    if (largeTagged.ok) {
+      expect(largeTagged.bytes.length).toBe(1546);
+      expect(largeTagged.warnings).toHaveLength(0);
+    }
   });
 });

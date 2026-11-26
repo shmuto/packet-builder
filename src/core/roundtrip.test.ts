@@ -8,6 +8,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
   createPresets,
 } from './presets';
 import { analyzeBuiltBytesRoundTrip, analyzeDecodeRoundTrip } from './roundtrip';
@@ -21,7 +22,17 @@ describe('analyzeDecodeRoundTrip', () => {
     }
   });
 
-  it('reports reproducible for IP-in-IP, 6in4, 4in6, Raw IPv4, and Raw IPv6 stacks', () => {
+  it('reports reproducible for IP-in-IP, 6in4, 4in6, QinQ, Raw IPv4, and Raw IPv6 stacks', () => {
+    const qinq = [
+      createDefaultEthernet(),
+      { ...createDefaultVLAN(), vid: 200 },
+      { ...createDefaultVLAN(), vid: 100 },
+      createDefaultIPv4(),
+      createDefaultUDP(),
+    ];
+    expect(analyzeDecodeRoundTrip(qinq, encodeUtf8('qinq-ok'))).toEqual({
+      kind: 'reproducible',
+    });
     const ipInIp = [
       createDefaultEthernet(),
       createDefaultIPv4(),

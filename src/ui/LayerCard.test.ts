@@ -14,6 +14,7 @@ import {
   createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
+  createDefaultVLAN,
 } from '../core/presets';
 import { LayerCard } from './LayerCard';
 
@@ -21,6 +22,7 @@ describe('LayerCard per-field info controls', () => {
   it('renders a keyboard-accessible info control (aria-expanded & aria-controls) for every documented field', () => {
     const layers: Layer[] = [
       createDefaultEthernet(),
+      createDefaultVLAN(),
       createDefaultARP(),
       createDefaultIPv4(),
       createDefaultIPv6(),
