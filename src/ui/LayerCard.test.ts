@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { FIELD_DOCS } from '../core/fieldDocs';
-import type { Layer } from '../core/layers/types';
+import { autoValue, type Layer } from '../core/layers/types';
 import { buildPacket } from '../core/packet';
 import {
   createDefaultARP,
@@ -44,7 +44,22 @@ describe('LayerCard per-field info controls', () => {
         sequenceNumber: 1,
       },
       createDefaultUDP(),
-      createDefaultTCP(),
+      {
+        ...createDefaultTCP(),
+        options: [
+          { kind: 'mss', mss: 1460 },
+          { kind: 'windowScale', shiftCount: 7 },
+          { kind: 'sackPermitted' },
+          { kind: 'timestamps', tsVal: 100, tsEcr: 0 },
+          { kind: 'nop' },
+          { kind: 'raw', optionKind: 30, length: autoValue(), dataHex: 'aa bb' },
+          { kind: 'eol' },
+        ],
+      },
+      {
+        ...createDefaultTCP(),
+        options: [{ kind: 'sack', blocks: [{ left: 100, right: 200 }] }],
+      },
       createDefaultVXLAN(),
       { ...createDefaultBGP(), bgpType: 1 },
       { ...createDefaultBGP(), bgpType: 2 },
@@ -81,7 +96,7 @@ describe('LayerCard per-field info controls', () => {
 
       const matches = [
         ...html.matchAll(
-          /<button[^>]*aria-expanded="false"[^>]*aria-controls="layer-\d+-([a-zA-Z0-9]+)-doc"[^>]*>/g,
+          /<button[^>]*aria-expanded="false"[^>]*aria-controls="layer-\d+-([a-zA-Z0-9-]+)-doc"[^>]*>/g,
         ),
       ];
       let set = renderedControlsByLayer.get(layer.type);
@@ -90,7 +105,11 @@ describe('LayerCard per-field info controls', () => {
         renderedControlsByLayer.set(layer.type, set);
       }
       for (const m of matches) {
-        set.add(m[1]);
+        // Normalize hyphenated indexed IDs (e.g., options-0-sack-blocks-0-left -> options.sack.blocks.left)
+        const normalized = m[1].includes('-')
+          ? m[1].replace(/-\d+(?=-|$)/g, '').replace(/-/g, '.')
+          : m[1];
+        set.add(normalized);
       }
     });
 

@@ -200,6 +200,39 @@ export interface TCPFlags {
   readonly fin: boolean;
 }
 
+/**
+ * Length encoding mode for Raw TCP/IPv4 options:
+ * - `auto`: length byte computed automatically from 2 + data bytes (TLV)
+ * - `manual`: explicit length byte override (TLV; < 2 is an error)
+ * - `none`: omit the length byte and emit [type/kind, ...data] verbatim (lossless malformed decode fallback)
+ */
+export type RawOptionLength = AutoOrManual<number> | { readonly mode: 'none' };
+
+export interface TCPSackBlock {
+  /** Left Edge of SACK block (32-bit sequence number, RFC 2018 §3) */
+  readonly left: number;
+  /** Right Edge of SACK block (32-bit sequence number, RFC 2018 §3) */
+  readonly right: number;
+}
+
+export type TCPOption =
+  | { readonly kind: 'eol' }
+  | { readonly kind: 'nop' }
+  | { readonly kind: 'mss'; readonly mss: number }
+  | { readonly kind: 'windowScale'; readonly shiftCount: number }
+  | { readonly kind: 'sackPermitted' }
+  | { readonly kind: 'sack'; readonly blocks: readonly TCPSackBlock[] }
+  | { readonly kind: 'timestamps'; readonly tsVal: number; readonly tsEcr: number }
+  | {
+      readonly kind: 'raw';
+      /** 8-bit Option Kind (0-255, RFC 9293 §3.1) */
+      readonly optionKind: number;
+      /** 8-bit Option Length (auto = 2 + data bytes, manual, or none for verbatim raw bytes) */
+      readonly length: RawOptionLength;
+      /** Option data bytes in hexadecimal (without Kind/Length bytes) */
+      readonly dataHex: string;
+    };
+
 export interface TCPLayer {
   readonly type: 'tcp';
   /** 送信元ポート番号（16 ビット、0〜65535） */
@@ -210,7 +243,7 @@ export interface TCPLayer {
   readonly seqNumber: number;
   /** Acknowledgment Number（32 ビット、0〜4294967295） */
   readonly ackNumber: number;
-  /** Data Offset（4 ビット、自動時はオプションなし基本ヘッダの 5） */
+  /** Data Offset（4 ビット、自動時は 5 + ceil(options / 4)） */
   readonly dataOffset: AutoOrManual<number>;
   /** Control Bits（8 ビット、RFC 9293 Section 3.1） */
   readonly flags: TCPFlags;
@@ -220,6 +253,8 @@ export interface TCPLayer {
   readonly checksum: AutoOrManual<number>;
   /** Urgent Pointer（16 ビット、0〜65535） */
   readonly urgentPointer: number;
+  /** Ordered list of TCP options (padded to 32-bit boundary, max 40 bytes, RFC 9293 §3.1) */
+  readonly options: readonly TCPOption[];
 }
 
 /** BGP-4 message types defined in RFC 4271 Section 4.1 */

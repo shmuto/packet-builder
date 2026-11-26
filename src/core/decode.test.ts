@@ -135,7 +135,7 @@ describe('decodePacket', () => {
       }
     }
 
-    // TCP with Data Offset = 6 (options present)
+    // TCP with Data Offset = 6 and truncated Timestamps option (01 01 08 0a)
     const tcpWithOpt = buildPacket(
       [
         createDefaultEthernet(),
@@ -149,7 +149,7 @@ describe('decodePacket', () => {
       const dec = decodePacket(tcpWithOpt.bytes, 'ethernet');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
-        expect(dec.value.notes.some((n) => n.includes('Data Offset'))).toBe(true);
+        expect(dec.value.notes.some((n) => n.includes('Malformed TCP option'))).toBe(true);
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(tcpWithOpt.bytes);
       }
@@ -473,7 +473,7 @@ describe('decodePacket', () => {
       }
     }
 
-    // TCP port 179 segment with TCP options (e.g. Data Offset = 8 / 12-byte RFC 7323 Timestamps) skips BGP decode with a note
+    // TCP port 179 segment with TCP options (Data Offset = 8 / NOP+NOP+Timestamps) now decodes BGP too
     const tcpOptions12B = new Uint8Array([
       0x01, 0x01, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02,
     ]);
@@ -498,8 +498,17 @@ describe('decodePacket', () => {
       const dec = decodePacket(tcpOptBgpBuilt.bytes, 'ethernet');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
-        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp']);
-        expect(dec.value.notes.some((n) => n.includes('BGP-4 decoding skipped'))).toBe(true);
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'tcp', 'bgp']);
+        expect(dec.value.notes).toHaveLength(0);
+        const tcpLayer = dec.value.layers[2];
+        expect(tcpLayer.type).toBe('tcp');
+        if (tcpLayer.type === 'tcp') {
+          expect(tcpLayer.options).toEqual([
+            { kind: 'nop' },
+            { kind: 'nop' },
+            { kind: 'timestamps', tsVal: 1, tsEcr: 2 },
+          ]);
+        }
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(tcpOptBgpBuilt.bytes);
       }
@@ -1730,6 +1739,230 @@ describe('decodePacket', () => {
         expect(dec.value.notes.some((n) => n.includes('VXLAN tunnel depth limit'))).toBe(true);
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(deepBuilt.bytes);
+      }
+    }
+  });
+
+  it('losslessly decodes and round-trips every TCP option kind, Linux SYN, SACK+TS, unknown kind, and BGP OPEN with Timestamps', () => {
+    const cases: readonly { name: string; layers: Layer[]; payload?: Uint8Array }[] = [
+      {
+        name: 'EOL alone',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultTCP(), options: [{ kind: 'eol' }] }],
+      },
+      {
+        name: 'NOP alone',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultTCP(), options: [{ kind: 'nop' }] }],
+      },
+      {
+        name: 'MSS alone',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultTCP(), options: [{ kind: 'mss', mss: 1460 }] }],
+      },
+      {
+        name: 'Window Scale alone',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultTCP(), options: [{ kind: 'windowScale', shiftCount: 7 }] }],
+      },
+      {
+        name: 'SACK-Permitted alone',
+        layers: [createDefaultEthernet(), createDefaultIPv4(), { ...createDefaultTCP(), options: [{ kind: 'sackPermitted' }] }],
+      },
+      {
+        name: 'SACK alone (2 blocks)',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          {
+            ...createDefaultTCP(),
+            options: [
+              {
+                kind: 'sack',
+                blocks: [
+                  { left: 1000, right: 2000 },
+                  { left: 3000, right: 4500 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'Timestamps alone',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          { ...createDefaultTCP(), options: [{ kind: 'timestamps', tsVal: 0x11223344, tsEcr: 0x55667788 }] },
+        ],
+      },
+      {
+        name: 'Linux SYN option set',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          {
+            ...createDefaultTCP(),
+            options: [
+              { kind: 'mss', mss: 1460 },
+              { kind: 'sackPermitted' },
+              { kind: 'timestamps', tsVal: 1000000, tsEcr: 0 },
+              { kind: 'nop' },
+              { kind: 'windowScale', shiftCount: 7 },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'SACK 3 blocks + Timestamps',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          {
+            ...createDefaultTCP(),
+            options: [
+              { kind: 'timestamps', tsVal: 42, tsEcr: 99 },
+              {
+                kind: 'sack',
+                blocks: [
+                  { left: 10, right: 20 },
+                  { left: 30, right: 40 },
+                  { left: 50, right: 60 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'Unknown kind (Kind 30, Length 4)',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          {
+            ...createDefaultTCP(),
+            options: [{ kind: 'raw', optionKind: 30, length: autoValue(), dataHex: 'de ad' }],
+          },
+        ],
+      },
+      {
+        name: 'BGP OPEN over TCP with Timestamps',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          {
+            ...createDefaultTCP(),
+            dstPort: 179,
+            options: [{ kind: 'nop' }, { kind: 'nop' }, { kind: 'timestamps', tsVal: 12345, tsEcr: 67890 }],
+          },
+          createDefaultBGP(),
+        ],
+      },
+    ];
+
+    for (const c of cases) {
+      const built = buildPacket(c.layers, c.payload ?? new Uint8Array(0));
+      expect(built.ok, c.name).toBe(true);
+      if (!built.ok) continue;
+
+      const dec = decodePacket(built.bytes, 'ethernet');
+      expect(dec.ok, c.name).toBe(true);
+      if (!dec.ok) continue;
+
+      expect(dec.value.layers.map((l) => l.type), c.name).toEqual(c.layers.map((l) => l.type));
+      expect(dec.value.notes, c.name).toHaveLength(0);
+
+      const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+      expect(rebuilt.ok, c.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, c.name).toEqual(built.bytes);
+      }
+    }
+  });
+
+  it('losslessly preserves malformed TCP options and non-zero bytes after EOL as a raw block with notes', () => {
+    const buildWithRawOptBytes = (optBytes: Uint8Array) => {
+      const doWords = 5 + optBytes.length / 4;
+      const built = buildPacket(
+        [
+          createDefaultEthernet(),
+          createDefaultIPv4(),
+          { ...createDefaultTCP(), dataOffset: manualValue(doWords) },
+        ],
+        optBytes,
+      );
+      expect(built.ok).toBe(true);
+      if (!built.ok) throw new Error('failed to build test fixture');
+      return built.bytes;
+    };
+
+    const malformedCases: readonly { name: string; optBytes: Uint8Array; noteMatch: string }[] = [
+      {
+        name: 'Length < 2 (Length = 1)',
+        optBytes: new Uint8Array([0x1e, 0x01, 0xaa, 0xbb]),
+        noteMatch: '(< 2)',
+      },
+      {
+        name: 'Length < 2 (Length = 0)',
+        optBytes: new Uint8Array([0x02, 0x00, 0x05, 0xb4]),
+        noteMatch: '(< 2)',
+      },
+      {
+        name: 'Length running past header',
+        optBytes: new Uint8Array([0x1e, 0x0a, 0xaa, 0xbb]),
+        noteMatch: 'exceeding remaining',
+      },
+      {
+        name: 'Truncated known option missing Length byte at end',
+        optBytes: new Uint8Array([0x03, 0x03, 0x07, 0x02]),
+        noteMatch: 'missing Length byte',
+      },
+      {
+        name: 'Wrong fixed length for MSS (Length = 6)',
+        optBytes: new Uint8Array([0x02, 0x06, 0x05, 0xb4, 0x00, 0x00, 0x00, 0x00]),
+        noteMatch: 'expected 4',
+      },
+      {
+        name: 'Wrong fixed length for Window Scale (Length = 4)',
+        optBytes: new Uint8Array([0x03, 0x04, 0x07, 0x00]),
+        noteMatch: 'expected 3',
+      },
+      {
+        name: 'Wrong fixed length for SACK-Permitted (Length = 3)',
+        optBytes: new Uint8Array([0x04, 0x03, 0x00, 0x00]),
+        noteMatch: 'expected 2',
+      },
+      {
+        name: 'Wrong length for SACK (Length = 6)',
+        optBytes: new Uint8Array([0x05, 0x06, 0x01, 0x02, 0x03, 0x04, 0x00, 0x00]),
+        noteMatch: 'expected 2 + 8n',
+      },
+      {
+        name: 'Wrong fixed length for Timestamps (Length = 8)',
+        optBytes: new Uint8Array([0x08, 0x08, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00]),
+        noteMatch: 'expected 10',
+      },
+      {
+        name: 'Non-zero bytes after EOL',
+        optBytes: new Uint8Array([0x00, 0xaa, 0xbb, 0xcc]),
+        noteMatch: 'End of Option List',
+      },
+    ];
+
+    for (const mc of malformedCases) {
+      const wire = buildWithRawOptBytes(mc.optBytes);
+      const dec = decodePacket(wire, 'ethernet');
+      expect(dec.ok, mc.name).toBe(true);
+      if (!dec.ok) continue;
+
+      expect(dec.value.notes.some((n) => n.includes(mc.noteMatch)), mc.name).toBe(true);
+      const tcpLayer = dec.value.layers[2];
+      expect(tcpLayer.type, mc.name).toBe('tcp');
+      if (tcpLayer.type === 'tcp') {
+        expect(tcpLayer.options.some((o) => o.kind === 'raw'), mc.name).toBe(true);
+      }
+      expect(dec.value.payload.length, mc.name).toBe(0);
+
+      const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+      expect(rebuilt.ok, mc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, mc.name).toEqual(wire);
       }
     }
   });

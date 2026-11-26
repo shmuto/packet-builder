@@ -491,4 +491,82 @@ describe('permalink', () => {
     const autoEth: Layer[] = [{ ...createDefaultEthernet(), etherType: autoValue() }];
     expect(hasOnlyFiniteNumbers(autoEth)).toBe(true);
   });
+
+  it('loads a fixed pre-Step-23 #p1= permalink without TCP options as options: [] with identical 54-byte output', () => {
+    // Fixed fragment created before TCP options were added (TCPLayer has no "options" key)
+    const legacyFragment =
+      '#p1=eyJsYXllcnMiOlt7InR5cGUiOiJldGhlcm5ldCIsImRzdE1hYyI6IjAwOjExOjIyOjMzOjQ0OjU1Iiwic3JjTWFjIjoiNjY6Nzc6ODg6OTk6YWE6YmIiLCJldGhlclR5cGUiOnsibW9kZSI6ImF1dG8ifX0seyJ0eXBlIjoiaXB2NCIsInRvcyI6MCwidG90YWxMZW5ndGgiOnsibW9kZSI6ImF1dG8ifSwiaWRlbnRpZmljYXRpb24iOjQ2NjAsImZsYWdzIjp7InJlc2VydmVkIjpmYWxzZSwiZGYiOnRydWUsIm1mIjpmYWxzZX0sImZyYWdtZW50T2Zmc2V0IjowLCJ0dGwiOjY0LCJwcm90b2NvbCI6eyJtb2RlIjoiYXV0byJ9LCJoZWFkZXJDaGVja3N1bSI6eyJtb2RlIjoiYXV0byJ9LCJzcmNJcCI6IjE5Mi4xNjguMC4xIiwiZHN0SXAiOiIxOTIuMTY4LjAuMiJ9LHsidHlwZSI6InRjcCIsInNyY1BvcnQiOjU0MzIxLCJkc3RQb3J0Ijo0NDMsInNlcU51bWJlciI6MTAwMCwiYWNrTnVtYmVyIjowLCJkYXRhT2Zmc2V0Ijp7Im1vZGUiOiJhdXRvIn0sImZsYWdzIjp7ImN3ciI6ZmFsc2UsImVjZSI6ZmFsc2UsInVyZyI6ZmFsc2UsImFjayI6ZmFsc2UsInBzaCI6ZmFsc2UsInJzdCI6ZmFsc2UsInN5biI6dHJ1ZSwiZmluIjpmYWxzZX0sIndpbmRvd1NpemUiOjY1NTM1LCJjaGVja3N1bSI6eyJtb2RlIjoiYXV0byJ9LCJ1cmdlbnRQb2ludGVyIjowfV0sInBheWxvYWQiOnsibW9kZSI6InRleHQiLCJ0ZXh0IjoiIn19';
+
+    const decoded = decodePermalink(legacyFragment);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+
+    const tcpLayer = decoded.value.layers[2];
+    expect(tcpLayer.type).toBe('tcp');
+    if (tcpLayer.type === 'tcp') {
+      expect(tcpLayer.options).toEqual([]);
+    }
+
+    const built = buildPacket(decoded.value.layers, new Uint8Array(0));
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      // 14(Eth) + 20(IPv4) + 20(TCP without options) = 54 bytes, TCP checksum = 0x54ba
+      expect(built.bytes.length).toBe(54);
+      expect(built.bytes.slice(34)).toEqual(
+        new Uint8Array([
+          0xd4, 0x31, 0x01, 0xbb,
+          0x00, 0x00, 0x03, 0xe8,
+          0x00, 0x00, 0x00, 0x00,
+          0x50, 0x02, 0xff, 0xff,
+          0x54, 0xba, 0x00, 0x00,
+        ]),
+      );
+    }
+  });
+
+  it('round-trips TCP options of every kind and strictly rejects malformed TCP option shapes', () => {
+    const state: PermalinkState = {
+      layers: [
+        createDefaultEthernet(),
+        createDefaultIPv4(),
+        {
+          ...createDefaultTCP(),
+          options: [
+            { kind: 'mss', mss: 1460 },
+            { kind: 'windowScale', shiftCount: 7 },
+            { kind: 'sackPermitted' },
+            { kind: 'sack', blocks: [{ left: 100, right: 200 }] },
+            { kind: 'timestamps', tsVal: 123, tsEcr: 456 },
+            { kind: 'nop' },
+            { kind: 'raw', optionKind: 30, length: autoValue(), dataHex: 'aa bb' },
+            { kind: 'raw', optionKind: 31, length: manualValue(4), dataHex: 'cc dd' },
+            { kind: 'raw', optionKind: 32, length: { mode: 'none' }, dataHex: 'ee' },
+            { kind: 'eol' },
+          ],
+        },
+      ],
+      payload: { mode: 'text', text: '' },
+    };
+
+    const decoded = decodePermalink(encodePermalink(state));
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      expect(decoded.value).toEqual(state);
+    }
+
+    const baseTcp = createDefaultTCP();
+    const invalidOptionPayloads = [
+      { ...baseTcp, options: 'not-an-array' },
+      { ...baseTcp, options: [{ kind: 'unknownKind' }] },
+      { ...baseTcp, options: [{ kind: 'mss', mss: '1460' }] },
+      { ...baseTcp, options: [{ kind: 'mss', mss: 1460, extra: 1 }] },
+      { ...baseTcp, options: [{ kind: 'sack', blocks: [{ left: 1 }] }] },
+      { ...baseTcp, options: [{ kind: 'raw', optionKind: 30, length: { mode: 'bad' }, dataHex: '' }] },
+    ];
+
+    for (const badTcp of invalidOptionPayloads) {
+      const raw = JSON.stringify({ layers: [badTcp], payload: { mode: 'text', text: '' } });
+      expect(decodePermalink(encodeRawJson(raw)).ok).toBe(false);
+    }
+  });
 });
