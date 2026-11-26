@@ -28,12 +28,15 @@ interface LayerItem {
   readonly layer: Layer;
 }
 
-interface InitialEditorState {
+interface EditorFields {
   readonly activePresetId: PresetId | null;
   readonly layers: readonly Layer[];
   readonly payloadMode: PayloadMode;
   readonly payloadText: string;
   readonly payloadHex: string;
+}
+
+interface InitialEditorState extends EditorFields {
   readonly permalinkError: string | null;
   readonly initialSyncedFragment: string | null;
   readonly suppressInitialSync: boolean;
@@ -41,33 +44,18 @@ interface InitialEditorState {
 
 const HASH_SYNC_DEBOUNCE_MS = 250;
 
-function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState {
-  const fallback = (permalinkError: string | null, suppressInitialSync: boolean): InitialEditorState => ({
-    activePresetId: defaultPreset.id,
-    layers: defaultPreset.layers,
+function fieldsFromPreset(preset: PacketPreset): EditorFields {
+  return {
+    activePresetId: preset.id,
+    layers: preset.layers,
     payloadMode: 'text',
-    payloadText: defaultPreset.payloadText,
-    payloadHex: formatSpacedHex(defaultPreset.payloadBytes),
-    permalinkError,
-    initialSyncedFragment: null,
-    suppressInitialSync,
-  });
+    payloadText: preset.payloadText,
+    payloadHex: formatSpacedHex(preset.payloadBytes),
+  };
+}
 
-  if (typeof window === 'undefined') {
-    return fallback(null, true);
-  }
-
-  const hash = window.location.hash;
-  if (hash.length === 0 || hash === '#') {
-    return fallback(null, true);
-  }
-
-  const decoded = decodePermalink(hash);
-  if (!decoded.ok) {
-    return fallback(`Could not load packet from URL: ${decoded.error}`, true);
-  }
-
-  const { layers, payload } = decoded.value;
+function fieldsFromPermalink(state: PermalinkState): EditorFields {
+  const { layers, payload } = state;
   return {
     activePresetId: null,
     layers,
@@ -75,6 +63,33 @@ function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState
     payloadText: payload.mode === 'text' ? payload.text : '',
     payloadHex:
       payload.mode === 'hex' ? payload.hex : formatSpacedHex(encodeUtf8(payload.text)),
+  };
+}
+
+function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState {
+  const fallback = (permalinkError: string | null): InitialEditorState => ({
+    ...fieldsFromPreset(defaultPreset),
+    permalinkError,
+    initialSyncedFragment: null,
+    suppressInitialSync: true,
+  });
+
+  if (typeof window === 'undefined') {
+    return fallback(null);
+  }
+
+  const hash = window.location.hash;
+  if (hash.length === 0 || hash === '#') {
+    return fallback(null);
+  }
+
+  const decoded = decodePermalink(hash);
+  if (!decoded.ok) {
+    return fallback(`Could not load packet from URL: ${decoded.error}`);
+  }
+
+  return {
+    ...fieldsFromPermalink(decoded.value),
     permalinkError: null,
     initialSyncedFragment: encodePermalink(decoded.value),
     suppressInitialSync: false,
@@ -113,6 +128,7 @@ export function App() {
 
   const lastSyncedFragmentRef = useRef<string | null>(initialState.initialSyncedFragment);
   const suppressSyncRef = useRef<boolean>(initialState.suppressInitialSync);
+  const pendingFragmentRef = useRef<string | null>(null);
   const hashSyncTimerRef = useRef<number | null>(null);
 
   const payloadResult: Result<Uint8Array> = useMemo(() => {
@@ -158,21 +174,37 @@ export function App() {
     );
   }, [permalinkFragment]);
 
+  const flushPendingHashSync = useCallback(() => {
+    if (hashSyncTimerRef.current !== null) {
+      window.clearTimeout(hashSyncTimerRef.current);
+      hashSyncTimerRef.current = null;
+    }
+    const pending = pendingFragmentRef.current;
+    pendingFragmentRef.current = null;
+    if (pending !== null && pending !== lastSyncedFragmentRef.current) {
+      window.history.replaceState(null, '', `#${pending}`);
+      lastSyncedFragmentRef.current = pending;
+    }
+  }, []);
+
   // Keep URL hash in sync with editor state using debounced history.replaceState
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (suppressSyncRef.current || permalinkFragment === null) return;
-    if (permalinkFragment === lastSyncedFragmentRef.current) return;
+    if (suppressSyncRef.current || permalinkFragment === null) {
+      pendingFragmentRef.current = null;
+      return;
+    }
+    if (permalinkFragment === lastSyncedFragmentRef.current) {
+      pendingFragmentRef.current = null;
+      return;
+    }
 
+    pendingFragmentRef.current = permalinkFragment;
     if (hashSyncTimerRef.current !== null) {
       window.clearTimeout(hashSyncTimerRef.current);
     }
 
-    hashSyncTimerRef.current = window.setTimeout(() => {
-      window.history.replaceState(null, '', `#${permalinkFragment}`);
-      lastSyncedFragmentRef.current = permalinkFragment;
-      hashSyncTimerRef.current = null;
-    }, HASH_SYNC_DEBOUNCE_MS);
+    hashSyncTimerRef.current = window.setTimeout(flushPendingHashSync, HASH_SYNC_DEBOUNCE_MS);
 
     return () => {
       if (hashSyncTimerRef.current !== null) {
@@ -180,13 +212,46 @@ export function App() {
         hashSyncTimerRef.current = null;
       }
     };
-  }, [permalinkFragment]);
+  }, [permalinkFragment, flushPendingHashSync]);
+
+  // Flush any pending debounced hash update before reload/navigation so recent edits are never lost
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('pagehide', flushPendingHashSync);
+    window.addEventListener('beforeunload', flushPendingHashSync);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingHashSync);
+      window.removeEventListener('beforeunload', flushPendingHashSync);
+    };
+  }, [flushPendingHashSync]);
+
+  const applyEditorFields = useCallback(
+    (fields: EditorFields, error: string | null) => {
+      setActivePresetId(fields.activePresetId);
+      setLayerItems(fields.layers.map((layer) => ({ id: allocateId(), layer })));
+      setPayloadMode(fields.payloadMode);
+      setPayloadText(fields.payloadText);
+      setPayloadHex(fields.payloadHex);
+      setPayloadModeSwitchError(undefined);
+      setImportNotes([]);
+      setPermalinkError(error);
+      setHighlight(null);
+    },
+    [allocateId],
+  );
 
   // Listen for hashchange events (e.g., user edits URL fragment or navigates history)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const resetToDefaultPreset = (error: string | null) => {
+      suppressSyncRef.current = true;
+      lastSyncedFragmentRef.current = null;
+      applyEditorFields(fieldsFromPreset(presets[0]), error);
+    };
+
     const handleHashChange = () => {
+      pendingFragmentRef.current = null;
       if (hashSyncTimerRef.current !== null) {
         window.clearTimeout(hashSyncTimerRef.current);
         hashSyncTimerRef.current = null;
@@ -194,61 +259,24 @@ export function App() {
 
       const hash = window.location.hash;
       if (hash.length === 0 || hash === '#') {
-        const defaultPreset = presets[0];
-        suppressSyncRef.current = true;
-        lastSyncedFragmentRef.current = null;
-        setActivePresetId(defaultPreset.id);
-        setLayerItems(defaultPreset.layers.map((layer) => ({ id: allocateId(), layer })));
-        setPayloadMode('text');
-        setPayloadText(defaultPreset.payloadText);
-        setPayloadHex(formatSpacedHex(defaultPreset.payloadBytes));
-        setPayloadModeSwitchError(undefined);
-        setImportNotes([]);
-        setPermalinkError(null);
-        setHighlight(null);
+        resetToDefaultPreset(null);
         return;
       }
 
       const decoded = decodePermalink(hash);
       if (!decoded.ok) {
-        const defaultPreset = presets[0];
-        suppressSyncRef.current = true;
-        lastSyncedFragmentRef.current = null;
-        setActivePresetId(defaultPreset.id);
-        setLayerItems(defaultPreset.layers.map((layer) => ({ id: allocateId(), layer })));
-        setPayloadMode('text');
-        setPayloadText(defaultPreset.payloadText);
-        setPayloadHex(formatSpacedHex(defaultPreset.payloadBytes));
-        setPayloadModeSwitchError(undefined);
-        setImportNotes([]);
-        setPermalinkError(`Could not load packet from URL: ${decoded.error}`);
-        setHighlight(null);
+        resetToDefaultPreset(`Could not load packet from URL: ${decoded.error}`);
         return;
       }
 
-      const { layers: nextLayers, payload: nextPayload } = decoded.value;
       suppressSyncRef.current = false;
       lastSyncedFragmentRef.current = encodePermalink(decoded.value);
-      setActivePresetId(null);
-      setLayerItems(nextLayers.map((layer) => ({ id: allocateId(), layer })));
-      if (nextPayload.mode === 'text') {
-        setPayloadMode('text');
-        setPayloadText(nextPayload.text);
-        setPayloadHex(formatSpacedHex(encodeUtf8(nextPayload.text)));
-      } else {
-        setPayloadMode('hex');
-        setPayloadText('');
-        setPayloadHex(nextPayload.hex);
-      }
-      setPayloadModeSwitchError(undefined);
-      setImportNotes([]);
-      setPermalinkError(null);
-      setHighlight(null);
+      applyEditorFields(fieldsFromPermalink(decoded.value), null);
     };
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [allocateId, presets]);
+  }, [applyEditorFields, presets]);
 
   const markUserEdited = () => {
     suppressSyncRef.current = false;
@@ -257,14 +285,7 @@ export function App() {
 
   const applyPreset = (preset: PacketPreset) => {
     markUserEdited();
-    setActivePresetId(preset.id);
-    setLayerItems(preset.layers.map((layer) => ({ id: allocateId(), layer })));
-    setPayloadMode('text');
-    setPayloadText(preset.payloadText);
-    setPayloadHex(formatSpacedHex(preset.payloadBytes));
-    setPayloadModeSwitchError(undefined);
-    setImportNotes([]);
-    setHighlight(null);
+    applyEditorFields(fieldsFromPreset(preset), null);
   };
 
   const handleImportDecoded = (decoded: DecodedPacket) => {

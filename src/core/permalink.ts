@@ -689,8 +689,26 @@ export function decodePermalink(fragment: string): Result<PermalinkState> {
   return ok({ layers, payload: payload.value });
 }
 
-function isFiniteAutoOrManualNumber(field: AutoOrManual<number>): boolean {
-  return field.mode === 'auto' || Number.isFinite(field.value);
+function containsNonFiniteNumber(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return !Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (containsNonFiniteNumber(value[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (typeof value === 'object' && value !== null) {
+    for (const entry of Object.values(value)) {
+      if (containsNonFiniteNumber(entry)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -698,86 +716,5 @@ function isFiniteAutoOrManualNumber(field: AutoOrManual<number>): boolean {
  * Used to avoid serializing transient blank numeric drafts (`NaN` -> JSON `null`) into the URL hash.
  */
 export function hasOnlyFiniteNumbers(layers: readonly Layer[]): boolean {
-  for (const layer of layers) {
-    switch (layer.type) {
-      case 'ethernet':
-        if (!isFiniteAutoOrManualNumber(layer.etherType)) return false;
-        break;
-      case 'arp':
-        if (
-          !isFiniteAutoOrManualNumber(layer.hardwareType) ||
-          !isFiniteAutoOrManualNumber(layer.protocolType) ||
-          !isFiniteAutoOrManualNumber(layer.hardwareLength) ||
-          !isFiniteAutoOrManualNumber(layer.protocolLength) ||
-          !Number.isFinite(layer.operation)
-        ) {
-          return false;
-        }
-        break;
-      case 'ipv4':
-        if (
-          !Number.isFinite(layer.tos) ||
-          !isFiniteAutoOrManualNumber(layer.totalLength) ||
-          !Number.isFinite(layer.identification) ||
-          !Number.isFinite(layer.fragmentOffset) ||
-          !Number.isFinite(layer.ttl) ||
-          !isFiniteAutoOrManualNumber(layer.protocol) ||
-          !isFiniteAutoOrManualNumber(layer.headerChecksum)
-        ) {
-          return false;
-        }
-        break;
-      case 'icmp':
-        if (
-          !Number.isFinite(layer.icmpType) ||
-          !Number.isFinite(layer.code) ||
-          !isFiniteAutoOrManualNumber(layer.checksum) ||
-          !Number.isFinite(layer.identifier) ||
-          !Number.isFinite(layer.sequenceNumber)
-        ) {
-          return false;
-        }
-        break;
-      case 'udp':
-        if (
-          !Number.isFinite(layer.srcPort) ||
-          !Number.isFinite(layer.dstPort) ||
-          !isFiniteAutoOrManualNumber(layer.length) ||
-          !isFiniteAutoOrManualNumber(layer.checksum)
-        ) {
-          return false;
-        }
-        break;
-      case 'tcp':
-        if (
-          !Number.isFinite(layer.srcPort) ||
-          !Number.isFinite(layer.dstPort) ||
-          !Number.isFinite(layer.seqNumber) ||
-          !Number.isFinite(layer.ackNumber) ||
-          !isFiniteAutoOrManualNumber(layer.dataOffset) ||
-          !Number.isFinite(layer.windowSize) ||
-          !isFiniteAutoOrManualNumber(layer.checksum) ||
-          !Number.isFinite(layer.urgentPointer)
-        ) {
-          return false;
-        }
-        break;
-      case 'bgp':
-        if (
-          !isFiniteAutoOrManualNumber(layer.length) ||
-          !isFiniteAutoOrManualNumber(layer.version) ||
-          !Number.isFinite(layer.myAs) ||
-          !Number.isFinite(layer.holdTime) ||
-          !isFiniteAutoOrManualNumber(layer.optParamLength) ||
-          !isFiniteAutoOrManualNumber(layer.withdrawnRoutesLength) ||
-          !isFiniteAutoOrManualNumber(layer.totalPathAttrLength) ||
-          !Number.isFinite(layer.errorCode) ||
-          !Number.isFinite(layer.errorSubcode)
-        ) {
-          return false;
-        }
-        break;
-    }
-  }
-  return true;
+  return !containsNonFiniteNumber(layers);
 }
