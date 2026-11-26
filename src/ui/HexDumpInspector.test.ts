@@ -150,5 +150,72 @@ describe('HexDumpInspector', () => {
     expect(unsupportedHtml).toContain(
       'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this stack starts with UDP. Use Copy Link to keep the exact stack.',
     );
+
+    const noHeadersHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: [],
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'unsupported-start',
+          outerLayerType: null,
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(noHeadersHtml).toContain(
+      'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.',
+    );
+
+    const emptyDecodedHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'differs',
+          decodedLayerTypes: [],
+          decodedPayloadLength: 0,
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(emptyDecodedHtml).toContain(
+      'Import Hex cannot decode these bytes back into the same layer stack. Use Copy Link to keep the exact stack.',
+    );
+
+    const zeroPayloadHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'differs',
+          decodedLayerTypes: ['ethernet', 'ipv4'],
+          decodedPayloadLength: 0,
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(zeroPayloadHtml).toContain(
+      'Import Hex will read these bytes as ETH -&gt; IPv4. Use Copy Link to keep the exact stack.',
+    );
+
+    const oneBytePayloadHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: null,
+        roundTripReport: {
+          kind: 'differs',
+          decodedLayerTypes: ['ethernet'],
+          decodedPayloadLength: 1,
+        },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(oneBytePayloadHtml).toContain(
+      'Import Hex will read these bytes as ETH + Payload (1 byte). Use Copy Link to keep the exact stack.',
+    );
   });
 });

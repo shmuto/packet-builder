@@ -9,7 +9,7 @@ import {
   createDefaultUDP,
   createPresets,
 } from './presets';
-import { analyzeDecodeRoundTrip } from './roundtrip';
+import { analyzeBuiltBytesRoundTrip, analyzeDecodeRoundTrip } from './roundtrip';
 
 describe('analyzeDecodeRoundTrip', () => {
   it('reports reproducible for every built-in preset', () => {
@@ -130,6 +130,16 @@ describe('analyzeDecodeRoundTrip', () => {
 
     expect(analyzeDecodeRoundTrip([], new Uint8Array(0))).toEqual({
       kind: 'not-built',
+    });
+  });
+
+  it('returns empty differs with decodedPayloadLength 0 if decodePacket fails on built bytes', () => {
+    const ethOnly = [createDefaultEthernet()];
+    // Truncated 4-byte buffer cannot decode as 14-byte Ethernet II header
+    expect(analyzeBuiltBytesRoundTrip(ethOnly, 0, new Uint8Array([1, 2, 3, 4]))).toEqual({
+      kind: 'differs',
+      decodedLayerTypes: [],
+      decodedPayloadLength: 0,
     });
   });
 });

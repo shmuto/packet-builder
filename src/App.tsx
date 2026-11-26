@@ -17,7 +17,7 @@ import {
 } from './core/permalink';
 import { createPresets, type PacketPreset, type PresetId } from './core/presets';
 import { ok, type Result } from './core/result';
-import { analyzeDecodeRoundTrip, type RoundTripReport } from './core/roundtrip';
+import { analyzeBuiltBytesRoundTrip, type RoundTripReport } from './core/roundtrip';
 import { HexDumpInspector } from './ui/HexDumpInspector';
 import { ImportHexPanel } from './ui/ImportHexPanel';
 import { LayerCard } from './ui/LayerCard';
@@ -147,11 +147,11 @@ export function App() {
   );
 
   const roundTripReport: RoundTripReport = useMemo(() => {
-    if (!payloadResult.ok) {
+    if (!draft.ok || !draft.bytes || !payloadResult.ok) {
       return { kind: 'not-built' };
     }
-    return analyzeDecodeRoundTrip(layers, payloadResult.value);
-  }, [layers, payloadResult]);
+    return analyzeBuiltBytesRoundTrip(layers, payloadResult.value.length, draft.bytes);
+  }, [layers, payloadResult, draft.ok, draft.bytes]);
 
   const permalinkState: PermalinkState = useMemo(
     () => ({
