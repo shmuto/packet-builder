@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Open tsumiki (Live Site)
+    url: https://shmuto.github.io/packet-builder/
+    about: Learn what's inside BGP messages interactively in your browser.

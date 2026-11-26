@@ -328,6 +328,21 @@ export function App() {
           </div>
         </main>
       )}
+
+      <footer className="bgp-footer">
+        <span>tsumiki — client-side BGP learning tool (no server, zero telemetry).</span>
+        <span className="bgp-footer-links">
+          <a
+            href="https://github.com/shmuto/packet-builder/issues/new/choose"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Report an issue
+          </a>
+          <span aria-hidden="true">·</span>
+          <a href="./legacy/">Legacy Packet Builder</a>
+        </span>
+      </footer>
     </div>
   );
 }
