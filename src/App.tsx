@@ -281,9 +281,22 @@ export function App() {
               routerB={trace.config.routerB}
               steps={trace.steps}
               omissions={trace.omissions}
+              notes={trace.notes}
               selectedStepIndex={safeSelectedIndex}
               showTcpSteps={showTcpSteps}
-              onToggleTcpSteps={setShowTcpSteps}
+              onToggleTcpSteps={(show) => {
+                setShowTcpSteps(show);
+                if (!show && selectedStep && selectedStep.kind === 'tcp') {
+                  const nextBgp =
+                    trace.steps.find((s) => s.index > safeSelectedIndex && s.kind === 'bgp') ??
+                    [...trace.steps]
+                      .reverse()
+                      .find((s) => s.index < safeSelectedIndex && s.kind === 'bgp');
+                  if (nextBgp) {
+                    setSelectedStepIndex(nextBgp.index);
+                  }
+                }
+              }}
               onSelectStep={setSelectedStepIndex}
             />
           </div>
@@ -291,6 +304,7 @@ export function App() {
           <div className="bgp-col-inspector">
             {selectedStep && (
               <BgpMessageInspector
+                key={safeSelectedIndex}
                 title={selectedStep.summary}
                 subtitle={`${selectedStep.from === 'A' ? trace.config.routerA.name : trace.config.routerB.name} → ${selectedStep.to === 'A' ? trace.config.routerA.name : trace.config.routerB.name} · t = ${selectedStep.t}ms · Frame ${selectedStep.frameBytes.length} bytes`}
                 bgpBytes={selectedBgpBytes}

@@ -2092,6 +2092,11 @@ body {
   color: var(--text-muted);
 }
 
+.bgp-inline-error {
+  font-size: 0.72rem;
+  color: var(--error, #b91c1c);
+}
+
 .bgp-event-list {
   margin: 0;
   padding: 0;

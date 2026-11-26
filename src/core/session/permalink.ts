@@ -308,7 +308,7 @@ function validateRouterConfig(raw: unknown, ctx: string): Result<RouterConfig> {
   const objRes = validateAllowedKeys(
     raw,
     ['name', 'asn', 'routerId', 'holdTime', 'mac', 'peeringAddress', 'capabilities', 'routes'],
-    ['expectedPeerAs', 'localPref', 'ipv6NextHop'],
+    ['expectedPeerAs', 'localPref', 'ipv4NextHop', 'ipv6NextHop'],
     ctx,
   );
   if (!objRes.ok) return objRes;
@@ -322,6 +322,7 @@ function validateRouterConfig(raw: unknown, ctx: string): Result<RouterConfig> {
   const localPref = expectOptionalUint(obj, 'localPref', 0xffffffff, ctx);
   const mac = expectString(obj, 'mac', ctx);
   const peeringAddress = expectString(obj, 'peeringAddress', ctx);
+  const ipv4NextHop = expectOptionalString(obj, 'ipv4NextHop', ctx);
   const ipv6NextHop = expectOptionalString(obj, 'ipv6NextHop', ctx);
   const capabilities = validateCapabilities(obj.capabilities, `${ctx}.capabilities`);
   if (!name.ok) return name;
@@ -333,6 +334,7 @@ function validateRouterConfig(raw: unknown, ctx: string): Result<RouterConfig> {
   if (!localPref.ok) return localPref;
   if (!mac.ok) return mac;
   if (!peeringAddress.ok) return peeringAddress;
+  if (!ipv4NextHop.ok) return ipv4NextHop;
   if (!ipv6NextHop.ok) return ipv6NextHop;
   if (!capabilities.ok) return capabilities;
 
@@ -355,6 +357,7 @@ function validateRouterConfig(raw: unknown, ctx: string): Result<RouterConfig> {
     ...(localPref.value !== undefined ? { localPref: localPref.value } : {}),
     mac: mac.value,
     peeringAddress: peeringAddress.value,
+    ...(ipv4NextHop.value !== undefined ? { ipv4NextHop: ipv4NextHop.value } : {}),
     ...(ipv6NextHop.value !== undefined ? { ipv6NextHop: ipv6NextHop.value } : {}),
     capabilities: capabilities.value,
     routes,

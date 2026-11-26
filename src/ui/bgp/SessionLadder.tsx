@@ -5,6 +5,7 @@ export interface SessionLadderProps {
   readonly routerB: RouterConfig;
   readonly steps: readonly SessionStep[];
   readonly omissions: readonly RouteOmission[];
+  readonly notes?: readonly string[];
   readonly selectedStepIndex: number;
   readonly showTcpSteps: boolean;
   readonly onToggleTcpSteps: (show: boolean) => void;
@@ -22,6 +23,7 @@ export function SessionLadder({
   routerB,
   steps,
   omissions,
+  notes = [],
   selectedStepIndex,
   showTcpSteps,
   onToggleTcpSteps,
@@ -94,6 +96,17 @@ export function SessionLadder({
               <li key={`${o.router}-${o.prefix}-${idx}`}>
                 <strong className="mono">{o.prefix}</strong>: {o.reason}
               </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {notes.length > 0 && (
+        <div className="bgp-omissions-box" role="status" aria-label="Session Notes">
+          <h3 className="bgp-omissions-title">Session notes</h3>
+          <ul className="bgp-omissions-list">
+            {notes.map((note, idx) => (
+              <li key={idx}>{note}</li>
             ))}
           </ul>
         </div>

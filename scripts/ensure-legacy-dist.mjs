@@ -9,7 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const LEGACY_COMMIT = 'ffbcf65';
+const LEGACY_COMMIT = 'ffbcf655e9370e71a409adb2f87fd893270d3c26';
 const REPO_ROOT = process.cwd();
 const DIST_LEGACY = join(REPO_ROOT, 'dist', 'legacy');
 const CI_LEGACY_DIST = join(REPO_ROOT, 'legacy-src', 'dist');
