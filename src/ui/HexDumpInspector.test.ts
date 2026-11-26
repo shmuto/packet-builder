@@ -38,4 +38,55 @@ describe('HexDumpInspector', () => {
       expect(hasMidGap).toBe(idx === 7);
     });
   });
+
+  it('keeps Copy Link enabled for broken packets and shows a note only when URL exceeds 8000 chars', () => {
+    const preset = createPresets()[0];
+    const brokenLayers = preset.layers.map((layer) =>
+      layer.type === 'ipv4' ? { ...layer, ttl: 999 } : layer,
+    );
+    const brokenDraft = evaluatePacketDraft(brokenLayers, ok(preset.payloadBytes));
+    expect(brokenDraft.ok).toBe(false);
+
+    const shortUrl = 'https://shmuto.github.io/packet-builder/#p1=abc';
+    const shortHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: brokenLayers,
+        draft: brokenDraft,
+        highlight: null,
+        permalinkUrl: shortUrl,
+        onHighlightChange: () => {},
+      }),
+    );
+
+    const copyLinkBtn = shortHtml.match(/<button[^>]*>Copy Link<\/button>/);
+    expect(copyLinkBtn).not.toBeNull();
+    expect(copyLinkBtn![0]).not.toContain('disabled');
+    expect(shortHtml).not.toContain('export-status-note');
+
+    const exactLimitUrl = 'https://example.com/#' + 'a'.repeat(8000 - 'https://example.com/#'.length);
+    expect(exactLimitUrl.length).toBe(8000);
+    const exactLimitHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: brokenLayers,
+        draft: brokenDraft,
+        highlight: null,
+        permalinkUrl: exactLimitUrl,
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(exactLimitHtml).not.toContain('export-status-note');
+
+    const longUrl = exactLimitUrl + 'a';
+    expect(longUrl.length).toBe(8001);
+    const longHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: brokenLayers,
+        draft: brokenDraft,
+        highlight: null,
+        permalinkUrl: longUrl,
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(longHtml).toContain('export-status-note');
+  });
 });
