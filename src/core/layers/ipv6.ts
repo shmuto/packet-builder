@@ -1,12 +1,5 @@
 import { parseIPv6, writeUint16BE, writeUint32BE } from '../bytes';
-import { IP_PROTOCOL_ICMPV6 } from './icmpv6';
-import {
-  IP_PROTOCOL_GRE,
-  IP_PROTOCOL_IPIP,
-  IP_PROTOCOL_IPV6,
-  IP_PROTOCOL_TCP,
-  IP_PROTOCOL_UDP,
-} from './ipv4';
+import { IP_PROTOCOL_IPIP, IP_PROTOCOL_IPV6, IP_PROTOCOL_TCP } from './ipv4';
 import type {
   IPv6Layer,
   LayerEncodeResult,
@@ -44,16 +37,10 @@ function nextHeaderForUpperLayer(upperLayerType: LayerType | null): number | nul
   switch (upperLayerType) {
     case 'tcp':
       return IP_PROTOCOL_TCP;
-    case 'udp':
-      return IP_PROTOCOL_UDP;
-    case 'icmpv6':
-      return IP_PROTOCOL_ICMPV6;
     case 'ipv4':
       return IP_PROTOCOL_IPIP;
     case 'ipv6':
       return IP_PROTOCOL_IPV6;
-    case 'gre':
-      return IP_PROTOCOL_GRE;
     default:
       return null;
   }
@@ -91,7 +78,6 @@ export function encodeIPv6(layer: IPv6Layer, ctx: EncodeIPv6Context): LayerEncod
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'dstIp', message: dstIpResult.error });
   }
 
-  // RFC 8200 §3: Payload Length is 16-bit (max 65535 bytes; jumbograms RFC 2675 out of scope)
   const actualPayloadLength = ctx.upperBytesLength;
   if (actualPayloadLength > IPV6_MAX_PAYLOAD_LENGTH) {
     errors.push({
@@ -121,15 +107,6 @@ export function encodeIPv6(layer: IPv6Layer, ctx: EncodeIPv6Context): LayerEncod
     }
   }
 
-  if (ctx.upperLayerType === 'icmp') {
-    warnings.push({
-      layerIndex: ctx.layerIndex,
-      fieldId: 'nextHeader',
-      message:
-        'ICMPv4 sits directly above IPv6; use ICMPv6 (Next Header 58, RFC 4443) for IPv6 packets.',
-    });
-  }
-
   const inferredNextHeader = nextHeaderForUpperLayer(ctx.upperLayerType);
   const autoNextHeader = inferredNextHeader ?? 0;
   let nextHeaderValue = autoNextHeader;
@@ -148,12 +125,11 @@ export function encodeIPv6(layer: IPv6Layer, ctx: EncodeIPv6Context): LayerEncod
         });
       }
     }
-  } else if (inferredNextHeader === null && ctx.upperLayerType !== 'icmp') {
+  } else if (inferredNextHeader === null) {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'nextHeader',
-      message:
-        'No TCP / UDP / ICMPv6 / GRE / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
+      message: 'No TCP / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
     });
   }
 

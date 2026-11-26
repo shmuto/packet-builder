@@ -15,16 +15,8 @@ export const ETHERNET_HEADER_LENGTH = 14;
 export const ETHERNET_MIN_FRAME_LENGTH = 60;
 /** EtherType for IPv4 (RFC 894) */
 export const ETHERTYPE_IPV4 = 0x0800;
-/** EtherType for ARP (RFC 826) */
-export const ETHERTYPE_ARP = 0x0806;
 /** EtherType for IPv6 (RFC 2464) */
 export const ETHERTYPE_IPV6 = 0x86dd;
-/** TPID for IEEE 802.1Q C-tag VLAN */
-export const ETHERTYPE_VLAN = 0x8100;
-/** TPID for IEEE 802.1ad S-tag QinQ (Provider Bridges, IEEE 802.1Q §9.4) */
-export const ETHERTYPE_QINQ = 0x88a8;
-/** Legacy non-standard QinQ TPID (decoded for compatibility, not auto-generated) */
-export const ETHERTYPE_QINQ_LEGACY = 0x9100;
 
 export const ETHERNET_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'dstMac', label: 'Destination MAC', bitOffset: 0, bitLength: 48 },
@@ -35,34 +27,15 @@ export const ETHERNET_FIELD_SPANS: readonly RelativeFieldSpan[] = [
 export interface EncodeEthernetContext {
   readonly layerIndex: number;
   readonly upperLayerType: LayerType | null;
-  /** Layer immediately following `upperLayerType` (used to distinguish single 802.1Q vs. 802.1ad QinQ) */
-  readonly upperNextLayerType?: LayerType | null;
   readonly upperBytesLength: number;
 }
 
 export function ethernetEtherTypeForUpperLayers(
   upperLayerType: LayerType | null,
-  upperNextLayerType: LayerType | null = null,
 ): number | null {
   if (upperLayerType === 'ipv4') return ETHERTYPE_IPV4;
   if (upperLayerType === 'ipv6') return ETHERTYPE_IPV6;
-  if (upperLayerType === 'arp') return ETHERTYPE_ARP;
-  if (upperLayerType === 'vlan') {
-    return upperNextLayerType === 'vlan' ? ETHERTYPE_QINQ : ETHERTYPE_VLAN;
-  }
   return null;
-}
-
-function upperLayerNameForEtherType(
-  upperLayerType: LayerType | null,
-  upperNextLayerType: LayerType | null = null,
-): string {
-  if (upperLayerType === 'arp') return 'ARP';
-  if (upperLayerType === 'ipv6') return 'IPv6';
-  if (upperLayerType === 'vlan') {
-    return upperNextLayerType === 'vlan' ? '802.1ad QinQ S-tag' : '802.1Q VLAN';
-  }
-  return 'IPv4';
 }
 
 /**
@@ -85,8 +58,7 @@ export function encodeEthernet(
     errors.push({ layerIndex: ctx.layerIndex, fieldId: 'srcMac', message: srcMacResult.error });
   }
 
-  const upperNext = ctx.upperNextLayerType ?? null;
-  const inferredEtherType = ethernetEtherTypeForUpperLayers(ctx.upperLayerType, upperNext);
+  const inferredEtherType = ethernetEtherTypeForUpperLayers(ctx.upperLayerType);
   const autoEtherType = inferredEtherType ?? ETHERTYPE_IPV4;
   let etherTypeValue = autoEtherType;
 
@@ -98,7 +70,7 @@ export function encodeEthernet(
       etherTypeValue = layer.etherType.value;
       if (inferredEtherType !== null && etherTypeValue !== inferredEtherType) {
         const expectedHex = `0x${inferredEtherType.toString(16).padStart(4, '0')}`;
-        const upperName = upperLayerNameForEtherType(ctx.upperLayerType, upperNext);
+        const upperName = ctx.upperLayerType === 'ipv6' ? 'IPv6' : 'IPv4';
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'etherType',
@@ -110,7 +82,7 @@ export function encodeEthernet(
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'etherType',
-      message: 'Upper layer is not IPv4, IPv6, ARP, or VLAN; defaulting EtherType to 0x0800.',
+      message: 'Upper layer is not IPv4 or IPv6; defaulting EtherType to 0x0800.',
     });
   }
 
