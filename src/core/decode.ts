@@ -883,10 +883,12 @@ function decodeEtherTypeChain(
     return payload;
   }
 
+  const enclosing = vlanDepth > 0 ? 'VLAN tag' : 'Ethernet II';
+
   if (etherType === ETHERTYPE_IPV4) {
     if (remaining < IPV4_HEADER_LENGTH) {
       notes.push(
-        `IPv4 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+        `IPv4 header after ${enclosing} is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
     }
@@ -904,7 +906,7 @@ function decodeEtherTypeChain(
   if (etherType === ETHERTYPE_IPV6) {
     if (remaining < IPV6_HEADER_LENGTH) {
       notes.push(
-        `IPv6 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+        `IPv6 header after ${enclosing} is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
     }
@@ -921,7 +923,7 @@ function decodeEtherTypeChain(
   if (etherType === ETHERTYPE_ARP) {
     if (remaining < ARP_HEADER_LENGTH) {
       notes.push(
-        `ARP packet after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+        `ARP packet after ${enclosing} is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
       );
       return bytes.slice(offset);
     }

@@ -27,7 +27,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     etherType: {
       summary:
         '16-bit identifier declaring which protocol or VLAN TPID follows the Ethernet header. Common values are 0x0800 (IPv4), 0x86dd (IPv6), 0x0806 (ARP), 0x8100 (802.1Q C-tag), and 0x88a8 (802.1ad S-tag).',
-      reference: 'IEEE 802.3 §3.2.6 / IEEE 802.1Q §9.4',
+      reference: 'IEEE 802.3 §3.2.6 / IEEE 802.1Q §9.5',
     },
   },
 
@@ -50,7 +50,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     etherType: {
       summary:
         '16-bit EtherType (or inner TPID in QinQ) declaring the protocol that follows this 4-byte VLAN tag body (TCI + EtherType): 0x0800 (IPv4), 0x86dd (IPv6), 0x0806 (ARP), or 0x8100 (inner C-tag).',
-      reference: 'IEEE 802.1Q §9.4 / IEEE 802.3 §3.2.6',
+      reference: 'IEEE 802.1Q §9.5 / IEEE 802.3 §3.2.6',
     },
   },
 

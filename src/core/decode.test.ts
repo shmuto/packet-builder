@@ -1171,6 +1171,81 @@ describe('decodePacket', () => {
         expect(dec.value.notes.some((n) => n.includes('VLAN tag header'))).toBe(true);
       }
     }
+
+    // Truncated IPv4 header after VLAN tag reports 'VLAN tag' as the enclosing layer
+    const truncAfterVlan = buildPacket(
+      [createDefaultEthernet(), { ...createDefaultVLAN(), etherType: manualValue(0x0800) }],
+      new Uint8Array([0x45, 0x00, 0x00, 0x14]),
+    );
+    expect(truncAfterVlan.ok).toBe(true);
+    if (truncAfterVlan.ok) {
+      const dec = decodePacket(truncAfterVlan.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'vlan']);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x45, 0x00, 0x00, 0x14]));
+        expect(dec.value.notes.some((n) => n.includes('IPv4 header after VLAN tag is truncated'))).toBe(
+          true,
+        );
+      }
+    }
+  });
+
+  it('decodes 60-byte Ethernet-padded VLAN-tagged ARP and short IPv4+UDP frames', () => {
+    // 1. Tagged ARP (14B Eth + 4B VLAN + 28B ARP = 46B) padded with 14 trailing zeros to 60B
+    const taggedArp = buildPacket(
+      [createDefaultEthernet(), createDefaultVLAN(), createDefaultARP()],
+      new Uint8Array(0),
+    );
+    expect(taggedArp.ok).toBe(true);
+    if (taggedArp.ok) {
+      expect(taggedArp.bytes).toHaveLength(46);
+      const padded60 = new Uint8Array(60);
+      padded60.set(taggedArp.bytes, 0);
+
+      const dec = decodePacket(padded60, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'vlan', 'arp']);
+        expect(dec.value.payload).toEqual(new Uint8Array(14));
+        expect(dec.value.notes.some((n) => n.includes('14 trailing byte(s)'))).toBe(true);
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(padded60);
+      }
+    }
+
+    // 2. Tagged short IPv4+UDP (14B Eth + 4B VLAN + 20B IPv4 + 8B UDP + 4B payload = 50B) padded to 60B
+    const shortPayload = encodeUtf8('ping');
+    const taggedUdp = buildPacket(
+      [createDefaultEthernet(), createDefaultVLAN(), createDefaultIPv4(), createDefaultUDP()],
+      shortPayload,
+    );
+    expect(taggedUdp.ok).toBe(true);
+    if (taggedUdp.ok) {
+      expect(taggedUdp.bytes).toHaveLength(50);
+      const padded60 = new Uint8Array(60);
+      padded60.set(taggedUdp.bytes, 0);
+
+      const dec = decodePacket(padded60, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'vlan', 'ipv4', 'udp']);
+        expect(dec.value.payload).toEqual(shortPayload);
+        expect(
+          dec.value.notes.some((n) => n.includes('10 trailing zero byte(s) of Ethernet padding')),
+        ).toBe(true);
+        const ipv4 = dec.value.layers[2];
+        const udp = dec.value.layers[3];
+        if (ipv4.type === 'ipv4' && udp.type === 'udp') {
+          expect(ipv4.totalLength).toEqual(autoValue());
+          expect(ipv4.headerChecksum).toEqual(autoValue());
+          expect(udp.length).toEqual(autoValue());
+          expect(udp.checksum).toEqual(autoValue());
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(taggedUdp.bytes);
+      }
+    }
   });
 });
 

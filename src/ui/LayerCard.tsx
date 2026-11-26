@@ -214,7 +214,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-etherType`}
                 label="EtherType"
-                hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP / 0x8100=VLAN"
+                hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP / 0x8100=802.1Q / 0x88a8=802.1ad"
                 doc={fieldDoc('etherType')}
                 allowHex
                 hexDigits={4}
