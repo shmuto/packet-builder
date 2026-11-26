@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const channel = process.env.PW_CHANNEL || undefined;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -13,7 +15,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(channel ? { channel } : {}),
+      },
     },
   ],
   webServer: {

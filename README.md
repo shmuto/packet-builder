@@ -43,10 +43,12 @@ Requires Node.js 22+.
 
 ```bash
 npm install
-npm run dev        # Start Vite dev server
-npm run test       # Run Vitest unit tests
-npm run typecheck  # Run TypeScript type check (tsc --noEmit)
-npm run check      # Run typecheck, tests, and production build
+npm run dev                     # Start Vite dev server
+npm run test                    # Run Vitest unit tests
+npm run typecheck               # Run TypeScript type check (tsc --noEmit)
+npm run check                   # Run typecheck, tests, and production build
+npm run e2e                     # Run Playwright E2E tests (default headless shell)
+PW_CHANNEL=chromium npm run e2e # Run Playwright E2E tests in full Chromium (new headless mode)
 ```
 
 ## Project Structure
