@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toHexDump, toHexString } from '../core/bytes';
+import { getFieldDoc, type FieldDoc } from '../core/fieldDocs';
 import {
   findHighlightedByteIndices,
   formatByteBinary,
@@ -192,7 +193,12 @@ export function HexDumpInspector({
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  const hoveredByteDetail = (() => {
+  const hoveredByteDetail: {
+    readonly title: string;
+    readonly metrics: string;
+    readonly fields: string;
+    readonly doc?: FieldDoc;
+  } | null = (() => {
     if (!isSuccess || !bytes || !highlight) return null;
     if (highlight.kind === 'layer') {
       const seg = segments.find(
@@ -216,10 +222,16 @@ export function HexDumpInspector({
       const matching = spans.filter(
         (s) => s.bitOffset < byteStart + 8 && s.bitOffset + s.bitLength > byteStart,
       );
+      const singleSpan = matching.length === 1 ? matching[0] : undefined;
+      const doc =
+        singleSpan && singleSpan.layerType !== 'payload'
+          ? getFieldDoc(singleSpan.layerType, singleSpan.fieldId)
+          : undefined;
       return {
         title: `Byte 0x${highlight.byteIndex.toString(16).padStart(2, '0')} (#${highlight.byteIndex})`,
         metrics: `0x${value.toString(16).padStart(2, '0')} · dec ${value} · bin ${formatByteBinary(value)}`,
         fields: matching.map((s) => `${s.label} (${s.bitLength}b)`).join(' + '),
+        doc,
       };
     }
     const span = spans.find(
@@ -230,10 +242,15 @@ export function HexDumpInspector({
     const endByte = Math.floor((span.bitOffset + span.bitLength - 1) / 8);
     const byteRange =
       startByte === endByte ? `byte ${startByte}` : `bytes ${startByte}..${endByte}`;
+    const doc =
+      span.layerType === 'payload'
+        ? undefined
+        : getFieldDoc(span.layerType, span.fieldId);
     return {
       title: span.label,
       metrics: `${span.bitLength} bits · ${byteRange} · packet bits ${span.bitOffset}..${span.bitOffset + span.bitLength - 1}`,
       fields: span.layerType === 'payload' ? 'Payload' : LAYER_META[span.layerType].name,
+      doc,
     };
   })();
 
@@ -410,10 +427,18 @@ export function HexDumpInspector({
                 {hoveredByteDetail.fields && (
                   <span className="hover-detail-fields">{hoveredByteDetail.fields}</span>
                 )}
+                {hoveredByteDetail.doc && (
+                  <div className="hover-detail-doc">
+                    <span>{hoveredByteDetail.doc.summary}</span>
+                    <span className="hover-detail-ref mono">
+                      {hoveredByteDetail.doc.reference}
+                    </span>
+                  </div>
+                )}
               </>
             ) : (
               <span className="hover-detail-placeholder">
-                Hover a field, hex byte, header pill, or bit-diagram cell to inspect bit &amp; byte mapping.
+                Hover or focus a field, hex byte, header pill, or bit-diagram cell to inspect bit &amp; byte mapping.
               </span>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getFieldDoc } from '../core/fieldDocs';
 import {
   isFieldHighlighted,
   resolveHighlightedLayerIndex,
@@ -16,6 +17,8 @@ import type {
 import {
   AutoManualField,
   AutoManualTextField,
+  FieldDocBox,
+  FieldInfoButton,
   FixedFieldChip,
   NumberField,
   TextField,
@@ -74,12 +77,22 @@ export function LayerCard({
   onRemove,
 }: LayerCardProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [openCustomDocs, setOpenCustomDocs] = useState<Readonly<Record<string, boolean>>>({});
   const meta = LAYER_META[layer.type];
 
   const fieldError = (fieldId: string) =>
     errors.find((e) => e.fieldId === fieldId)?.message;
   const fieldWarning = (fieldId: string) =>
     warnings.find((w) => w.fieldId === fieldId)?.message;
+  const fieldDoc = (fieldId: string) => getFieldDoc(layer.type, fieldId);
+  const flagsDoc = fieldDoc('flags');
+  const bgpTypeDoc = fieldDoc('bgpType');
+
+  const isCustomDocOpen = (fieldId: string) => Boolean(openCustomDocs[fieldId]);
+  const toggleCustomDoc = (fieldId: string) =>
+    setOpenCustomDocs((prev) => ({ ...prev, [fieldId]: !prev[fieldId] }));
+  const closeCustomDoc = (fieldId: string) =>
+    setOpenCustomDocs((prev) => ({ ...prev, [fieldId]: false }));
 
   const isHighlighted = (fieldId: string) =>
     isFieldHighlighted(index, fieldId, spans, highlight);
@@ -166,6 +179,7 @@ export function LayerCard({
                 id={`${id}-dstMac`}
                 label="Destination MAC"
                 hint="48 bit"
+                doc={fieldDoc('dstMac')}
                 placeholder="00:11:22:33:44:55"
                 value={layer.dstMac}
                 error={fieldError('dstMac')}
@@ -179,6 +193,7 @@ export function LayerCard({
                 id={`${id}-srcMac`}
                 label="Source MAC"
                 hint="48 bit"
+                doc={fieldDoc('srcMac')}
                 placeholder="66:77:88:99:aa:bb"
                 value={layer.srcMac}
                 error={fieldError('srcMac')}
@@ -192,6 +207,7 @@ export function LayerCard({
                 id={`${id}-etherType`}
                 label="EtherType"
                 hint="0x0800=IPv4 / 0x0806=ARP"
+                doc={fieldDoc('etherType')}
                 allowHex
                 hexDigits={4}
                 value={layer.etherType}
@@ -212,6 +228,7 @@ export function LayerCard({
                 id={`${id}-operation`}
                 label="Operation"
                 hint="1=Request / 2=Reply"
+                doc={fieldDoc('operation')}
                 value={layer.operation}
                 error={fieldError('operation')}
                 warning={fieldWarning('operation')}
@@ -246,6 +263,7 @@ export function LayerCard({
                 id={`${id}-senderMac`}
                 label="Sender MAC (SHA)"
                 hint="48 bit"
+                doc={fieldDoc('senderMac')}
                 placeholder="66:77:88:99:aa:bb"
                 value={layer.senderMac}
                 error={fieldError('senderMac')}
@@ -259,6 +277,7 @@ export function LayerCard({
                 id={`${id}-senderIp`}
                 label="Sender IPv4 (SPA)"
                 hint="32 bit"
+                doc={fieldDoc('senderIp')}
                 placeholder="192.168.0.1"
                 value={layer.senderIp}
                 error={fieldError('senderIp')}
@@ -272,6 +291,7 @@ export function LayerCard({
                 id={`${id}-targetMac`}
                 label="Target MAC (THA)"
                 hint="48 bit"
+                doc={fieldDoc('targetMac')}
                 placeholder="00:00:00:00:00:00"
                 value={layer.targetMac}
                 error={fieldError('targetMac')}
@@ -285,6 +305,7 @@ export function LayerCard({
                 id={`${id}-targetIp`}
                 label="Target IPv4 (TPA)"
                 hint="32 bit"
+                doc={fieldDoc('targetIp')}
                 placeholder="192.168.0.2"
                 value={layer.targetIp}
                 error={fieldError('targetIp')}
@@ -298,6 +319,7 @@ export function LayerCard({
                 id={`${id}-hardwareType`}
                 label="Hardware Type (HTYPE)"
                 hint="1 = Ethernet"
+                doc={fieldDoc('hardwareType')}
                 value={layer.hardwareType}
                 resolvedAutoValue={resolvedAutoValues?.hardwareType}
                 error={fieldError('hardwareType')}
@@ -311,6 +333,7 @@ export function LayerCard({
                 id={`${id}-protocolType`}
                 label="Protocol Type (PTYPE)"
                 hint="0x0800 = IPv4"
+                doc={fieldDoc('protocolType')}
                 allowHex
                 hexDigits={4}
                 value={layer.protocolType}
@@ -326,6 +349,7 @@ export function LayerCard({
                 id={`${id}-hardwareLength`}
                 label="Hardware Size (HLEN)"
                 hint="6 bytes"
+                doc={fieldDoc('hardwareLength')}
                 value={layer.hardwareLength}
                 resolvedAutoValue={resolvedAutoValues?.hardwareLength}
                 error={fieldError('hardwareLength')}
@@ -339,6 +363,7 @@ export function LayerCard({
                 id={`${id}-protocolLength`}
                 label="Protocol Size (PLEN)"
                 hint="4 bytes"
+                doc={fieldDoc('protocolLength')}
                 value={layer.protocolLength}
                 resolvedAutoValue={resolvedAutoValues?.protocolLength}
                 error={fieldError('protocolLength')}
@@ -355,17 +380,21 @@ export function LayerCard({
             <div className="field-grid">
               <div className="fixed-field-row field-span-full">
                 <FixedFieldChip
+                  id={`${id}-version`}
                   label="Version"
                   value="4"
                   bits="4b"
+                  doc={fieldDoc('version')}
                   isHighlighted={isHighlighted('version')}
                   onHoverStart={hoverStart('version')}
                   onHoverEnd={hoverEnd}
                 />
                 <FixedFieldChip
+                  id={`${id}-ihl`}
                   label="IHL"
                   value="5 (20B)"
                   bits="4b"
+                  doc={fieldDoc('ihl')}
                   isHighlighted={isHighlighted('ihl')}
                   onHoverStart={hoverStart('ihl')}
                   onHoverEnd={hoverEnd}
@@ -376,6 +405,7 @@ export function LayerCard({
                 id={`${id}-srcIp`}
                 label="Source IPv4"
                 hint="32 bit"
+                doc={fieldDoc('srcIp')}
                 placeholder="192.168.0.1"
                 value={layer.srcIp}
                 error={fieldError('srcIp')}
@@ -389,6 +419,7 @@ export function LayerCard({
                 id={`${id}-dstIp`}
                 label="Destination IPv4"
                 hint="32 bit"
+                doc={fieldDoc('dstIp')}
                 placeholder="192.168.0.2"
                 value={layer.dstIp}
                 error={fieldError('dstIp')}
@@ -402,6 +433,7 @@ export function LayerCard({
                 id={`${id}-ttl`}
                 label="TTL"
                 hint="0-255"
+                doc={fieldDoc('ttl')}
                 value={layer.ttl}
                 error={fieldError('ttl')}
                 warning={fieldWarning('ttl')}
@@ -414,6 +446,7 @@ export function LayerCard({
                 id={`${id}-identification`}
                 label="Identification"
                 hint="0x0000-0xffff"
+                doc={fieldDoc('identification')}
                 allowHex
                 hexDigits={4}
                 value={layer.identification}
@@ -428,6 +461,7 @@ export function LayerCard({
                 id={`${id}-tos`}
                 label="TOS (DSCP/ECN)"
                 hint="8 bit"
+                doc={fieldDoc('tos')}
                 allowHex
                 hexDigits={2}
                 value={layer.tos}
@@ -442,6 +476,7 @@ export function LayerCard({
                 id={`${id}-fragmentOffset`}
                 label="Fragment Offset"
                 hint="0-8191 (13 bit)"
+                doc={fieldDoc('fragmentOffset')}
                 value={layer.fragmentOffset}
                 error={fieldError('fragmentOffset')}
                 warning={fieldWarning('fragmentOffset')}
@@ -457,10 +492,28 @@ export function LayerCard({
                 onMouseLeave={hoverEnd}
               >
                 <div className="field-label-row">
-                  <span className="field-label">Flags</span>
+                  <div className="field-label-main">
+                    <span className="field-label">Flags</span>
+                    {flagsDoc && (
+                      <FieldInfoButton
+                        label="Flags"
+                        docId={`${id}-flags-doc`}
+                        open={isCustomDocOpen('flags')}
+                        onToggle={() => toggleCustomDoc('flags')}
+                        onClose={() => closeCustomDoc('flags')}
+                        onFocus={hoverStart('flags')}
+                        onBlur={hoverEnd}
+                      />
+                    )}
+                  </div>
                   <span className="field-hint">3 bit (R / DF / MF)</span>
                 </div>
-                <div className="flag-chip-row">
+                <div
+                  className="flag-chip-row"
+                  role="group"
+                  aria-label="IPv4 Flags"
+                  aria-describedby={isCustomDocOpen('flags') ? `${id}-flags-doc` : undefined}
+                >
                   <label className={`flag-chip${layer.flags.reserved ? ' is-checked' : ''}`}>
                     <input
                       type="checkbox"
@@ -507,6 +560,9 @@ export function LayerCard({
                     <span>MF (More Fragments)</span>
                   </label>
                 </div>
+                {flagsDoc && isCustomDocOpen('flags') && (
+                  <FieldDocBox id={`${id}-flags-doc`} doc={flagsDoc} />
+                )}
                 {fieldWarning('flags') && (
                   <p className="field-msg is-warning">{fieldWarning('flags')}</p>
                 )}
@@ -516,6 +572,7 @@ export function LayerCard({
                 id={`${id}-totalLength`}
                 label="Total Length"
                 hint="bytes"
+                doc={fieldDoc('totalLength')}
                 value={layer.totalLength}
                 resolvedAutoValue={resolvedAutoValues?.totalLength}
                 error={fieldError('totalLength')}
@@ -529,6 +586,7 @@ export function LayerCard({
                 id={`${id}-protocol`}
                 label="Protocol"
                 hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP"
+                doc={fieldDoc('protocol')}
                 value={layer.protocol}
                 resolvedAutoValue={resolvedAutoValues?.protocol}
                 error={fieldError('protocol')}
@@ -542,6 +600,7 @@ export function LayerCard({
                 id={`${id}-headerChecksum`}
                 label="Header Checksum"
                 hint="RFC 1071"
+                doc={fieldDoc('headerChecksum')}
                 allowHex
                 hexDigits={4}
                 value={layer.headerChecksum}
@@ -562,6 +621,7 @@ export function LayerCard({
                 id={`${id}-icmpType`}
                 label="Type"
                 hint="8=Echo Req / 0=Reply"
+                doc={fieldDoc('icmpType')}
                 value={layer.icmpType}
                 error={fieldError('icmpType')}
                 warning={fieldWarning('icmpType')}
@@ -574,6 +634,7 @@ export function LayerCard({
                 id={`${id}-code`}
                 label="Code"
                 hint="0-255"
+                doc={fieldDoc('code')}
                 value={layer.code}
                 error={fieldError('code')}
                 warning={fieldWarning('code')}
@@ -586,6 +647,7 @@ export function LayerCard({
                 id={`${id}-identifier`}
                 label="Identifier"
                 hint="0-65535"
+                doc={fieldDoc('identifier')}
                 value={layer.identifier}
                 error={fieldError('identifier')}
                 warning={fieldWarning('identifier')}
@@ -598,6 +660,7 @@ export function LayerCard({
                 id={`${id}-sequenceNumber`}
                 label="Sequence Number"
                 hint="0-65535"
+                doc={fieldDoc('sequenceNumber')}
                 value={layer.sequenceNumber}
                 error={fieldError('sequenceNumber')}
                 warning={fieldWarning('sequenceNumber')}
@@ -610,6 +673,7 @@ export function LayerCard({
                 id={`${id}-checksum`}
                 label="Checksum"
                 hint="RFC 792"
+                doc={fieldDoc('checksum')}
                 allowHex
                 hexDigits={4}
                 value={layer.checksum}
@@ -630,6 +694,7 @@ export function LayerCard({
                 id={`${id}-srcPort`}
                 label="Source Port"
                 hint="0-65535"
+                doc={fieldDoc('srcPort')}
                 value={layer.srcPort}
                 error={fieldError('srcPort')}
                 warning={fieldWarning('srcPort')}
@@ -642,6 +707,7 @@ export function LayerCard({
                 id={`${id}-dstPort`}
                 label="Destination Port"
                 hint="0-65535"
+                doc={fieldDoc('dstPort')}
                 value={layer.dstPort}
                 error={fieldError('dstPort')}
                 warning={fieldWarning('dstPort')}
@@ -654,6 +720,7 @@ export function LayerCard({
                 id={`${id}-length`}
                 label="Length"
                 hint="8 + payload"
+                doc={fieldDoc('length')}
                 value={layer.length}
                 resolvedAutoValue={resolvedAutoValues?.length}
                 error={fieldError('length')}
@@ -667,6 +734,7 @@ export function LayerCard({
                 id={`${id}-checksum`}
                 label="Checksum"
                 hint="IPv4 pseudo-header"
+                doc={fieldDoc('checksum')}
                 allowHex
                 hexDigits={4}
                 value={layer.checksum}
@@ -687,6 +755,7 @@ export function LayerCard({
                 id={`${id}-srcPort`}
                 label="Source Port"
                 hint="0-65535"
+                doc={fieldDoc('srcPort')}
                 value={layer.srcPort}
                 error={fieldError('srcPort')}
                 warning={fieldWarning('srcPort')}
@@ -699,6 +768,7 @@ export function LayerCard({
                 id={`${id}-dstPort`}
                 label="Destination Port"
                 hint="0-65535"
+                doc={fieldDoc('dstPort')}
                 value={layer.dstPort}
                 error={fieldError('dstPort')}
                 warning={fieldWarning('dstPort')}
@@ -711,6 +781,7 @@ export function LayerCard({
                 id={`${id}-seqNumber`}
                 label="Sequence Number"
                 hint="32 bit"
+                doc={fieldDoc('seqNumber')}
                 value={layer.seqNumber}
                 error={fieldError('seqNumber')}
                 warning={fieldWarning('seqNumber')}
@@ -723,6 +794,7 @@ export function LayerCard({
                 id={`${id}-ackNumber`}
                 label="Acknowledgment Number"
                 hint="32 bit"
+                doc={fieldDoc('ackNumber')}
                 value={layer.ackNumber}
                 error={fieldError('ackNumber')}
                 warning={fieldWarning('ackNumber')}
@@ -735,6 +807,7 @@ export function LayerCard({
                 id={`${id}-windowSize`}
                 label="Window Size"
                 hint="0-65535"
+                doc={fieldDoc('windowSize')}
                 value={layer.windowSize}
                 error={fieldError('windowSize')}
                 warning={fieldWarning('windowSize')}
@@ -747,6 +820,7 @@ export function LayerCard({
                 id={`${id}-urgentPointer`}
                 label="Urgent Pointer"
                 hint="0-65535"
+                doc={fieldDoc('urgentPointer')}
                 value={layer.urgentPointer}
                 error={fieldError('urgentPointer')}
                 warning={fieldWarning('urgentPointer')}
@@ -762,10 +836,28 @@ export function LayerCard({
                 onMouseLeave={hoverEnd}
               >
                 <div className="field-label-row">
-                  <span className="field-label">Control Bits</span>
+                  <div className="field-label-main">
+                    <span className="field-label">Control Bits</span>
+                    {flagsDoc && (
+                      <FieldInfoButton
+                        label="Control Bits"
+                        docId={`${id}-flags-doc`}
+                        open={isCustomDocOpen('flags')}
+                        onToggle={() => toggleCustomDoc('flags')}
+                        onClose={() => closeCustomDoc('flags')}
+                        onFocus={hoverStart('flags')}
+                        onBlur={hoverEnd}
+                      />
+                    )}
+                  </div>
                   <span className="field-hint">8 bit (RFC 9293 Section 3.1)</span>
                 </div>
-                <div className="flag-chip-row">
+                <div
+                  className="flag-chip-row"
+                  role="group"
+                  aria-label="TCP Control Bits"
+                  aria-describedby={isCustomDocOpen('flags') ? `${id}-flags-doc` : undefined}
+                >
                   {TCP_FLAG_ITEMS.map(({ key, label }) => (
                     <label
                       key={key}
@@ -787,12 +879,16 @@ export function LayerCard({
                     </label>
                   ))}
                 </div>
+                {flagsDoc && isCustomDocOpen('flags') && (
+                  <FieldDocBox id={`${id}-flags-doc`} doc={flagsDoc} />
+                )}
               </div>
 
               <AutoManualField
                 id={`${id}-dataOffset`}
                 label="Data Offset"
                 hint="4 bit (base=5)"
+                doc={fieldDoc('dataOffset')}
                 value={layer.dataOffset}
                 resolvedAutoValue={resolvedAutoValues?.dataOffset}
                 error={fieldError('dataOffset')}
@@ -806,6 +902,7 @@ export function LayerCard({
                 id={`${id}-checksum`}
                 label="Checksum"
                 hint="IPv4 pseudo-header"
+                doc={fieldDoc('checksum')}
                 allowHex
                 hexDigits={4}
                 value={layer.checksum}
@@ -820,9 +917,11 @@ export function LayerCard({
 
               <div className="fixed-field-row field-span-full">
                 <FixedFieldChip
+                  id={`${id}-reserved`}
                   label="Reserved"
                   value="0"
                   bits="4b"
+                  doc={fieldDoc('reserved')}
                   isHighlighted={isHighlighted('reserved')}
                   onHoverStart={hoverStart('reserved')}
                   onHoverEnd={hoverEnd}
@@ -839,10 +938,28 @@ export function LayerCard({
                 onMouseLeave={hoverEnd}
               >
                 <div className="field-label-row">
-                  <span className="field-label">Message Type</span>
+                  <div className="field-label-main">
+                    <span className="field-label">Message Type</span>
+                    {bgpTypeDoc && (
+                      <FieldInfoButton
+                        label="Message Type"
+                        docId={`${id}-bgpType-doc`}
+                        open={isCustomDocOpen('bgpType')}
+                        onToggle={() => toggleCustomDoc('bgpType')}
+                        onClose={() => closeCustomDoc('bgpType')}
+                        onFocus={hoverStart('bgpType')}
+                        onBlur={hoverEnd}
+                      />
+                    )}
+                  </div>
                   <span className="field-hint">8 bit (RFC 4271 §4.1)</span>
                 </div>
-                <div className="flag-chip-row" role="group" aria-label="BGP Message Type">
+                <div
+                  className="flag-chip-row"
+                  role="group"
+                  aria-label="BGP Message Type"
+                  aria-describedby={isCustomDocOpen('bgpType') ? `${id}-bgpType-doc` : undefined}
+                >
                   {BGP_TYPE_OPTIONS.map(({ type, label }) => (
                     <button
                       key={type}
@@ -857,12 +974,16 @@ export function LayerCard({
                     </button>
                   ))}
                 </div>
+                {bgpTypeDoc && isCustomDocOpen('bgpType') && (
+                  <FieldDocBox id={`${id}-bgpType-doc`} doc={bgpTypeDoc} />
+                )}
               </div>
 
               <AutoManualTextField
                 id={`${id}-marker`}
                 label="Marker"
                 hint="16 bytes (0xff × 16)"
+                doc={fieldDoc('marker')}
                 fullWidth
                 autoPreviewText="ff ff … ff (16 bytes)"
                 manualSeedValue={BGP_DEFAULT_MARKER_HEX}
@@ -880,6 +1001,7 @@ export function LayerCard({
                 id={`${id}-length`}
                 label="Length"
                 hint="19-4096 bytes"
+                doc={fieldDoc('length')}
                 value={layer.length}
                 resolvedAutoValue={resolvedAutoValues?.length}
                 error={fieldError('length')}
@@ -896,6 +1018,7 @@ export function LayerCard({
                     id={`${id}-version`}
                     label="Version"
                     hint="4 = BGP-4"
+                    doc={fieldDoc('version')}
                     value={layer.version}
                     resolvedAutoValue={resolvedAutoValues?.version}
                     error={fieldError('version')}
@@ -909,6 +1032,7 @@ export function LayerCard({
                     id={`${id}-myAs`}
                     label="My AS"
                     hint="16 bit (0-65535)"
+                    doc={fieldDoc('myAs')}
                     value={layer.myAs}
                     error={fieldError('myAs')}
                     warning={fieldWarning('myAs')}
@@ -921,6 +1045,7 @@ export function LayerCard({
                     id={`${id}-holdTime`}
                     label="Hold Time"
                     hint="0 or 3-65535 sec"
+                    doc={fieldDoc('holdTime')}
                     value={layer.holdTime}
                     error={fieldError('holdTime')}
                     warning={fieldWarning('holdTime')}
@@ -933,6 +1058,7 @@ export function LayerCard({
                     id={`${id}-bgpIdentifier`}
                     label="BGP Identifier"
                     hint="32-bit IPv4"
+                    doc={fieldDoc('bgpIdentifier')}
                     placeholder="192.0.2.1"
                     value={layer.bgpIdentifier}
                     error={fieldError('bgpIdentifier')}
@@ -946,6 +1072,7 @@ export function LayerCard({
                     id={`${id}-optParamLength`}
                     label="Optional Parameters Length"
                     hint="0-255 bytes"
+                    doc={fieldDoc('optParamLength')}
                     value={layer.optParamLength}
                     resolvedAutoValue={resolvedAutoValues?.optParamLength}
                     error={fieldError('optParamLength')}
@@ -964,6 +1091,7 @@ export function LayerCard({
                     id={`${id}-withdrawnRoutesLength`}
                     label="Withdrawn Routes Length"
                     hint="16 bit (0 = none)"
+                    doc={fieldDoc('withdrawnRoutesLength')}
                     value={layer.withdrawnRoutesLength}
                     resolvedAutoValue={resolvedAutoValues?.withdrawnRoutesLength}
                     error={fieldError('withdrawnRoutesLength')}
@@ -979,6 +1107,7 @@ export function LayerCard({
                     id={`${id}-totalPathAttrLength`}
                     label="Total Path Attribute Length"
                     hint="16 bit (bytes)"
+                    doc={fieldDoc('totalPathAttrLength')}
                     value={layer.totalPathAttrLength}
                     resolvedAutoValue={resolvedAutoValues?.totalPathAttrLength}
                     error={fieldError('totalPathAttrLength')}
@@ -997,6 +1126,7 @@ export function LayerCard({
                     id={`${id}-errorCode`}
                     label="Error Code"
                     hint="0-255 (1-6: RFC 4271, 7: RFC 7313)"
+                    doc={fieldDoc('errorCode')}
                     value={layer.errorCode}
                     error={fieldError('errorCode')}
                     warning={fieldWarning('errorCode')}
@@ -1009,6 +1139,7 @@ export function LayerCard({
                     id={`${id}-errorSubcode`}
                     label="Error Subcode"
                     hint="0-255"
+                    doc={fieldDoc('errorSubcode')}
                     value={layer.errorSubcode}
                     error={fieldError('errorSubcode')}
                     warning={fieldWarning('errorSubcode')}

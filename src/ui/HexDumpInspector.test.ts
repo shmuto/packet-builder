@@ -218,4 +218,45 @@ describe('HexDumpInspector', () => {
       'Import Hex will read these bytes as ETH + Payload (1 byte). Use Copy Link to keep the exact stack.',
     );
   });
+
+  it('displays field summary and RFC reference in the hover detail strip for highlighted fields and single-field bytes', () => {
+    const preset = createPresets()[0]; // Ethernet (0) + IPv4 (1) + UDP (2)
+    const draft = evaluatePacketDraft(preset.layers, ok(preset.payloadBytes));
+
+    // Highlight IPv4 TTL field (layerIndex 1, fieldId 'ttl')
+    const fieldHighlightHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: { kind: 'field', layerIndex: 1, fieldId: 'ttl' },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(fieldHighlightHtml).toContain('hover-detail-doc');
+    expect(fieldHighlightHtml).toContain('Hop limit decremented by each router');
+    expect(fieldHighlightHtml).toContain('RFC 791 §3.1');
+
+    // Highlight byte #22 (IPv4 TTL byte: 14 Ethernet + 8 IPv4 offset)
+    const byteHighlightHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: { kind: 'byte', byteIndex: 22 },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(byteHighlightHtml).toContain('hover-detail-doc');
+    expect(byteHighlightHtml).toContain('RFC 791 §3.1');
+
+    // Highlight payload field: no RFC field doc should appear
+    const payloadHighlightHtml = renderToStaticMarkup(
+      createElement(HexDumpInspector, {
+        layers: preset.layers,
+        draft,
+        highlight: { kind: 'field', layerIndex: 3, fieldId: 'payload' },
+        onHighlightChange: () => {},
+      }),
+    );
+    expect(payloadHighlightHtml).not.toContain('hover-detail-doc');
+  });
 });
