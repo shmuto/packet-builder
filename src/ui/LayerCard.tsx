@@ -1328,8 +1328,9 @@ export function LayerCard({
                   <NumberField
                     id={`${id}-sequenceNumber`}
                     label="Sequence Number"
-                    hint="0-4294967295 (32 bit)"
+                    hint="0-4294967295 (32 bit, hex ok)"
                     doc={fieldDoc('sequenceNumber')}
+                    allowHex
                     value={layer.sequenceNumber}
                     error={fieldError('sequenceNumber')}
                     warning={fieldWarning('sequenceNumber')}

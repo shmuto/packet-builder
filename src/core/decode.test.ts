@@ -1428,6 +1428,32 @@ describe('decodePacket', () => {
         expect(rebuilt.ok && rebuilt.bytes).toEqual(greVlan.bytes);
       }
     }
+
+    // 5. Direct GRE + ARP (Protocol Type 0x0806)
+    const greArp = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '198.51.100.1', dstIp: '198.51.100.2' },
+        createDefaultGRE(),
+        createDefaultARP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(greArp.ok).toBe(true);
+    if (greArp.ok) {
+      const dec = decodePacket(greArp.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'gre', 'arp']);
+        const gre = dec.value.layers[2];
+        if (gre.type === 'gre') {
+          expect(gre.protocolType).toEqual(autoValue());
+        }
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(greArp.bytes);
+      }
+    }
   });
 
   it('keeps GRE Version 1 (PPTP), truncated optional fields, non-zero reserved bits, and overly deep GRE tunnels in Payload safely', () => {

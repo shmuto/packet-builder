@@ -40,6 +40,7 @@ import {
   ETHERTYPE_VLAN,
 } from './layers/ethernet';
 import {
+  getGREHeaderLength,
   GRE_BASE_HEADER_LENGTH,
   GRE_PROTOCOL_TEB,
   greProtocolTypeForUpperLayer,
@@ -885,11 +886,11 @@ function decodeGREAt(
     return null;
   }
 
-  const headerLength =
-    GRE_BASE_HEADER_LENGTH +
-    (checksumPresent ? 4 : 0) +
-    (keyPresent ? 4 : 0) +
-    (sequencePresent ? 4 : 0);
+  const headerLength = getGREHeaderLength({
+    checksumPresent,
+    keyPresent,
+    sequencePresent,
+  });
 
   if (upperRemaining < headerLength) {
     notes.push(
@@ -970,7 +971,7 @@ function decodeGREAt(
       notes,
       0,
       depth + 1,
-      'GRE',
+      'gre',
     );
   }
 
@@ -996,6 +997,8 @@ function decodeGREAt(
 
 const MAX_VLAN_TAGS = 16;
 
+type EtherTypeParentKind = 'ethernet' | 'gre';
+
 function isVLANTpid(etherType: number): boolean {
   return (
     etherType === ETHERTYPE_VLAN ||
@@ -1012,7 +1015,7 @@ function decodeEtherTypeChain(
   notes: string[],
   vlanDepth = 0,
   tunnelDepth = 0,
-  parentLabel = 'Ethernet II',
+  parentKind: EtherTypeParentKind = 'ethernet',
 ): Uint8Array {
   const remaining = bytes.length - offset;
 
@@ -1045,7 +1048,7 @@ function decodeEtherTypeChain(
       notes,
       vlanDepth + 1,
       tunnelDepth,
-      parentLabel,
+      parentKind,
     );
 
     const expectedInner = vlanInnerEtherTypeForUpperLayer(decodedUpperLayers[0]?.type ?? null);
@@ -1063,7 +1066,8 @@ function decodeEtherTypeChain(
     return payload;
   }
 
-  const enclosing = vlanDepth > 0 ? 'VLAN tag' : parentLabel;
+  const enclosing =
+    vlanDepth > 0 ? 'VLAN tag' : parentKind === 'gre' ? 'GRE' : 'Ethernet II';
 
   if (etherType === ETHERTYPE_IPV4) {
     if (remaining < IPV4_HEADER_LENGTH) {
@@ -1141,7 +1145,7 @@ function decodeEtherTypeChain(
     return trailing;
   }
 
-  const label = enclosing === 'GRE' ? 'GRE Protocol Type' : 'EtherType';
+  const label = vlanDepth === 0 && parentKind === 'gre' ? 'GRE Protocol Type' : 'EtherType';
   notes.push(
     `${label} 0x${etherType.toString(16).padStart(4, '0')} is not decoded into a layer; remaining bytes kept as Payload.`,
   );
@@ -1168,7 +1172,7 @@ function decodeEthernetFrameAt(
     notes,
     0,
     tunnelDepth,
-    'Ethernet II',
+    'ethernet',
   );
 
   const expectedEthEtherType = ethernetEtherTypeForUpperLayers(
