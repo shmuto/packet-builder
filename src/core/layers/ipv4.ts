@@ -471,6 +471,20 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
             fieldId: `${optPrefix}.raw.number`,
             message: typeErr,
           });
+        } else {
+          if (opt.optionType === IPV4_OPT_EOL) {
+            seenEol = true;
+          }
+          if (
+            (opt.optionType === IPV4_OPT_EOL || opt.optionType === IPV4_OPT_NOP) &&
+            opt.length.mode !== 'none'
+          ) {
+            warnings.push({
+              layerIndex: ctx.layerIndex,
+              fieldId: `${optPrefix}.raw.length`,
+              message: `IPv4 option Type ${opt.optionType} (${opt.optionType === IPV4_OPT_EOL ? 'EOL' : 'NOP'}) is a 1-byte option without a Length field (RFC 791 §3.1).`,
+            });
+          }
         }
         const dataParsed = parseHexBytes(opt.dataHex);
         if (!dataParsed.ok) {

@@ -261,7 +261,7 @@ describe('encodeIPv4', () => {
       expect(raNonZero.warnings.some((w) => w.message.includes('RFC 2113 §2.1'))).toBe(true);
     }
 
-    // 5) Bytes after End of Option List
+    // 5) Bytes after End of Option List (typed EOL and Raw Type 0)
     const afterEol = encodeIPv4(
       makeBaseIPv4({
         options: [{ kind: 'eol' }, { kind: 'nop' }],
@@ -271,6 +271,36 @@ describe('encodeIPv4', () => {
     expect(afterEol.ok).toBe(true);
     if (afterEol.ok) {
       expect(afterEol.warnings.some((w) => w.message.includes('End of Option List'))).toBe(true);
+    }
+
+    const afterRawEol = encodeIPv4(
+      makeBaseIPv4({
+        options: [
+          { kind: 'raw', optionType: 0, length: { mode: 'none' }, dataHex: '' },
+          { kind: 'nop' },
+        ],
+      }),
+      { layerIndex: 0, upperLayerType: 'udp', upperBytesLength: 8 },
+    );
+    expect(afterRawEol.ok).toBe(true);
+    if (afterRawEol.ok) {
+      expect(afterRawEol.warnings.some((w) => w.message.includes('End of Option List'))).toBe(true);
+    }
+
+    // 6) Raw Type 0 / Type 1 with TLV Length field -> 1-byte option warning
+    const rawNopWithLen = encodeIPv4(
+      makeBaseIPv4({
+        options: [{ kind: 'raw', optionType: 1, length: autoValue(), dataHex: '' }],
+      }),
+      { layerIndex: 0, upperLayerType: 'udp', upperBytesLength: 8 },
+    );
+    expect(rawNopWithLen.ok).toBe(true);
+    if (rawNopWithLen.ok) {
+      expect(
+        rawNopWithLen.warnings.some(
+          (w) => w.fieldId === 'options[0].raw.length' && w.message.includes('1-byte option'),
+        ),
+      ).toBe(true);
     }
   });
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FieldDoc } from '../core/fieldDocs';
 import {
   decodeIPv4OptionTypeByte,
+  getIPv4OptionByteLength,
   getIPv4OptionsMetrics,
   getIPv4OptionTypeByte,
   IPV4_MAX_OPTIONS_LENGTH,
@@ -270,7 +271,7 @@ export function IPv4OptionsEditor({
                   const lenId = `${prefix}.${opt.kind}.length`;
                   const ptrId = `${prefix}.${opt.kind}.pointer`;
                   const numId = `${prefix}.${opt.kind}.number`;
-                  const routeLen = 3 + opt.addresses.length * 4;
+                  const routeLen = getIPv4OptionByteLength(opt);
 
                   const addAddress = () => {
                     handleUpdate(i, {
@@ -374,8 +375,7 @@ export function IPv4OptionsEditor({
                   const ovflId = `${prefix}.timestamp.overflow`;
                   const flagId = `${prefix}.timestamp.flag`;
                   const dataId = `${prefix}.timestamp.data`;
-                  const compactLen = opt.dataHex.replace(/\s+/g, '').length;
-                  const estLen = 4 + Math.floor(compactLen / 2);
+                  const tsLen = getIPv4OptionByteLength(opt);
 
                   return (
                     <div className="option-item-body">
@@ -384,7 +384,7 @@ export function IPv4OptionsEditor({
                         <FixedFieldChip
                           id={`${htmlPrefix}-timestamp-length`}
                           label="Length"
-                          value={String(estLen)}
+                          value={String(tsLen)}
                           bits="8b"
                           doc={fieldDoc(lenId)}
                           isHighlighted={isHighlighted(lenId)}
@@ -523,20 +523,31 @@ export function IPv4OptionsEditor({
                           </div>
                         </div>
                       ) : (
-                        <AutoManualField
-                          id={`${htmlPrefix}-raw-length`}
-                          label="Length"
-                          hint="2 + data bytes"
-                          doc={fieldDoc(`${prefix}.raw.length`)}
-                          value={opt.length}
-                          resolvedAutoValue={resolvedAutoValues?.[`${prefix}.raw.length`]}
-                          error={fieldError(`${prefix}.raw.length`)}
-                          warning={fieldWarning(`${prefix}.raw.length`)}
-                          isHighlighted={isHighlighted(`${prefix}.raw.length`)}
-                          onHoverStart={hoverStart(`${prefix}.raw.length`)}
-                          onHoverEnd={hoverEnd}
-                          onChange={(length) => handleUpdate(i, { ...opt, length })}
-                        />
+                        <div className="option-item-body">
+                          <AutoManualField
+                            id={`${htmlPrefix}-raw-length`}
+                            label="Length"
+                            hint="2 + data bytes"
+                            doc={fieldDoc(`${prefix}.raw.length`)}
+                            value={opt.length}
+                            resolvedAutoValue={resolvedAutoValues?.[`${prefix}.raw.length`]}
+                            error={fieldError(`${prefix}.raw.length`)}
+                            warning={fieldWarning(`${prefix}.raw.length`)}
+                            isHighlighted={isHighlighted(`${prefix}.raw.length`)}
+                            onHoverStart={hoverStart(`${prefix}.raw.length`)}
+                            onHoverEnd={hoverEnd}
+                            onChange={(length) => handleUpdate(i, { ...opt, length })}
+                          />
+                          <button
+                            type="button"
+                            className="mode-btn"
+                            onClick={() =>
+                              handleUpdate(i, { ...opt, length: { mode: 'none' } })
+                            }
+                          >
+                            Omit Length (Raw bytes)
+                          </button>
+                        </div>
                       )}
                       <div className="field-span-full">
                         <TextField
