@@ -55,11 +55,14 @@ test.describe('Import Hex round-trip', () => {
       await textarea.fill(copiedHex);
       await page.getByRole('button', { name: 'Decode & Load' }).click();
 
-      const decodedLayers = await page.locator('.layer-card .layer-name').allInnerTexts();
-      const decodedHexDump = await page.locator('.hexdump-grid').innerText();
-
-      expect(decodedLayers, `Decoded layer stack for "${presetName}"`).toEqual(originalLayers);
-      expect(decodedHexDump, `Decoded hex dump for "${presetName}"`).toBe(originalHexDump);
+      await expect(
+        page.locator('.layer-card .layer-name'),
+        `Decoded layer stack for "${presetName}"`,
+      ).toHaveText(originalLayers);
+      await expect(
+        page.locator('.hexdump-grid'),
+        `Decoded hex dump for "${presetName}"`,
+      ).toHaveText(originalHexDump, { useInnerText: true });
     }
   });
 });

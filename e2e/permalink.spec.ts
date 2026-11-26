@@ -24,8 +24,10 @@ test.describe('Shareable permalinks', () => {
     const checksumInput = ipv4Card.getByRole('textbox', { name: 'Header Checksum', exact: true });
     await checksumInput.fill('0xdead');
 
-    // Verify the corrupted bytes appear in the hex dump and wait for the debounced hash update
-    await expect(page.locator('.hexdump-grid')).toContainText('de');
+    // Verify the corrupted 2-byte IPv4 Header Checksum (offsets 24..25 = 14B Ethernet + 10B IPv4)
+    const hexBytes = page.locator('.hexdump-grid .hex-byte');
+    await expect(hexBytes.nth(24)).toHaveText('de');
+    await expect(hexBytes.nth(25)).toHaveText('ad');
     await page.waitForFunction(() => {
       const hash = window.location.hash;
       if (!hash.startsWith('#p1=')) return false;
@@ -46,7 +48,9 @@ test.describe('Shareable permalinks', () => {
         .getByRole('region', { name: 'IPv4 layer' })
         .getByRole('textbox', { name: 'Header Checksum', exact: true }),
     ).toHaveValue('0xdead');
-    expect(await restoredPage.locator('.hexdump-grid').innerText()).toBe(expectedHexDump);
+    await expect(restoredPage.locator('.hexdump-grid')).toHaveText(expectedHexDump, {
+      useInnerText: true,
+    });
     await restoredPage.close();
   });
 
