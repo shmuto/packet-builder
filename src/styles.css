@@ -1015,6 +1015,17 @@ body {
   color: var(--status-err-fg);
 }
 
+.export-status-note {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--status-warn-bg);
+  border: 1px solid var(--status-warn-border);
+  color: var(--status-warn-fg);
+  font-size: 0.77rem;
+  line-height: 1.45;
+}
+
 /* Hover detail strip */
 .hover-detail-strip {
   display: flex;
@@ -1311,6 +1322,20 @@ body {
   border-radius: var(--radius-md);
   background: var(--accent-soft);
   border: 1px solid var(--accent);
+  font-size: 0.82rem;
+}
+
+.permalink-error-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1.2rem;
+  border-radius: var(--radius-md);
+  background: var(--status-err-bg);
+  border: 1px solid var(--status-err-border);
+  color: var(--status-err-fg);
   font-size: 0.82rem;
 }
 

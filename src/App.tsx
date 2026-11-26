@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { decodeUtf8Strict, encodeUtf8, parseHexBytes } from './core/bytes';
 import { detectPrintableUtf8, type DecodedPacket } from './core/decode';
 import {
@@ -8,6 +8,13 @@ import {
   type HighlightTarget,
 } from './core/inspector';
 import type { Layer, LayerType } from './core/layers/types';
+import {
+  buildPermalinkUrl,
+  decodePermalink,
+  encodePermalink,
+  hasOnlyFiniteNumbers,
+  type PermalinkState,
+} from './core/permalink';
 import { createPresets, type PacketPreset, type PresetId } from './core/presets';
 import { ok, type Result } from './core/result';
 import { HexDumpInspector } from './ui/HexDumpInspector';
@@ -21,26 +28,108 @@ interface LayerItem {
   readonly layer: Layer;
 }
 
+interface EditorFields {
+  readonly activePresetId: PresetId | null;
+  readonly layers: readonly Layer[];
+  readonly payloadMode: PayloadMode;
+  readonly payloadText: string;
+  readonly payloadHex: string;
+}
+
+interface InitialEditorState extends EditorFields {
+  readonly permalinkError: string | null;
+  readonly initialSyncedFragment: string | null;
+  readonly suppressInitialSync: boolean;
+}
+
+const HASH_SYNC_DEBOUNCE_MS = 250;
+
+function fieldsFromPreset(preset: PacketPreset): EditorFields {
+  return {
+    activePresetId: preset.id,
+    layers: preset.layers,
+    payloadMode: 'text',
+    payloadText: preset.payloadText,
+    payloadHex: formatSpacedHex(preset.payloadBytes),
+  };
+}
+
+function fieldsFromPermalink(state: PermalinkState): EditorFields {
+  const { layers, payload } = state;
+  return {
+    activePresetId: null,
+    layers,
+    payloadMode: payload.mode,
+    payloadText: payload.mode === 'text' ? payload.text : '',
+    payloadHex:
+      payload.mode === 'hex' ? payload.hex : formatSpacedHex(encodeUtf8(payload.text)),
+  };
+}
+
+function readInitialEditorState(defaultPreset: PacketPreset): InitialEditorState {
+  const fallback = (permalinkError: string | null): InitialEditorState => ({
+    ...fieldsFromPreset(defaultPreset),
+    permalinkError,
+    initialSyncedFragment: null,
+    suppressInitialSync: true,
+  });
+
+  if (typeof window === 'undefined') {
+    return fallback(null);
+  }
+
+  const hash = window.location.hash;
+  if (hash.length === 0 || hash === '#') {
+    return fallback(null);
+  }
+
+  const decoded = decodePermalink(hash);
+  if (!decoded.ok) {
+    return fallback(`Could not load packet from URL: ${decoded.error}`);
+  }
+
+  return {
+    ...fieldsFromPermalink(decoded.value),
+    permalinkError: null,
+    initialSyncedFragment: encodePermalink(decoded.value),
+    suppressInitialSync: false,
+  };
+}
+
 export function App() {
   const presets = useMemo(() => createPresets(), []);
   const nextIdRef = useRef(1);
-  const allocateId = () => `layer-${nextIdRef.current++}`;
+  const allocateId = useCallback(() => `layer-${nextIdRef.current++}`, []);
 
-  const [activePresetId, setActivePresetId] = useState<PresetId | null>(presets[0].id);
+  const initialStateRef = useRef<InitialEditorState | null>(null);
+  if (initialStateRef.current === null) {
+    initialStateRef.current = readInitialEditorState(presets[0]);
+  }
+  const initialState = initialStateRef.current;
+
+  const [activePresetId, setActivePresetId] = useState<PresetId | null>(
+    initialState.activePresetId,
+  );
   const [layerItems, setLayerItems] = useState<LayerItem[]>(() =>
-    presets[0].layers.map((layer) => ({ id: allocateId(), layer })),
+    initialState.layers.map((layer) => ({ id: allocateId(), layer })),
   );
-  const [payloadMode, setPayloadMode] = useState<PayloadMode>('text');
-  const [payloadText, setPayloadText] = useState<string>(presets[0].payloadText);
-  const [payloadHex, setPayloadHex] = useState<string>(() =>
-    formatSpacedHex(presets[0].payloadBytes),
-  );
+  const [payloadMode, setPayloadMode] = useState<PayloadMode>(initialState.payloadMode);
+  const [payloadText, setPayloadText] = useState<string>(initialState.payloadText);
+  const [payloadHex, setPayloadHex] = useState<string>(initialState.payloadHex);
   const [payloadModeSwitchError, setPayloadModeSwitchError] = useState<string | undefined>(
     undefined,
   );
   const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [importNotes, setImportNotes] = useState<readonly string[]>([]);
+  const [permalinkError, setPermalinkError] = useState<string | null>(
+    initialState.permalinkError,
+  );
+
+  const lastSyncedFragmentRef = useRef<string | null>(initialState.initialSyncedFragment);
+  const suppressSyncRef = useRef<boolean>(initialState.suppressInitialSync);
+  const pendingFragmentRef = useRef<string | null>(null);
+  const hashSyncTimerRef = useRef<number | null>(null);
 
   const payloadResult: Result<Uint8Array> = useMemo(() => {
     if (payloadMode === 'text') {
@@ -56,18 +145,151 @@ export function App() {
     [layers, payloadResult],
   );
 
+  const permalinkState: PermalinkState = useMemo(
+    () => ({
+      layers,
+      payload:
+        payloadMode === 'text'
+          ? { mode: 'text', text: payloadText }
+          : { mode: 'hex', hex: payloadHex },
+    }),
+    [layers, payloadMode, payloadText, payloadHex],
+  );
+
+  const permalinkFragment: string | null = useMemo(() => {
+    if (!hasOnlyFiniteNumbers(layers)) {
+      return null;
+    }
+    return encodePermalink(permalinkState);
+  }, [layers, permalinkState]);
+
+  const permalinkUrl: string | null = useMemo(() => {
+    if (permalinkFragment === null || typeof window === 'undefined') {
+      return null;
+    }
+    return buildPermalinkUrl(
+      window.location.origin,
+      window.location.pathname,
+      permalinkFragment,
+    );
+  }, [permalinkFragment]);
+
+  const flushPendingHashSync = useCallback(() => {
+    if (hashSyncTimerRef.current !== null) {
+      window.clearTimeout(hashSyncTimerRef.current);
+      hashSyncTimerRef.current = null;
+    }
+    const pending = pendingFragmentRef.current;
+    pendingFragmentRef.current = null;
+    if (pending !== null && pending !== lastSyncedFragmentRef.current) {
+      window.history.replaceState(null, '', `#${pending}`);
+      lastSyncedFragmentRef.current = pending;
+    }
+  }, []);
+
+  // Keep URL hash in sync with editor state using debounced history.replaceState
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (suppressSyncRef.current || permalinkFragment === null) {
+      pendingFragmentRef.current = null;
+      return;
+    }
+    if (permalinkFragment === lastSyncedFragmentRef.current) {
+      pendingFragmentRef.current = null;
+      return;
+    }
+
+    pendingFragmentRef.current = permalinkFragment;
+    if (hashSyncTimerRef.current !== null) {
+      window.clearTimeout(hashSyncTimerRef.current);
+    }
+
+    hashSyncTimerRef.current = window.setTimeout(flushPendingHashSync, HASH_SYNC_DEBOUNCE_MS);
+
+    return () => {
+      if (hashSyncTimerRef.current !== null) {
+        window.clearTimeout(hashSyncTimerRef.current);
+        hashSyncTimerRef.current = null;
+      }
+    };
+  }, [permalinkFragment, flushPendingHashSync]);
+
+  // Flush any pending debounced hash update before reload/navigation so recent edits are never lost
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('pagehide', flushPendingHashSync);
+    window.addEventListener('beforeunload', flushPendingHashSync);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingHashSync);
+      window.removeEventListener('beforeunload', flushPendingHashSync);
+    };
+  }, [flushPendingHashSync]);
+
+  const applyEditorFields = useCallback(
+    (fields: EditorFields, error: string | null) => {
+      setActivePresetId(fields.activePresetId);
+      setLayerItems(fields.layers.map((layer) => ({ id: allocateId(), layer })));
+      setPayloadMode(fields.payloadMode);
+      setPayloadText(fields.payloadText);
+      setPayloadHex(fields.payloadHex);
+      setPayloadModeSwitchError(undefined);
+      setImportNotes([]);
+      setPermalinkError(error);
+      setHighlight(null);
+    },
+    [allocateId],
+  );
+
+  // Listen for hashchange events (e.g., user edits URL fragment or navigates history)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const resetToDefaultPreset = (error: string | null) => {
+      suppressSyncRef.current = true;
+      lastSyncedFragmentRef.current = null;
+      applyEditorFields(fieldsFromPreset(presets[0]), error);
+    };
+
+    const handleHashChange = () => {
+      pendingFragmentRef.current = null;
+      if (hashSyncTimerRef.current !== null) {
+        window.clearTimeout(hashSyncTimerRef.current);
+        hashSyncTimerRef.current = null;
+      }
+
+      const hash = window.location.hash;
+      if (hash.length === 0 || hash === '#') {
+        resetToDefaultPreset(null);
+        return;
+      }
+
+      const decoded = decodePermalink(hash);
+      if (!decoded.ok) {
+        resetToDefaultPreset(`Could not load packet from URL: ${decoded.error}`);
+        return;
+      }
+
+      suppressSyncRef.current = false;
+      lastSyncedFragmentRef.current = encodePermalink(decoded.value);
+      applyEditorFields(fieldsFromPermalink(decoded.value), null);
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [applyEditorFields, presets]);
+
+  const markUserEdited = () => {
+    suppressSyncRef.current = false;
+    setPermalinkError(null);
+  };
+
   const applyPreset = (preset: PacketPreset) => {
-    setActivePresetId(preset.id);
-    setLayerItems(preset.layers.map((layer) => ({ id: allocateId(), layer })));
-    setPayloadMode('text');
-    setPayloadText(preset.payloadText);
-    setPayloadHex(formatSpacedHex(preset.payloadBytes));
-    setPayloadModeSwitchError(undefined);
-    setImportNotes([]);
-    setHighlight(null);
+    markUserEdited();
+    applyEditorFields(fieldsFromPreset(preset), null);
   };
 
   const handleImportDecoded = (decoded: DecodedPacket) => {
+    markUserEdited();
     setActivePresetId(null);
     setLayerItems(decoded.layers.map((layer) => ({ id: allocateId(), layer })));
     const textCheck = detectPrintableUtf8(decoded.payload);
@@ -87,6 +309,7 @@ export function App() {
   };
 
   const handleLayerChange = (index: number, nextLayer: Layer) => {
+    markUserEdited();
     setActivePresetId(null);
     setImportNotes([]);
     setLayerItems((prev) =>
@@ -99,6 +322,7 @@ export function App() {
     if (targetIndex < 0 || targetIndex >= layerItems.length) {
       return;
     }
+    markUserEdited();
     setActivePresetId(null);
     setImportNotes([]);
     setHighlight(null);
@@ -111,6 +335,7 @@ export function App() {
   };
 
   const handleRemoveLayer = (index: number) => {
+    markUserEdited();
     setActivePresetId(null);
     setImportNotes([]);
     setHighlight(null);
@@ -118,6 +343,7 @@ export function App() {
   };
 
   const handleAddLayer = (type: LayerType) => {
+    markUserEdited();
     setActivePresetId(null);
     setImportNotes([]);
     setHighlight(null);
@@ -128,6 +354,7 @@ export function App() {
     if (nextMode === payloadMode) return;
 
     if (nextMode === 'hex') {
+      markUserEdited();
       setPayloadHex(formatSpacedHex(encodeUtf8(payloadText)));
       setPayloadModeSwitchError(undefined);
       setPayloadMode('hex');
@@ -148,6 +375,7 @@ export function App() {
       );
       return;
     }
+    markUserEdited();
     setPayloadText(decoded.value);
     setPayloadModeSwitchError(undefined);
     setPayloadMode('text');
@@ -200,6 +428,23 @@ export function App() {
           </div>
         </nav>
       </header>
+
+      {permalinkError && (
+        <div className="permalink-error-banner" role="alert">
+          <div className="import-notes-body">
+            <strong>Invalid Permalink</strong>
+            <span>{permalinkError} Loaded the default preset instead.</span>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Dismiss permalink error"
+            onClick={() => setPermalinkError(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {showImportPanel && (
         <ImportHexPanel
@@ -294,10 +539,12 @@ export function App() {
               onHoverEnd={() => setHighlight(null)}
               onModeChange={handlePayloadModeChange}
               onTextChange={(next) => {
+                markUserEdited();
                 setActivePresetId(null);
                 setPayloadText(next);
               }}
               onHexChange={(next) => {
+                markUserEdited();
                 setActivePresetId(null);
                 setPayloadModeSwitchError(undefined);
                 setPayloadHex(next);
@@ -311,6 +558,7 @@ export function App() {
             layers={layers}
             draft={draft}
             highlight={highlight}
+            permalinkUrl={permalinkUrl}
             onHighlightChange={setHighlight}
           />
         </div>

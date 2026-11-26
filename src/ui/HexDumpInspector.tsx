@@ -9,6 +9,7 @@ import {
 } from '../core/inspector';
 import type { Layer, LayerType } from '../core/layers/types';
 import { buildPcap, selectPcapLinkType } from '../core/pcap';
+import { PERMALINK_LONG_URL_THRESHOLD } from '../core/permalink';
 import { BitDiagram } from './BitDiagram';
 import { LAYER_META } from './layerMeta';
 
@@ -16,10 +17,11 @@ export interface HexDumpInspectorProps {
   readonly layers: readonly Layer[];
   readonly draft: EvaluatedPacketDraft;
   readonly highlight: HighlightTarget | null;
+  readonly permalinkUrl?: string | null;
   readonly onHighlightChange: (target: HighlightTarget | null) => void;
 }
 
-type CopyStatus = 'idle' | 'hex-ok' | 'dump-ok' | 'error';
+type CopyStatus = 'idle' | 'hex-ok' | 'dump-ok' | 'link-ok' | 'error';
 
 const HEX_COL_HEADERS: readonly string[] = Array.from({ length: 16 }, (_, i) =>
   i.toString(16).padStart(2, '0'),
@@ -84,6 +86,7 @@ export function HexDumpInspector({
   layers,
   draft,
   highlight,
+  permalinkUrl,
   onHighlightChange,
 }: HexDumpInspectorProps) {
   const { ok: isSuccess, bytes, spans, rows, segments, errors, warnings, payloadError } = draft;
@@ -130,6 +133,17 @@ export function HexDumpInspector({
     try {
       await navigator.clipboard.writeText(text);
       setCopyStatus(kind === 'hex' ? 'hex-ok' : 'dump-ok');
+    } catch {
+      setCopyStatus('error');
+    }
+    scheduleCopyReset();
+  };
+
+  const handleCopyLink = async () => {
+    if (!permalinkUrl) return;
+    try {
+      await navigator.clipboard.writeText(permalinkUrl);
+      setCopyStatus('link-ok');
     } catch {
       setCopyStatus('error');
     }
@@ -249,12 +263,33 @@ export function HexDumpInspector({
         >
           Download .pcap
         </button>
+        <button
+          type="button"
+          className="export-btn"
+          disabled={!permalinkUrl}
+          title={
+            permalinkUrl
+              ? 'Copy a shareable link that restores this exact layer stack and payload'
+              : 'Enter numbers in blank numeric fields before copying a link'
+          }
+          onClick={() => void handleCopyLink()}
+        >
+          {copyStatus === 'link-ok' ? 'Copied Link!' : 'Copy Link'}
+        </button>
         {copyStatus === 'error' && (
           <span className="export-status-error" role="alert">
             Clipboard access denied
           </span>
         )}
       </div>
+
+      {permalinkUrl && permalinkUrl.length > PERMALINK_LONG_URL_THRESHOLD && (
+        <p className="export-status-note" role="status">
+          This shareable link is {permalinkUrl.length.toLocaleString()} characters long (over{' '}
+          {PERMALINK_LONG_URL_THRESHOLD.toLocaleString()}); some apps or browsers may truncate long
+          links.
+        </p>
+      )}
 
       {isSuccess && segments.length > 0 && (
         <div
