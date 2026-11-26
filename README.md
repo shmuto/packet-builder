@@ -1,8 +1,10 @@
-# tsumiki (packet-builder)
+# tsumiki
 
-**An interactive, client-side educational packet builder for stacking Ethernet II, VLAN (802.1Q / 802.1ad QinQ), ARP, IPv4, IPv6, ICMP, ICMPv6, GRE, UDP, TCP, VXLAN, and BGP-4 layers like building blocks.**
+**Learn what's inside BGP messages before you open a capture.**
 
-Everything runs purely in the browser (no backend required) and deploys as a static site on GitHub Pages.
+Explore live two-router BGP sessions — TCP establishment, OPEN capability negotiation, UPDATE path attributes, MP-BGP IPv6, End-of-RIB, and NOTIFICATIONs — with plain-English explanations, RFC references, raw BGP hex decoding, and Wireshark-ready `.pcap` export.
+
+Everything runs purely in the browser (no backend required) and deploys as a static site on GitHub Pages. The former general-purpose packet builder remains available at `/legacy/`.
 
 ## Features
 
