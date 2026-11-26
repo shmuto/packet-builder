@@ -26,7 +26,7 @@ Everything runs purely in the browser (no backend required) and deploys as a sta
 | --- | --- | --- | --- |
 | L2 | **Ethernet II** (14B) | RFC 894 / IEEE 802.3 | EtherType (`0x0800` for IPv4, `0x0806` for ARP) |
 | L2.5 | **ARP** (28B) | RFC 826 | Hardware Type (`1`), Protocol Type (`0x0800`), Hardware Size (`6`), Protocol Size (`4`) |
-| L3 | **IPv4** (20B, IHL=5 fixed) | RFC 791 | Total Length, Protocol (ICMP=1 / TCP=6 / UDP=17), Header Checksum (RFC 1071) |
+| L3 | **IPv4** (20B, IHL=5 fixed) | RFC 791 / RFC 2003 (IP-in-IP) | Total Length, Protocol (ICMP=1 / IP-in-IP=4 / TCP=6 / UDP=17), Header Checksum (RFC 1071) |
 | L3 (over IPv4) | **ICMP** (8B base) | RFC 792 | Checksum (RFC 1071 over header + payload) |
 | L4 | **UDP** (8B) | RFC 768 | Length, Checksum (with IPv4 pseudo-header; `0x0000` mapped to `0xffff`) |
 | L4 | **TCP** (20B base) | RFC 9293 Section 3.1 | Data Offset (`5`), Checksum (with IPv4 pseudo-header; `0x0000` preserved) |

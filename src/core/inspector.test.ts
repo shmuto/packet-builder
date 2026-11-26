@@ -633,4 +633,55 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 14 })).toBe(1);
     expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 42 })).toBeNull();
   });
+
+  it('distinguishes outer and inner IPv4 layers in segments, unified bit diagram boundaries, and layer highlights', () => {
+    const draft = evaluatePacketDraft(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+        createDefaultIPv4(),
+        createDefaultUDP(),
+      ],
+      ok(encodeUtf8('hi')),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Segments separate outer IPv4 (14..33) and inner IPv4 (34..53)
+    expect(draft.segments).toEqual([
+      { layerIndex: 0, layerType: 'ethernet', byteOffset: 0, byteLength: 14 },
+      { layerIndex: 1, layerType: 'ipv4', byteOffset: 14, byteLength: 20 },
+      { layerIndex: 2, layerType: 'ipv4', byteOffset: 34, byteLength: 20 },
+      { layerIndex: 3, layerType: 'udp', byteOffset: 54, byteLength: 8 },
+      { layerIndex: 4, layerType: 'payload', byteOffset: 62, byteLength: 2 },
+    ]);
+
+    // Unified bit diagram marks outer IPv4 end and inner IPv4 start right at bit 272 (row 8, col 16)
+    const rows = buildUnifiedBitDiagramRows(draft.spans);
+    expect(
+      rows[8].cells.map((c) => [
+        c.span.layerIndex,
+        c.span.fieldId,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      [1, 'dstIp', false, true],
+      [2, 'version', true, false],
+      [2, 'ihl', false, false],
+      [2, 'tos', false, false],
+    ]);
+
+    // Layer highlight resolves outer (1) vs inner (2) independently
+    expect(findHighlightedByteIndices(draft.spans, { kind: 'layer', layerIndex: 1 }).has(14)).toBe(
+      true,
+    );
+    expect(findHighlightedByteIndices(draft.spans, { kind: 'layer', layerIndex: 1 }).has(34)).toBe(
+      false,
+    );
+    expect(findHighlightedByteIndices(draft.spans, { kind: 'layer', layerIndex: 2 }).has(34)).toBe(
+      true,
+    );
+    expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 33 })).toBe(1);
+    expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 34 })).toBe(2);
+  });
 });

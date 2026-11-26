@@ -7,6 +7,7 @@ import {
   createDefaultARP,
   createDefaultBGP,
   createDefaultEthernet,
+  createDefaultICMP,
   createDefaultIPv4,
   createDefaultTCP,
   createDefaultUDP,
@@ -496,6 +497,172 @@ describe('decodePacket', () => {
         expect(dec.value.notes.some((n) => n.includes('BGP-4 decoding skipped'))).toBe(true);
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(tcpOptBgpBuilt.bytes);
+      }
+    }
+  });
+
+  it('decodes and round-trips IP-in-IP (RFC 2003, Protocol 4) and multi-level IPv4 encapsulation', () => {
+    // 1) Ethernet + Outer IPv4 + Inner IPv4 + UDP + "Hello"
+    const ipipLayers: Layer[] = [
+      createDefaultEthernet(),
+      { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+      createDefaultIPv4(),
+      createDefaultUDP(),
+    ];
+    const built = buildPacket(ipipLayers, encodeUtf8('Hello'));
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    const decoded = decodePacket(built.bytes, 'ethernet');
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.value.notes).toEqual([]);
+    expect(decoded.value.layers.map((l) => l.type)).toEqual(['ethernet', 'ipv4', 'ipv4', 'udp']);
+    const outerIp = decoded.value.layers[1];
+    const innerIp = decoded.value.layers[2];
+    const udp = decoded.value.layers[3];
+    expect(outerIp.type === 'ipv4' && outerIp.srcIp).toBe('10.0.0.1');
+    expect(outerIp.type === 'ipv4' && outerIp.protocol).toEqual(autoValue());
+    expect(innerIp.type === 'ipv4' && innerIp.srcIp).toBe('192.168.0.1');
+    expect(udp.type === 'udp' && udp.checksum).toEqual(autoValue());
+
+    const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+    expect(rebuilt.ok && rebuilt.bytes).toEqual(built.bytes);
+
+    // 2) Raw IPv4 -> IPv4 -> IPv4 -> ICMP (3 nested IPv4 layers)
+    const nestedBuilt = buildPacket(
+      [
+        { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+        { ...createDefaultIPv4(), srcIp: '172.16.0.1', dstIp: '172.16.0.2' },
+        createDefaultIPv4(),
+        createDefaultICMP(),
+      ],
+      encodeUtf8('deep'),
+    );
+    expect(nestedBuilt.ok).toBe(true);
+    if (nestedBuilt.ok) {
+      const decNested = decodePacket(nestedBuilt.bytes, 'ipv4');
+      expect(decNested.ok).toBe(true);
+      if (decNested.ok) {
+        expect(decNested.value.notes).toEqual([]);
+        expect(decNested.value.layers.map((l) => l.type)).toEqual(['ipv4', 'ipv4', 'ipv4', 'icmp']);
+        const rebuiltNested = buildPacket(decNested.value.layers, decNested.value.payload);
+        expect(rebuiltNested.ok && rebuiltNested.bytes).toEqual(nestedBuilt.bytes);
+      }
+    }
+
+    // 3) Truncated inner IPv4 (< 20B) and inner IPv4 with options (IHL=6) stay in Payload with notes
+    const truncInner = buildPacket(
+      [{ ...createDefaultIPv4(), protocol: manualValue(4) }],
+      new Uint8Array(10),
+    );
+    expect(truncInner.ok).toBe(true);
+    if (truncInner.ok) {
+      const dec = decodePacket(truncInner.bytes, 'ipv4');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv4']);
+        expect(dec.value.notes.some((n) => n.includes('Protocol 4 is truncated'))).toBe(true);
+        const r = buildPacket(dec.value.layers, dec.value.payload);
+        expect(r.ok && r.bytes).toEqual(truncInner.bytes);
+      }
+    }
+
+    const innerWithOptions = new Uint8Array(24);
+    innerWithOptions[0] = 0x46; // Version=4, IHL=6
+    const optInner = buildPacket(
+      [{ ...createDefaultIPv4(), protocol: manualValue(4) }],
+      innerWithOptions,
+    );
+    expect(optInner.ok).toBe(true);
+    if (optInner.ok) {
+      const dec = decodePacket(optInner.bytes, 'ipv4');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv4']);
+        expect(dec.value.notes.some((n) => n.includes('Inner IPv4 header') && n.includes('IHL=6'))).toBe(true);
+        const r = buildPacket(dec.value.layers, dec.value.payload);
+        expect(r.ok && r.bytes).toEqual(optInner.bytes);
+      }
+    }
+
+    // 4) Inner IPv4 Total Length < outer IPv4 payload length keeps inner + trailing bytes in Payload for exact round-trip
+    const innerUdpBuilt = buildPacket(
+      [createDefaultIPv4(), createDefaultUDP()],
+      new Uint8Array([0xaa, 0xbb]),
+    );
+    expect(innerUdpBuilt.ok).toBe(true);
+    if (innerUdpBuilt.ok) {
+      const outerPayloadWithTrailer = new Uint8Array(innerUdpBuilt.bytes.length + 4);
+      outerPayloadWithTrailer.set(innerUdpBuilt.bytes, 0);
+      outerPayloadWithTrailer.set([0xde, 0xad, 0xbe, 0xef], innerUdpBuilt.bytes.length);
+      const outerBuilt = buildPacket(
+        [{ ...createDefaultIPv4(), protocol: manualValue(4) }],
+        outerPayloadWithTrailer,
+      );
+      expect(outerBuilt.ok).toBe(true);
+      if (outerBuilt.ok) {
+        const dec = decodePacket(outerBuilt.bytes, 'ipv4');
+        expect(dec.ok).toBe(true);
+        if (dec.ok) {
+          expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv4']);
+          expect(dec.value.layers[0].type === 'ipv4' && dec.value.layers[0].protocol).toEqual(
+            manualValue(4),
+          );
+          expect(dec.value.payload).toEqual(outerPayloadWithTrailer);
+          expect(
+            dec.value.notes.some((n) => n.includes('Inner IPv4 Total Length')),
+          ).toBe(true);
+          const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+          expect(rebuilt.ok && rebuilt.bytes).toEqual(outerBuilt.bytes);
+        }
+      }
+    }
+
+    // 5) Ethernet -> Outer IPv4 -> Inner IPv4 -> TCP(179) -> BGP OPEN round-trips byte-for-byte
+    const ipipBgpBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+        createDefaultIPv4(),
+        { ...createDefaultTCP(), dstPort: 179 },
+        createDefaultBGP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(ipipBgpBuilt.ok).toBe(true);
+    if (ipipBgpBuilt.ok) {
+      const dec = decodePacket(ipipBgpBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv4',
+          'ipv4',
+          'tcp',
+          'bgp',
+        ]);
+        const tcpLayer = dec.value.layers[3];
+        expect(tcpLayer.type === 'tcp' && tcpLayer.checksum).toEqual(autoValue());
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(ipipBgpBuilt.bytes);
+      }
+    }
+
+    // 6) Pathological nesting (> 16 total IPv4 layers) stops cleanly with a note and round-trips losslessly
+    const deepLayers: Layer[] = Array.from({ length: 18 }, () => createDefaultIPv4());
+    const deepBuilt = buildPacket(deepLayers, new Uint8Array(0));
+    expect(deepBuilt.ok).toBe(true);
+    if (deepBuilt.ok) {
+      const dec = decodePacket(deepBuilt.bytes, 'ipv4');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers).toHaveLength(16); // MAX_IPV4_LAYERS = 16 decoded; remaining 2 in Payload
+        expect(dec.value.payload).toHaveLength(40);
+        expect(dec.value.notes.some((n) => n.includes('IP-in-IP layer limit'))).toBe(true);
+        const r = buildPacket(dec.value.layers, dec.value.payload);
+        expect(r.ok && r.bytes).toEqual(deepBuilt.bytes);
       }
     }
   });

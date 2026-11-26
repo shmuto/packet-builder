@@ -51,7 +51,7 @@ function isValidTransition(lower: LayerType, upper: LayerType): boolean {
     return upper === 'ipv4' || upper === 'arp';
   }
   if (lower === 'ipv4') {
-    return upper === 'icmp' || upper === 'udp' || upper === 'tcp';
+    return upper === 'ipv4' || upper === 'icmp' || upper === 'udp' || upper === 'tcp';
   }
   if (lower === 'tcp') {
     return upper === 'bgp';
@@ -60,7 +60,7 @@ function isValidTransition(lower: LayerType, upper: LayerType): boolean {
 }
 
 /**
- * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> ICMP/UDP/TCP -> BGP）になっているか検証する。
+ * レイヤーの並び順が対応する階層構造（Ethernet -> IPv4/ARP -> IPv4(IP-in-IP)/ICMP/UDP/TCP -> BGP）になっているか検証する。
  */
 export function validateLayerOrder(layers: readonly Layer[]): PacketError[] {
   const errors: PacketError[] = [];

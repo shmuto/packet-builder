@@ -16,8 +16,9 @@ export const IPV4_VERSION = 4;
 export const IPV4_IHL = 5;
 export const IPV4_MAX_TOTAL_LENGTH = 0xffff;
 
-/** IPv4 protocol numbers (IANA / RFC 792, 9293, 768) */
+/** IPv4 protocol numbers (IANA / RFC 792, 2003, 9293, 768) */
 export const IP_PROTOCOL_ICMP = 1;
+export const IP_PROTOCOL_IPIP = 4;
 export const IP_PROTOCOL_TCP = 6;
 export const IP_PROTOCOL_UDP = 17;
 
@@ -46,6 +47,8 @@ function protocolNumberForUpperLayer(upperLayerType: LayerType | null): number |
   switch (upperLayerType) {
     case 'icmp':
       return IP_PROTOCOL_ICMP;
+    case 'ipv4':
+      return IP_PROTOCOL_IPIP;
     case 'tcp':
       return IP_PROTOCOL_TCP;
     case 'udp':
@@ -146,7 +149,7 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'protocol',
-      message: 'No ICMP / TCP / UDP upper layer found; defaulting Protocol to 0.',
+      message: 'No ICMP / IPv4 / TCP / UDP upper layer found; defaulting Protocol to 0.',
     });
   }
 
