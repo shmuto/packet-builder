@@ -6,13 +6,13 @@ import { encodeTCP } from '../layers/tcp';
 import {
   autoValue,
   type EthernetLayer,
+  type IPPseudoContext,
   type IPv4Layer,
   type IPv6Layer,
   type TCPFlags,
   type TCPLayer,
   type TCPOption,
 } from '../layers/types';
-import type { IPPseudoContext } from '../layers/udp';
 import type { RouterConfig, RouterId, SessionType } from './types';
 
 export const BGP_TCP_PORT = 179;
@@ -171,7 +171,6 @@ export function buildTcpFrame({
       headerChecksum: autoValue(),
       srcIp: sender.peeringAddress,
       dstIp: receiver.peeringAddress,
-      options: [],
     };
     const ipv4Res = encodeIPv4(ipv4Layer, {
       layerIndex: 1,
@@ -215,7 +214,6 @@ export function buildTcpFrame({
   const ethRes = encodeEthernet(ethLayer, {
     layerIndex: 0,
     upperLayerType: nextLayerType,
-    upperNextLayerType: 'tcp',
     upperBytesLength: ipBytes.length + transportBytes.length,
   });
   if (!ethRes.ok) {

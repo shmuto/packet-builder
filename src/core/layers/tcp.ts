@@ -1,8 +1,8 @@
 import { concatBytes, parseHexBytes, writeUint16BE, writeUint32BE } from '../bytes';
 import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum';
 import { IP_PROTOCOL_TCP } from './ipv4';
-import type { IPPseudoContext } from './udp';
 import type {
+  IPPseudoContext,
   LayerEncodeResult,
   PacketError,
   PacketWarning,

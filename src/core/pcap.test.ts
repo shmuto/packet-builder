@@ -10,21 +10,58 @@ import {
   PCAP_PACKET_HEADER_LENGTH,
   selectPcapLinkType,
 } from './pcap';
-import {
-  createDefaultEthernet,
-  createDefaultIPv4,
-  createDefaultIPv6,
-  createDefaultUDP,
-} from './presets';
+import { autoValue, type Layer } from './layers/types';
+
+const SAMPLE_ETH: Layer = {
+  type: 'ethernet',
+  dstMac: '00:00:5e:00:53:02',
+  srcMac: '00:00:5e:00:53:01',
+  etherType: autoValue(),
+};
+const SAMPLE_IPV4: Layer = {
+  type: 'ipv4',
+  ihl: autoValue(),
+  tos: 0,
+  totalLength: autoValue(),
+  identification: 1,
+  flags: { reserved: false, df: true, mf: false },
+  fragmentOffset: 0,
+  ttl: 64,
+  protocol: autoValue(),
+  headerChecksum: autoValue(),
+  srcIp: '192.0.2.1',
+  dstIp: '192.0.2.2',
+};
+const SAMPLE_IPV6: Layer = {
+  type: 'ipv6',
+  trafficClass: 0,
+  flowLabel: 0,
+  payloadLength: autoValue(),
+  nextHeader: autoValue(),
+  hopLimit: 64,
+  srcIp: '2001:db8::1',
+  dstIp: '2001:db8::2',
+};
+const SAMPLE_TCP: Layer = {
+  type: 'tcp',
+  srcPort: 49152,
+  dstPort: 179,
+  seqNumber: 1,
+  ackNumber: 0,
+  dataOffset: autoValue(),
+  flags: { cwr: false, ece: false, urg: false, ack: false, psh: false, rst: false, syn: true, fin: false },
+  windowSize: 65535,
+  checksum: autoValue(),
+  urgentPointer: 0,
+  options: [],
+};
 
 describe('selectPcapLinkType', () => {
   it('selects link type based on the outermost layer', () => {
-    expect(selectPcapLinkType([createDefaultEthernet(), createDefaultIPv4()])).toBe(
-      LINKTYPE_ETHERNET,
-    );
-    expect(selectPcapLinkType([createDefaultIPv4(), createDefaultUDP()])).toBe(LINKTYPE_RAW);
-    expect(selectPcapLinkType([createDefaultIPv6(), createDefaultUDP()])).toBe(LINKTYPE_RAW);
-    expect(selectPcapLinkType([createDefaultUDP()])).toBe(LINKTYPE_USER0);
+    expect(selectPcapLinkType([SAMPLE_ETH, SAMPLE_IPV4])).toBe(LINKTYPE_ETHERNET);
+    expect(selectPcapLinkType([SAMPLE_IPV4, SAMPLE_TCP])).toBe(LINKTYPE_RAW);
+    expect(selectPcapLinkType([SAMPLE_IPV6, SAMPLE_TCP])).toBe(LINKTYPE_RAW);
+    expect(selectPcapLinkType([SAMPLE_TCP])).toBe(LINKTYPE_USER0);
     expect(selectPcapLinkType([])).toBe(LINKTYPE_USER0);
   });
 });
