@@ -52,5 +52,5 @@ PW_CHANNEL=chrome npm run e2e   # Run Playwright E2E tests using system Chrome
 | Workflow | Purpose |
 | --- | --- |
 | `.github/workflows/ci.yml` | Runs `check`, `e2e` (including `/legacy/`), and `wireshark-oracle` (`tshark`) on PRs and pushes to `main` |
-| `.github/workflows/pages.yml` | Builds the BGP app to `dist/` and commit `ffbcf65` to `dist/legacy/`, then deploys to GitHub Pages |
+| `.github/workflows/pages.yml` | Builds the BGP app to `dist/`, builds the legacy builder from commit `ffbcf65` into `dist/legacy/`, then deploys to GitHub Pages |
 | `.github/workflows/claude-review.yml` | Runs automated PR code reviews |

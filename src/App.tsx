@@ -339,8 +339,6 @@ export function App() {
           >
             Report an issue
           </a>
-          <span aria-hidden="true">·</span>
-          <a href="./legacy/">Legacy Packet Builder</a>
         </span>
       </footer>
     </div>
