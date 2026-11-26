@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { FieldDoc } from '../core/fieldDocs';
 import { formatHex, parseUnsignedIntInput } from '../core/inspector';
 import { autoValue, manualValue, type AutoOrManual } from '../core/layers/types';
 
@@ -6,6 +7,7 @@ interface BaseFieldProps {
   readonly id: string;
   readonly label: string;
   readonly hint?: string;
+  readonly doc?: FieldDoc;
   readonly error?: string;
   readonly warning?: string;
   readonly isHighlighted?: boolean;
@@ -17,6 +19,69 @@ function getFeedbackId(id: string, error?: string, warning?: string): string | u
   if (error) return `${id}-error`;
   if (warning) return `${id}-warning`;
   return undefined;
+}
+
+function joinDescribedBy(...ids: readonly (string | undefined)[]): string | undefined {
+  const present = ids.filter((id): id is string => Boolean(id));
+  return present.length > 0 ? present.join(' ') : undefined;
+}
+
+export interface FieldInfoButtonProps {
+  readonly label: string;
+  readonly docId: string;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onClose: () => void;
+  readonly onFocus?: () => void;
+  readonly onBlur?: () => void;
+}
+
+/** Keyboard- and touch-accessible disclosure toggle that reveals a field's RFC explanation. */
+export function FieldInfoButton({
+  label,
+  docId,
+  open,
+  onToggle,
+  onClose,
+  onFocus,
+  onBlur,
+}: FieldInfoButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`field-info-btn${open ? ' is-open' : ''}`}
+      aria-label={`Explain ${label}`}
+      aria-expanded={open}
+      aria-controls={docId}
+      title={`Explain ${label}`}
+      onClick={onToggle}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && open) {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      i
+    </button>
+  );
+}
+
+export interface FieldDocBoxProps {
+  readonly id: string;
+  readonly doc: FieldDoc;
+}
+
+/** Inline explanation card showing plain-English field summary and RFC/IEEE section reference. */
+export function FieldDocBox({ id, doc }: FieldDocBoxProps) {
+  return (
+    <div id={id} className="field-doc-box">
+      <p className="field-doc-summary">{doc.summary}</p>
+      <span className="field-doc-ref mono">{doc.reference}</span>
+    </div>
+  );
 }
 
 function FieldFeedback({
@@ -46,36 +111,76 @@ function FieldFeedback({
 }
 
 export interface FixedFieldChipProps {
+  readonly id?: string;
   readonly label: string;
   readonly value: string;
   readonly bits: string;
+  readonly doc?: FieldDoc;
   readonly isHighlighted?: boolean;
   readonly onHoverStart?: () => void;
   readonly onHoverEnd?: () => void;
 }
 
-/** Read-only fixed header field chip (e.g., IPv4 Version=4, IHL=5, TCP Reserved=0) with hover sync */
+/** Read-only fixed header field chip (e.g., IPv4 Version=4, IHL=5, TCP Reserved=0) with hover sync and tap/keyboard doc toggle. */
 export function FixedFieldChip({
+  id,
   label,
   value,
   bits,
+  doc,
   isHighlighted = false,
   onHoverStart,
   onHoverEnd,
 }: FixedFieldChipProps) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const docId = id ? `${id}-doc` : undefined;
+
+  if (!doc) {
+    return (
+      <span
+        tabIndex={0}
+        className={`fixed-field-chip mono${isHighlighted ? ' is-highlighted' : ''}`}
+        onMouseEnter={onHoverStart}
+        onMouseLeave={onHoverEnd}
+        onFocus={onHoverStart}
+        onBlur={onHoverEnd}
+      >
+        <span className="fixed-field-name">{label}</span>
+        <span className="fixed-field-val">{value}</span>
+        <span className="fixed-field-bits">{bits}</span>
+      </span>
+    );
+  }
+
   return (
-    <span
-      tabIndex={0}
-      className={`fixed-field-chip mono${isHighlighted ? ' is-highlighted' : ''}`}
-      onMouseEnter={onHoverStart}
-      onMouseLeave={onHoverEnd}
-      onFocus={onHoverStart}
-      onBlur={onHoverEnd}
-    >
-      <span className="fixed-field-name">{label}</span>
-      <span className="fixed-field-val">{value}</span>
-      <span className="fixed-field-bits">{bits}</span>
-    </span>
+    <div className={`fixed-field-item${infoOpen ? ' is-expanded' : ''}`}>
+      <button
+        type="button"
+        className={`fixed-field-chip is-interactive mono${isHighlighted ? ' is-highlighted' : ''}${infoOpen ? ' is-open' : ''}`}
+        aria-expanded={infoOpen}
+        aria-controls={docId}
+        aria-describedby={infoOpen ? docId : undefined}
+        onClick={() => setInfoOpen((prev) => !prev)}
+        onMouseEnter={onHoverStart}
+        onMouseLeave={onHoverEnd}
+        onFocus={onHoverStart}
+        onBlur={onHoverEnd}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && infoOpen) {
+            e.stopPropagation();
+            setInfoOpen(false);
+          }
+        }}
+      >
+        <span className="fixed-field-name">{label}</span>
+        <span className="fixed-field-val">{value}</span>
+        <span className="fixed-field-bits">{bits}</span>
+        <span className="fixed-field-info-mark" aria-hidden="true">
+          i
+        </span>
+      </button>
+      {infoOpen && docId && <FieldDocBox id={docId} doc={doc} />}
+    </div>
   );
 }
 
@@ -89,6 +194,7 @@ export function TextField({
   id,
   label,
   hint,
+  doc,
   error,
   warning,
   isHighlighted = false,
@@ -98,7 +204,9 @@ export function TextField({
   placeholder,
   onChange,
 }: TextFieldProps) {
-  const feedbackId = getFeedbackId(id, error, warning);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const docId = `${id}-doc`;
+  const describedBy = joinDescribedBy(getFeedbackId(id, error, warning), doc && infoOpen ? docId : undefined);
 
   return (
     <div
@@ -107,9 +215,22 @@ export function TextField({
       onMouseLeave={onHoverEnd}
     >
       <div className="field-label-row">
-        <label className="field-label" htmlFor={id}>
-          {label}
-        </label>
+        <div className="field-label-main">
+          <label className="field-label" htmlFor={id}>
+            {label}
+          </label>
+          {doc && (
+            <FieldInfoButton
+              label={label}
+              docId={docId}
+              open={infoOpen}
+              onToggle={() => setInfoOpen((prev) => !prev)}
+              onClose={() => setInfoOpen(false)}
+              onFocus={onHoverStart}
+              onBlur={onHoverEnd}
+            />
+          )}
+        </div>
         {hint && <span className="field-hint">{hint}</span>}
       </div>
       <input
@@ -119,11 +240,12 @@ export function TextField({
         value={value}
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}
-        aria-describedby={feedbackId}
+        aria-describedby={describedBy}
         onFocus={onHoverStart}
         onBlur={onHoverEnd}
         onChange={(e) => onChange(e.target.value)}
       />
+      {doc && infoOpen && <FieldDocBox id={docId} doc={doc} />}
       <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
@@ -148,6 +270,7 @@ export function NumberField({
   id,
   label,
   hint,
+  doc,
   error,
   warning,
   isHighlighted = false,
@@ -160,6 +283,7 @@ export function NumberField({
   onChange,
 }: NumberFieldProps) {
   const [draft, setDraft] = useState<string>(() => formatNumberDraft(value, hexDigits));
+  const [infoOpen, setInfoOpen] = useState(false);
 
   useEffect(() => {
     const parsedDraft = parseUnsignedIntInput(draft, allowHex);
@@ -171,7 +295,8 @@ export function NumberField({
     }
   }, [value, allowHex, hexDigits]);
 
-  const feedbackId = getFeedbackId(id, error, warning);
+  const docId = `${id}-doc`;
+  const describedBy = joinDescribedBy(getFeedbackId(id, error, warning), doc && infoOpen ? docId : undefined);
 
   return (
     <div
@@ -180,9 +305,22 @@ export function NumberField({
       onMouseLeave={onHoverEnd}
     >
       <div className="field-label-row">
-        <label className="field-label" htmlFor={id}>
-          {label}
-        </label>
+        <div className="field-label-main">
+          <label className="field-label" htmlFor={id}>
+            {label}
+          </label>
+          {doc && (
+            <FieldInfoButton
+              label={label}
+              docId={docId}
+              open={infoOpen}
+              onToggle={() => setInfoOpen((prev) => !prev)}
+              onClose={() => setInfoOpen(false)}
+              onFocus={onHoverStart}
+              onBlur={onHoverEnd}
+            />
+          )}
+        </div>
         {hint && <span className="field-hint">{hint}</span>}
       </div>
       <input
@@ -193,7 +331,7 @@ export function NumberField({
         value={draft}
         placeholder={placeholder}
         aria-invalid={error ? true : undefined}
-        aria-describedby={feedbackId}
+        aria-describedby={describedBy}
         onFocus={onHoverStart}
         onBlur={onHoverEnd}
         onChange={(e) => {
@@ -202,6 +340,7 @@ export function NumberField({
           onChange(parseUnsignedIntInput(nextRaw, allowHex));
         }}
       />
+      {doc && infoOpen && <FieldDocBox id={docId} doc={doc} />}
       <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
@@ -219,6 +358,7 @@ export function AutoManualField({
   id,
   label,
   hint,
+  doc,
   error,
   warning,
   isHighlighted = false,
@@ -233,6 +373,7 @@ export function AutoManualField({
   const [draft, setDraft] = useState<string>(() =>
     value.mode === 'manual' ? formatNumberDraft(value.value, hexDigits) : '',
   );
+  const [infoOpen, setInfoOpen] = useState(false);
 
   useEffect(() => {
     if (value.mode !== 'manual') {
@@ -245,7 +386,8 @@ export function AutoManualField({
   }, [value, allowHex, hexDigits]);
 
   const isAuto = value.mode === 'auto';
-  const feedbackId = getFeedbackId(id, error, warning);
+  const docId = `${id}-doc`;
+  const describedBy = joinDescribedBy(getFeedbackId(id, error, warning), doc && infoOpen ? docId : undefined);
   const autoLabelId = `${id}-label`;
 
   const autoDisplayText =
@@ -272,15 +414,28 @@ export function AutoManualField({
       onMouseLeave={onHoverEnd}
     >
       <div className="field-label-row">
-        {isAuto ? (
-          <span id={autoLabelId} className="field-label">
-            {label}
-          </span>
-        ) : (
-          <label className="field-label" htmlFor={id}>
-            {label}
-          </label>
-        )}
+        <div className="field-label-main">
+          {isAuto ? (
+            <span id={autoLabelId} className="field-label">
+              {label}
+            </span>
+          ) : (
+            <label className="field-label" htmlFor={id}>
+              {label}
+            </label>
+          )}
+          {doc && (
+            <FieldInfoButton
+              label={label}
+              docId={docId}
+              open={infoOpen}
+              onToggle={() => setInfoOpen((prev) => !prev)}
+              onClose={() => setInfoOpen(false)}
+              onFocus={onHoverStart}
+              onBlur={onHoverEnd}
+            />
+          )}
+        </div>
         <div className="mode-toggle" role="group" aria-label={`${label} mode`}>
           <button
             type="button"
@@ -306,7 +461,7 @@ export function AutoManualField({
           className={`field-auto-preview mono${error ? ' is-error' : warning ? ' is-warning' : ''}`}
           role="group"
           aria-labelledby={autoLabelId}
-          aria-describedby={feedbackId}
+          aria-describedby={describedBy}
         >
           <span className="auto-tag">AUTO</span>
           <span className="auto-val">{autoDisplayText}</span>
@@ -321,7 +476,7 @@ export function AutoManualField({
           value={draft}
           placeholder={hint}
           aria-invalid={error ? true : undefined}
-          aria-describedby={feedbackId}
+          aria-describedby={describedBy}
           onFocus={onHoverStart}
           onBlur={onHoverEnd}
           onChange={(e) => {
@@ -332,6 +487,7 @@ export function AutoManualField({
         />
       )}
 
+      {doc && infoOpen && <FieldDocBox id={docId} doc={doc} />}
       <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
@@ -350,6 +506,7 @@ export function AutoManualTextField({
   id,
   label,
   hint,
+  doc,
   error,
   warning,
   isHighlighted = false,
@@ -362,8 +519,10 @@ export function AutoManualTextField({
   fullWidth = false,
   onChange,
 }: AutoManualTextFieldProps) {
+  const [infoOpen, setInfoOpen] = useState(false);
   const isAuto = value.mode === 'auto';
-  const feedbackId = getFeedbackId(id, error, warning);
+  const docId = `${id}-doc`;
+  const describedBy = joinDescribedBy(getFeedbackId(id, error, warning), doc && infoOpen ? docId : undefined);
   const autoLabelId = `${id}-label`;
 
   const handleSwitchMode = (mode: 'auto' | 'manual') => {
@@ -381,15 +540,28 @@ export function AutoManualTextField({
       onMouseLeave={onHoverEnd}
     >
       <div className="field-label-row">
-        {isAuto ? (
-          <span id={autoLabelId} className="field-label">
-            {label}
-          </span>
-        ) : (
-          <label className="field-label" htmlFor={id}>
-            {label}
-          </label>
-        )}
+        <div className="field-label-main">
+          {isAuto ? (
+            <span id={autoLabelId} className="field-label">
+              {label}
+            </span>
+          ) : (
+            <label className="field-label" htmlFor={id}>
+              {label}
+            </label>
+          )}
+          {doc && (
+            <FieldInfoButton
+              label={label}
+              docId={docId}
+              open={infoOpen}
+              onToggle={() => setInfoOpen((prev) => !prev)}
+              onClose={() => setInfoOpen(false)}
+              onFocus={onHoverStart}
+              onBlur={onHoverEnd}
+            />
+          )}
+        </div>
         <div className="mode-toggle" role="group" aria-label={`${label} mode`}>
           <button
             type="button"
@@ -415,7 +587,7 @@ export function AutoManualTextField({
           className={`field-auto-preview mono${error ? ' is-error' : warning ? ' is-warning' : ''}`}
           role="group"
           aria-labelledby={autoLabelId}
-          aria-describedby={feedbackId}
+          aria-describedby={describedBy}
         >
           <span className="auto-tag">AUTO</span>
           <span className="auto-val">{autoPreviewText}</span>
@@ -429,13 +601,14 @@ export function AutoManualTextField({
           value={value.value}
           placeholder={placeholder ?? hint}
           aria-invalid={error ? true : undefined}
-          aria-describedby={feedbackId}
+          aria-describedby={describedBy}
           onFocus={onHoverStart}
           onBlur={onHoverEnd}
           onChange={(e) => onChange(manualValue(e.target.value))}
         />
       )}
 
+      {doc && infoOpen && <FieldDocBox id={docId} doc={doc} />}
       <FieldFeedback id={id} error={error} warning={warning} />
     </div>
   );
