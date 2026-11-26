@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { FieldDoc } from '../core/fieldDocs';
 import { formatHex, parseUnsignedIntInput } from '../core/inspector';
 import { autoValue, manualValue, type AutoOrManual } from '../core/layers/types';
@@ -133,7 +133,8 @@ export function FixedFieldChip({
   onHoverEnd,
 }: FixedFieldChipProps) {
   const [infoOpen, setInfoOpen] = useState(false);
-  const docId = id ? `${id}-doc` : undefined;
+  const generatedId = useId();
+  const docId = `${id ?? generatedId}-doc`;
 
   if (!doc) {
     return (
@@ -179,7 +180,7 @@ export function FixedFieldChip({
           i
         </span>
       </button>
-      {infoOpen && docId && <FieldDocBox id={docId} doc={doc} />}
+      {infoOpen && <FieldDocBox id={docId} doc={doc} />}
     </div>
   );
 }

@@ -85,6 +85,8 @@ export function LayerCard({
   const fieldWarning = (fieldId: string) =>
     warnings.find((w) => w.fieldId === fieldId)?.message;
   const fieldDoc = (fieldId: string) => getFieldDoc(layer.type, fieldId);
+  const flagsDoc = fieldDoc('flags');
+  const bgpTypeDoc = fieldDoc('bgpType');
 
   const isCustomDocOpen = (fieldId: string) => Boolean(openCustomDocs[fieldId]);
   const toggleCustomDoc = (fieldId: string) =>
@@ -492,7 +494,7 @@ export function LayerCard({
                 <div className="field-label-row">
                   <div className="field-label-main">
                     <span className="field-label">Flags</span>
-                    {fieldDoc('flags') && (
+                    {flagsDoc && (
                       <FieldInfoButton
                         label="Flags"
                         docId={`${id}-flags-doc`}
@@ -558,8 +560,8 @@ export function LayerCard({
                     <span>MF (More Fragments)</span>
                   </label>
                 </div>
-                {fieldDoc('flags') && isCustomDocOpen('flags') && (
-                  <FieldDocBox id={`${id}-flags-doc`} doc={fieldDoc('flags')!} />
+                {flagsDoc && isCustomDocOpen('flags') && (
+                  <FieldDocBox id={`${id}-flags-doc`} doc={flagsDoc} />
                 )}
                 {fieldWarning('flags') && (
                   <p className="field-msg is-warning">{fieldWarning('flags')}</p>
@@ -836,7 +838,7 @@ export function LayerCard({
                 <div className="field-label-row">
                   <div className="field-label-main">
                     <span className="field-label">Control Bits</span>
-                    {fieldDoc('flags') && (
+                    {flagsDoc && (
                       <FieldInfoButton
                         label="Control Bits"
                         docId={`${id}-flags-doc`}
@@ -877,8 +879,8 @@ export function LayerCard({
                     </label>
                   ))}
                 </div>
-                {fieldDoc('flags') && isCustomDocOpen('flags') && (
-                  <FieldDocBox id={`${id}-flags-doc`} doc={fieldDoc('flags')!} />
+                {flagsDoc && isCustomDocOpen('flags') && (
+                  <FieldDocBox id={`${id}-flags-doc`} doc={flagsDoc} />
                 )}
               </div>
 
@@ -938,7 +940,7 @@ export function LayerCard({
                 <div className="field-label-row">
                   <div className="field-label-main">
                     <span className="field-label">Message Type</span>
-                    {fieldDoc('bgpType') && (
+                    {bgpTypeDoc && (
                       <FieldInfoButton
                         label="Message Type"
                         docId={`${id}-bgpType-doc`}
@@ -972,8 +974,8 @@ export function LayerCard({
                     </button>
                   ))}
                 </div>
-                {fieldDoc('bgpType') && isCustomDocOpen('bgpType') && (
-                  <FieldDocBox id={`${id}-bgpType-doc`} doc={fieldDoc('bgpType')!} />
+                {bgpTypeDoc && isCustomDocOpen('bgpType') && (
+                  <FieldDocBox id={`${id}-bgpType-doc`} doc={bgpTypeDoc} />
                 )}
               </div>
 

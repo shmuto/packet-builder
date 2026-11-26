@@ -93,7 +93,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     tos: {
       summary:
         '8-bit quality-of-service field now split into a 6-bit DSCP priority value and 2-bit ECN congestion indicator. Defaults to 0x00 for best-effort traffic.',
-      reference: 'RFC 791 §3.1 / RFC 2474 §3',
+      reference: 'RFC 791 §3.1 / RFC 2474 §3 / RFC 3168 §5',
     },
     totalLength: {
       summary:
@@ -270,7 +270,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     myAs: {
       summary:
         '16-bit Autonomous System Number (ASN) of the BGP speaker sending the OPEN message (use 23456 when carrying a 4-byte ASN in capabilities).',
-      reference: 'RFC 4271 §4.2',
+      reference: 'RFC 4271 §4.2 / RFC 6793 §2',
     },
     holdTime: {
       summary:
@@ -300,7 +300,7 @@ export const FIELD_DOCS: Readonly<Record<LayerType, Readonly<Record<string, Fiel
     errorCode: {
       summary:
         '1-byte category explaining why a BGP session is being closed (1-6 in RFC 4271, such as 2 = OPEN Message Error or 4 = Hold Timer Expired; 7 = Route Refresh Error).',
-      reference: 'RFC 4271 §4.5',
+      reference: 'RFC 4271 §4.5 / RFC 7313 §5',
     },
     errorSubcode: {
       summary:
