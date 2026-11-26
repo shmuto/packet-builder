@@ -28,7 +28,7 @@ export type IPPseudoContext =
       readonly srcIp: Uint8Array;
       readonly dstIp: Uint8Array;
     }
-  | { readonly status: 'invalid' }
+  | { readonly status: 'invalid'; readonly version?: 4 | 6 }
   | { readonly status: 'absent' };
 
 export interface EncodeUDPContext {

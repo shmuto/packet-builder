@@ -93,4 +93,24 @@ describe('presets', () => {
       new Uint8Array([0x60, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x11, 0x40]),
     );
   });
+
+  it('IPv6 Ping preset builds a 66-byte RFC 4443 frame with Next Header 58 and zero warnings', () => {
+    const pingV6 = createPresets().find((p) => p.id === 'icmpv6-echo');
+    expect(pingV6).toBeDefined();
+    if (!pingV6) return;
+
+    const result = buildPacket(pingV6.layers, pingV6.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Ethernet) + 40(IPv6) + 8(ICMPv6) + 4("ping") = 66 bytes
+    expect(result.bytes.length).toBe(66);
+    expect(result.warnings).toHaveLength(0);
+    // IPv6 Next Header = 58 (0x3a, ICMPv6) at offset 20
+    expect(result.bytes[20]).toBe(58);
+    // ICMPv6 Type=128 (0x80), Code=0, Checksum=0x4571, ID=1, Seq=1 at offset 54..61
+    expect(result.bytes.slice(54, 62)).toEqual(
+      new Uint8Array([0x80, 0x00, 0x45, 0x71, 0x00, 0x01, 0x00, 0x01]),
+    );
+  });
 });

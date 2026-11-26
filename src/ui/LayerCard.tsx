@@ -6,9 +6,17 @@ import {
   type HighlightTarget,
 } from '../core/inspector';
 import { BGP_DEFAULT_MARKER_HEX } from '../core/layers/bgp';
+import {
+  getICMPv6RawFieldLabel,
+  ICMPV6_TYPE_ECHO_REPLY,
+  ICMPV6_TYPE_ECHO_REQUEST,
+  ICMPV6_TYPE_PACKET_TOO_BIG,
+  ICMPV6_TYPE_PARAMETER_PROBLEM,
+} from '../core/layers/icmpv6';
 import type {
   BGPMessageType,
   FieldSpan,
+  ICMPv6Layer,
   Layer,
   PacketError,
   PacketWarning,
@@ -718,7 +726,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-nextHeader`}
                 label="Next Header"
-                hint="6=TCP / 17=UDP / 4=IPv4 / 41=IPv6"
+                hint="6=TCP / 17=UDP / 58=ICMPv6 / 4=IPv4 / 41=IPv6"
                 doc={fieldDoc('nextHeader')}
                 value={layer.nextHeader}
                 resolvedAutoValue={resolvedAutoValues?.nextHeader}
@@ -804,6 +812,247 @@ export function LayerCard({
               />
             </div>
           )}
+
+          {layer.type === 'icmpv6' && (() => {
+            const toEcho = (current: ICMPv6Layer): ICMPv6Layer['rest'] => {
+              if (current.rest.kind === 'echo') return current.rest;
+              const raw = Number.isFinite(current.rest.value) ? current.rest.value >>> 0 : 0;
+              return { kind: 'echo', identifier: (raw >>> 16) & 0xffff, sequence: raw & 0xffff };
+            };
+            const toRaw = (current: ICMPv6Layer): ICMPv6Layer['rest'] => {
+              if (current.rest.kind === 'raw') return current.rest;
+              const hi = Number.isFinite(current.rest.identifier)
+                ? current.rest.identifier & 0xffff
+                : 0;
+              const lo = Number.isFinite(current.rest.sequence)
+                ? current.rest.sequence & 0xffff
+                : 0;
+              return { kind: 'raw', value: ((hi << 16) | lo) >>> 0 };
+            };
+            const rawFieldLabel = getICMPv6RawFieldLabel(layer.icmpType);
+
+            return (
+              <div className="field-grid">
+                <div className="field field-span-full">
+                  <div className="field-label-row">
+                    <span className="field-label">Quick Message Type</span>
+                    <span className="field-hint">RFC 4443</span>
+                  </div>
+                  <div className="flag-chip-row" role="group" aria-label="ICMPv6 Quick Message Type">
+                    <button
+                      type="button"
+                      className={`preset-btn${layer.icmpType === ICMPV6_TYPE_ECHO_REQUEST && layer.rest.kind === 'echo' ? ' is-active' : ''}`}
+                      onClick={() =>
+                        onChange({
+                          ...layer,
+                          icmpType: ICMPV6_TYPE_ECHO_REQUEST,
+                          code: 0,
+                          rest:
+                            layer.rest.kind === 'echo'
+                              ? layer.rest
+                              : { kind: 'echo', identifier: 1, sequence: 1 },
+                        })
+                      }
+                    >
+                      128: Echo Req
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn${layer.icmpType === ICMPV6_TYPE_ECHO_REPLY && layer.rest.kind === 'echo' ? ' is-active' : ''}`}
+                      onClick={() =>
+                        onChange({
+                          ...layer,
+                          icmpType: ICMPV6_TYPE_ECHO_REPLY,
+                          code: 0,
+                          rest:
+                            layer.rest.kind === 'echo'
+                              ? layer.rest
+                              : { kind: 'echo', identifier: 1, sequence: 1 },
+                        })
+                      }
+                    >
+                      129: Echo Reply
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn${layer.icmpType === ICMPV6_TYPE_PACKET_TOO_BIG && layer.rest.kind === 'raw' ? ' is-active' : ''}`}
+                      onClick={() =>
+                        onChange({
+                          ...layer,
+                          icmpType: ICMPV6_TYPE_PACKET_TOO_BIG,
+                          code: 0,
+                          rest: { kind: 'raw', value: 1280 },
+                        })
+                      }
+                    >
+                      2: Packet Too Big
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn${layer.icmpType === ICMPV6_TYPE_PARAMETER_PROBLEM && layer.rest.kind === 'raw' ? ' is-active' : ''}`}
+                      onClick={() =>
+                        onChange({
+                          ...layer,
+                          icmpType: ICMPV6_TYPE_PARAMETER_PROBLEM,
+                          code: 0,
+                          rest: { kind: 'raw', value: 0 },
+                        })
+                      }
+                    >
+                      4: Param Problem
+                    </button>
+                  </div>
+                </div>
+
+                <div className="field field-span-full">
+                  <div className="field-label-row">
+                    <span className="field-label">Header Format (Bytes 4-7)</span>
+                    <span className="field-hint">Echo (16b+16b) / Raw (32b)</span>
+                  </div>
+                  <div className="mode-toggle" role="group" aria-label="ICMPv6 body header format">
+                    <button
+                      type="button"
+                      className={`mode-btn${layer.rest.kind === 'echo' ? ' is-active' : ''}`}
+                      aria-pressed={layer.rest.kind === 'echo'}
+                      onClick={() => onChange({ ...layer, rest: toEcho(layer) })}
+                    >
+                      Echo (ID + Seq)
+                    </button>
+                    <button
+                      type="button"
+                      className={`mode-btn${layer.rest.kind === 'raw' ? ' is-active' : ''}`}
+                      aria-pressed={layer.rest.kind === 'raw'}
+                      onClick={() => onChange({ ...layer, rest: toRaw(layer) })}
+                    >
+                      Raw 32-bit ({rawFieldLabel})
+                    </button>
+                  </div>
+                </div>
+
+                <NumberField
+                  id={`${id}-icmpType`}
+                  label="Type"
+                  hint="128=Echo Req / 129=Reply / 2=PTB"
+                  doc={fieldDoc('icmpType')}
+                  value={layer.icmpType}
+                  error={fieldError('icmpType')}
+                  warning={fieldWarning('icmpType')}
+                  isHighlighted={isHighlighted('icmpType')}
+                  onHoverStart={hoverStart('icmpType')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(icmpType) => {
+                    if (Number.isNaN(icmpType)) {
+                      onChange({ ...layer, icmpType });
+                      return;
+                    }
+                    const isEchoType =
+                      icmpType === ICMPV6_TYPE_ECHO_REQUEST ||
+                      icmpType === ICMPV6_TYPE_ECHO_REPLY;
+                    onChange({
+                      ...layer,
+                      icmpType,
+                      rest: isEchoType ? toEcho(layer) : toRaw(layer),
+                    });
+                  }}
+                />
+                <NumberField
+                  id={`${id}-code`}
+                  label="Code"
+                  hint="0-255"
+                  doc={fieldDoc('code')}
+                  value={layer.code}
+                  error={fieldError('code')}
+                  warning={fieldWarning('code')}
+                  isHighlighted={isHighlighted('code')}
+                  onHoverStart={hoverStart('code')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(code) => onChange({ ...layer, code })}
+                />
+
+                {layer.rest.kind === 'echo' ? (
+                  <>
+                    <NumberField
+                      id={`${id}-identifier`}
+                      label="Identifier"
+                      hint="0-65535"
+                      doc={fieldDoc('identifier')}
+                      value={layer.rest.identifier}
+                      error={fieldError('identifier')}
+                      warning={fieldWarning('identifier')}
+                      isHighlighted={isHighlighted('identifier')}
+                      onHoverStart={hoverStart('identifier')}
+                      onHoverEnd={hoverEnd}
+                      onChange={(identifier) =>
+                        onChange({
+                          ...layer,
+                          rest: {
+                            kind: 'echo',
+                            identifier,
+                            sequence: layer.rest.kind === 'echo' ? layer.rest.sequence : 0,
+                          },
+                        })
+                      }
+                    />
+                    <NumberField
+                      id={`${id}-sequence`}
+                      label="Sequence Number"
+                      hint="0-65535"
+                      doc={fieldDoc('sequence')}
+                      value={layer.rest.sequence}
+                      error={fieldError('sequence')}
+                      warning={fieldWarning('sequence')}
+                      isHighlighted={isHighlighted('sequence')}
+                      onHoverStart={hoverStart('sequence')}
+                      onHoverEnd={hoverEnd}
+                      onChange={(sequence) =>
+                        onChange({
+                          ...layer,
+                          rest: {
+                            kind: 'echo',
+                            identifier: layer.rest.kind === 'echo' ? layer.rest.identifier : 0,
+                            sequence,
+                          },
+                        })
+                      }
+                    />
+                  </>
+                ) : (
+                  <NumberField
+                    id={`${id}-restValue`}
+                    label={rawFieldLabel}
+                    hint="32 bit (0-4294967295)"
+                    doc={fieldDoc('restValue')}
+                    allowHex
+                    hexDigits={8}
+                    value={layer.rest.value}
+                    error={fieldError('restValue')}
+                    warning={fieldWarning('restValue')}
+                    isHighlighted={isHighlighted('restValue')}
+                    onHoverStart={hoverStart('restValue')}
+                    onHoverEnd={hoverEnd}
+                    onChange={(value) => onChange({ ...layer, rest: { kind: 'raw', value } })}
+                  />
+                )}
+
+                <AutoManualField
+                  id={`${id}-checksum`}
+                  label="Checksum"
+                  hint="IPv6 pseudo-header (RFC 4443)"
+                  doc={fieldDoc('checksum')}
+                  allowHex
+                  hexDigits={4}
+                  value={layer.checksum}
+                  resolvedAutoValue={resolvedAutoValues?.checksum}
+                  error={fieldError('checksum')}
+                  warning={fieldWarning('checksum')}
+                  isHighlighted={isHighlighted('checksum')}
+                  onHoverStart={hoverStart('checksum')}
+                  onHoverEnd={hoverEnd}
+                  onChange={(checksum) => onChange({ ...layer, checksum })}
+                />
+              </div>
+            );
+          })()}
 
           {layer.type === 'udp' && (
             <div className="field-grid">

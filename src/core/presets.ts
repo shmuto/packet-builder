@@ -4,6 +4,7 @@ import type {
   BGPLayer,
   EthernetLayer,
   ICMPLayer,
+  ICMPv6Layer,
   IPv4Layer,
   IPv6Layer,
   Layer,
@@ -12,7 +13,14 @@ import type {
 } from './layers/types';
 import { autoValue } from './layers/types';
 
-export type PresetId = 'udp' | 'udp-ipv6' | 'tcp-syn' | 'icmp-echo' | 'arp-request' | 'bgp-open';
+export type PresetId =
+  | 'udp'
+  | 'udp-ipv6'
+  | 'tcp-syn'
+  | 'icmp-echo'
+  | 'icmpv6-echo'
+  | 'arp-request'
+  | 'bgp-open';
 
 export interface PacketPreset {
   readonly id: PresetId;
@@ -122,6 +130,21 @@ export function createDefaultICMP(): ICMPLayer {
   };
 }
 
+/** Creates a default ICMPv6 Echo Request header (Type 128, Code 0, RFC 4443 §4.1). */
+export function createDefaultICMPv6(): ICMPv6Layer {
+  return {
+    type: 'icmpv6',
+    icmpType: 128,
+    code: 0,
+    checksum: autoValue(),
+    rest: {
+      kind: 'echo',
+      identifier: 1,
+      sequence: 1,
+    },
+  };
+}
+
 export function createDefaultBGP(): BGPLayer {
   return {
     type: 'bgp',
@@ -145,6 +168,7 @@ export function createPresets(): readonly PacketPreset[] {
   const udpText = 'Hello, tsumiki!!!!';
   const udpIpv6Text = 'Hello';
   const icmpText = 'tsumiki-icmp-ping!';
+  const icmpv6Text = 'ping';
 
   return [
     {
@@ -178,6 +202,14 @@ export function createPresets(): readonly PacketPreset[] {
       layers: [createDefaultEthernet(), createDefaultIPv4(), createDefaultICMP()],
       payloadText: icmpText,
       payloadBytes: encodeUtf8(icmpText),
+    },
+    {
+      id: 'icmpv6-echo',
+      name: 'IPv6 Ping',
+      description: 'Ethernet II + IPv6 + ICMPv6 Echo Request (Type 128, Code 0, RFC 4443)',
+      layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultICMPv6()],
+      payloadText: icmpv6Text,
+      payloadBytes: encodeUtf8(icmpv6Text),
     },
     {
       id: 'arp-request',

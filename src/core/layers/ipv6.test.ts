@@ -65,7 +65,7 @@ describe('encodeIPv6', () => {
     expect(cursor).toBe(IPV6_HEADER_LENGTH * 8);
   });
 
-  it('auto-selects Next Header for TCP (6), UDP (17), IPv4 (4), and IPv6 (41)', () => {
+  it('auto-selects Next Header for TCP (6), UDP (17), ICMPv6 (58), IPv4 (4), and IPv6 (41)', () => {
     const tcp = encodeIPv6(makeBaseIPv6(), {
       layerIndex: 0,
       upperLayerType: 'tcp',
@@ -74,6 +74,11 @@ describe('encodeIPv6', () => {
     const udp = encodeIPv6(makeBaseIPv6(), {
       layerIndex: 0,
       upperLayerType: 'udp',
+      upperBytesLength: 8,
+    });
+    const icmpv6 = encodeIPv6(makeBaseIPv6(), {
+      layerIndex: 0,
+      upperLayerType: 'icmpv6',
       upperBytesLength: 8,
     });
     const ipv4 = encodeIPv6(makeBaseIPv6(), {
@@ -89,10 +94,12 @@ describe('encodeIPv6', () => {
 
     expect(tcp.ok && tcp.bytes[6]).toBe(6);
     expect(udp.ok && udp.bytes[6]).toBe(17);
+    expect(icmpv6.ok && icmpv6.bytes[6]).toBe(58);
     expect(ipv4.ok && ipv4.bytes[6]).toBe(4);
     expect(ipv6.ok && ipv6.bytes[6]).toBe(41);
     expect(tcp.ok && tcp.warnings).toEqual([]);
     expect(udp.ok && udp.warnings).toEqual([]);
+    expect(icmpv6.ok && icmpv6.warnings).toEqual([]);
     expect(ipv4.ok && ipv4.warnings).toEqual([]);
     expect(ipv6.ok && ipv6.warnings).toEqual([]);
   });

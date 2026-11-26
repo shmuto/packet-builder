@@ -37,6 +37,12 @@ import {
 } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH } from './layers/icmp';
 import {
+  ICMPV6_HEADER_LENGTH,
+  ICMPV6_TYPE_ECHO_REPLY,
+  ICMPV6_TYPE_ECHO_REQUEST,
+  IP_PROTOCOL_ICMPV6,
+} from './layers/icmpv6';
+import {
   IP_PROTOCOL_ICMP,
   IP_PROTOCOL_IPIP,
   IP_PROTOCOL_IPV6,
@@ -56,6 +62,7 @@ import {
   type BGPMessageType,
   type EthernetLayer,
   type ICMPLayer,
+  type ICMPv6Layer,
   type IPv4Layer,
   type IPv6Layer,
   type Layer,
@@ -123,6 +130,49 @@ function decodeICMPAt(bytes: Uint8Array, offset: number): { layer: ICMPLayer; pa
       sequenceNumber,
     },
     payload: bytes.slice(offset + ICMP_HEADER_LENGTH),
+  };
+}
+
+function decodeICMPv6At(
+  bytes: Uint8Array,
+  offset: number,
+  ip: PseudoIPInfo,
+): { layer: ICMPv6Layer; payload: Uint8Array } {
+  const icmpType = bytes[offset];
+  const code = bytes[offset + 1];
+  const checksum = readUint16BE(bytes, offset + 2);
+
+  const isEcho =
+    icmpType === ICMPV6_TYPE_ECHO_REQUEST || icmpType === ICMPV6_TYPE_ECHO_REPLY;
+  const rest = isEcho
+    ? ({
+        kind: 'echo',
+        identifier: readUint16BE(bytes, offset + 4),
+        sequence: readUint16BE(bytes, offset + 6),
+      } as const)
+    : ({
+        kind: 'raw',
+        value: readUint32BE(bytes, offset + 4),
+      } as const);
+
+  const segmentCopy = new Uint8Array(bytes.subarray(offset));
+  segmentCopy[2] = 0;
+  segmentCopy[3] = 0;
+  const csumRes = computePseudoChecksum(ip, IP_PROTOCOL_ICMPV6, segmentCopy);
+  const expectedChecksum = csumRes.ok ? csumRes.value : null;
+
+  return {
+    layer: {
+      type: 'icmpv6',
+      icmpType,
+      code,
+      checksum:
+        expectedChecksum !== null && checksum === expectedChecksum
+          ? autoValue()
+          : manualValue(checksum),
+      rest,
+    },
+    payload: bytes.slice(offset + ICMPV6_HEADER_LENGTH),
   };
 }
 
@@ -720,6 +770,10 @@ function decodeIPv6Chain(
     if (innerPayload !== null) {
       payload = innerPayload;
     }
+  } else if (nextHeader === IP_PROTOCOL_ICMPV6 && upperRemaining >= ICMPV6_HEADER_LENGTH) {
+    const res = decodeICMPv6At(scopedBytes, upperOffset, ipInfo);
+    decodedUpperLayers.push(res.layer);
+    payload = res.payload;
   } else if (nextHeader === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
     const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
     decodedUpperLayers.push(res.layer);
@@ -729,6 +783,7 @@ function decodeIPv6Chain(
   } else if (
     nextHeader === IP_PROTOCOL_IPIP ||
     nextHeader === IP_PROTOCOL_IPV6 ||
+    nextHeader === IP_PROTOCOL_ICMPV6 ||
     nextHeader === IP_PROTOCOL_UDP ||
     nextHeader === IP_PROTOCOL_TCP
   ) {

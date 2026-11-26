@@ -24,6 +24,7 @@ import {
   createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
+  createDefaultICMPv6,
   createDefaultIPv4,
   createDefaultIPv6,
   createDefaultTCP,
@@ -779,5 +780,58 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     expect(isFieldHighlighted(1, 'version', draft.spans, pktByte15)).toBe(false);
     expect(isFieldHighlighted(1, 'trafficClass', draft.spans, pktByte15)).toBe(true);
     expect(isFieldHighlighted(1, 'flowLabel', draft.spans, pktByte15)).toBe(true);
+  });
+
+  it('covers both Echo and Raw (Packet Too Big MTU) ICMPv6 variants in bit diagrams', () => {
+    const echoDraft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv6(), createDefaultICMPv6()],
+      ok(encodeUtf8('ping')),
+    );
+    expect(echoDraft.ok).toBe(true);
+    const echoRows = buildBitDiagramRows(echoDraft.spans, 2);
+    expect(echoRows).toHaveLength(2);
+    expectContiguousBitDiagram(echoRows, 64);
+    expect(echoRows[0].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['icmpType', 8],
+      ['code', 8],
+      ['checksum', 16],
+    ]);
+    expect(echoRows[1].cells.map((c) => [c.span.fieldId, c.colSpan])).toEqual([
+      ['identifier', 16],
+      ['sequence', 16],
+    ]);
+
+    const ptbDraft = evaluatePacketDraft(
+      [
+        createDefaultIPv6(),
+        {
+          ...createDefaultICMPv6(),
+          icmpType: 2,
+          rest: { kind: 'raw', value: 1280 },
+        },
+      ],
+      ok(new Uint8Array(0)),
+    );
+    expect(ptbDraft.ok).toBe(true);
+    const ptbRows = buildBitDiagramRows(ptbDraft.spans, 1);
+    expect(ptbRows).toHaveLength(2);
+    expectContiguousBitDiagram(ptbRows, 64);
+    expect(ptbRows[1].cells.map((c) => [c.span.fieldId, c.span.label, c.colSpan])).toEqual([
+      ['restValue', 'MTU', 32],
+    ]);
+
+    // Unified diagram for Raw IPv6 (320b) + ICMPv6 (64b) = 384 bits (12 rows of 32 bits)
+    const unified = buildUnifiedBitDiagramRows(ptbDraft.spans);
+    expect(unified).toHaveLength(12);
+    expect(unified[10].cells.map((c) => [c.span.layerType, c.span.fieldId, c.isLayerStart])).toEqual(
+      [
+        ['icmpv6', 'icmpType', true],
+        ['icmpv6', 'code', false],
+        ['icmpv6', 'checksum', false],
+      ],
+    );
+    expect(unified[11].cells.map((c) => [c.span.fieldId, c.span.label, c.isLayerEnd])).toEqual([
+      ['restValue', 'MTU', true],
+    ]);
   });
 });

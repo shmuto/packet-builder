@@ -1,4 +1,5 @@
 import { parseIPv6, writeUint16BE, writeUint32BE } from '../bytes';
+import { IP_PROTOCOL_ICMPV6 } from './icmpv6';
 import {
   IP_PROTOCOL_IPIP,
   IP_PROTOCOL_IPV6,
@@ -44,6 +45,8 @@ function nextHeaderForUpperLayer(upperLayerType: LayerType | null): number | nul
       return IP_PROTOCOL_TCP;
     case 'udp':
       return IP_PROTOCOL_UDP;
+    case 'icmpv6':
+      return IP_PROTOCOL_ICMPV6;
     case 'ipv4':
       return IP_PROTOCOL_IPIP;
     case 'ipv6':
@@ -146,7 +149,8 @@ export function encodeIPv6(layer: IPv6Layer, ctx: EncodeIPv6Context): LayerEncod
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'nextHeader',
-      message: 'No TCP / UDP / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
+      message:
+        'No TCP / UDP / ICMPv6 / IPv4 / IPv6 upper layer found; defaulting Next Header to 0.',
     });
   }
 

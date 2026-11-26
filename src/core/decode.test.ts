@@ -8,6 +8,7 @@ import {
   createDefaultBGP,
   createDefaultEthernet,
   createDefaultICMP,
+  createDefaultICMPv6,
   createDefaultIPv4,
   createDefaultIPv6,
   createDefaultTCP,
@@ -929,6 +930,115 @@ describe('decodePacket', () => {
         expect(dec.value.notes.some((n) => n.includes('IP tunnel layer limit'))).toBe(true);
         const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
         expect(rebuilt.ok && rebuilt.bytes).toEqual(mixedBuilt.bytes);
+      }
+    }
+  });
+
+  it('losslessly round-trips ICMPv6 Echo Request, Echo Reply, Packet Too Big, and manually corrupted checksum', () => {
+    const cases: readonly {
+      readonly name: string;
+      readonly layers: readonly Layer[];
+      readonly payload: Uint8Array;
+      readonly expectAutoChecksum: boolean;
+      readonly expectedRestKind: 'echo' | 'raw';
+    }[] = [
+      {
+        name: 'ICMPv6 Echo Request (Type 128)',
+        layers: [createDefaultEthernet(), createDefaultIPv6(), createDefaultICMPv6()],
+        payload: encodeUtf8('ping'),
+        expectAutoChecksum: true,
+        expectedRestKind: 'echo',
+      },
+      {
+        name: 'ICMPv6 Echo Reply (Type 129)',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv6(),
+          {
+            ...createDefaultICMPv6(),
+            icmpType: 129,
+            rest: { kind: 'echo', identifier: 0x1234, sequence: 0x5678 },
+          },
+        ],
+        payload: encodeUtf8('pong'),
+        expectAutoChecksum: true,
+        expectedRestKind: 'echo',
+      },
+      {
+        name: 'ICMPv6 Packet Too Big (Type 2, MTU 1280)',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv6(),
+          {
+            ...createDefaultICMPv6(),
+            icmpType: 2,
+            code: 0,
+            rest: { kind: 'raw', value: 1280 },
+          },
+        ],
+        payload: new Uint8Array([0x60, 0x00, 0x00, 0x00]),
+        expectAutoChecksum: true,
+        expectedRestKind: 'raw',
+      },
+      {
+        name: 'ICMPv6 Echo Request with manually corrupted checksum (0xdead)',
+        layers: [
+          createDefaultEthernet(),
+          createDefaultIPv6(),
+          {
+            ...createDefaultICMPv6(),
+            checksum: manualValue(0xdead),
+          },
+        ],
+        payload: encodeUtf8('bad'),
+        expectAutoChecksum: false,
+        expectedRestKind: 'echo',
+      },
+    ];
+
+    for (const tc of cases) {
+      const built = buildPacket(tc.layers, tc.payload);
+      expect(built.ok, tc.name).toBe(true);
+      if (!built.ok) continue;
+
+      const decoded = decodePacket(built.bytes, 'ethernet');
+      expect(decoded.ok, tc.name).toBe(true);
+      if (!decoded.ok) continue;
+
+      expect(decoded.value.notes, tc.name).toEqual([]);
+      expect(decoded.value.layers.map((l) => l.type), tc.name).toEqual([
+        'ethernet',
+        'ipv6',
+        'icmpv6',
+      ]);
+      const icmpv6 = decoded.value.layers[2];
+      expect(icmpv6.type === 'icmpv6' && icmpv6.rest.kind, tc.name).toBe(tc.expectedRestKind);
+      expect(
+        icmpv6.type === 'icmpv6' && icmpv6.checksum.mode,
+        tc.name,
+      ).toBe(tc.expectAutoChecksum ? 'auto' : 'manual');
+      expect(decoded.value.payload, tc.name).toEqual(tc.payload);
+
+      const rebuilt = buildPacket(decoded.value.layers, decoded.value.payload);
+      expect(rebuilt.ok, tc.name).toBe(true);
+      if (rebuilt.ok) {
+        expect(rebuilt.bytes, tc.name).toEqual(built.bytes);
+      }
+    }
+
+    // Truncated ICMPv6 (< 8 bytes) stays as Payload with a note
+    const truncBuilt = buildPacket(
+      [{ ...createDefaultIPv6(), nextHeader: manualValue(58) }],
+      new Uint8Array([0x80, 0x00, 0x00, 0x00]),
+    );
+    expect(truncBuilt.ok).toBe(true);
+    if (truncBuilt.ok) {
+      const dec = decodePacket(truncBuilt.bytes, 'ipv6');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv6']);
+        expect(dec.value.payload).toEqual(new Uint8Array([0x80, 0x00, 0x00, 0x00]));
+        expect(dec.value.notes.some((n) => n.includes('truncated'))).toBe(true);
       }
     }
   });
