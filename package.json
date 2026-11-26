@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && vite build",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "oracle": "node scripts/wireshark-oracle.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

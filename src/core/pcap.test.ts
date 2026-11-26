@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMultiPcap,
   buildPcap,
   LINKTYPE_ETHERNET,
   LINKTYPE_RAW,
@@ -80,3 +81,49 @@ describe('buildPcap', () => {
     expect(largeView.getUint32(36, true)).toBe(65549);
   });
 });
+
+describe('buildMultiPcap', () => {
+  it('writes multiple packets with independent timestamps and computes snaplen across all packets', () => {
+    const p1 = new Uint8Array([0x01, 0x02, 0x03]);
+    const p2 = new Uint8Array([0xaa, 0xbb, 0xcc, 0xdd, 0xee]);
+    const pcap = buildMultiPcap(
+      [
+        { bytes: p1, timestampMs: 1_700_000_000_010 },
+        { bytes: p2, timestampMs: 1_700_000_001_500 },
+      ],
+      { linkType: LINKTYPE_ETHERNET },
+    );
+
+    expect(pcap.length).toBe(
+      PCAP_GLOBAL_HEADER_LENGTH +
+        PCAP_PACKET_HEADER_LENGTH +
+        p1.length +
+        PCAP_PACKET_HEADER_LENGTH +
+        p2.length,
+    );
+
+    const view = new DataView(pcap.buffer);
+    expect(view.getUint32(0, true)).toBe(PCAP_MAGIC_MICROSECONDS);
+    expect(view.getUint32(20, true)).toBe(LINKTYPE_ETHERNET);
+
+    // Record 1
+    expect(view.getUint32(24, true)).toBe(1_700_000_000);
+    expect(view.getUint32(28, true)).toBe(10_000);
+    expect(view.getUint32(32, true)).toBe(3);
+    expect(pcap.slice(40, 43)).toEqual(p1);
+
+    // Record 2
+    const rec2 = 43;
+    expect(view.getUint32(rec2, true)).toBe(1_700_000_001);
+    expect(view.getUint32(rec2 + 4, true)).toBe(500_000);
+    expect(view.getUint32(rec2 + 8, true)).toBe(5);
+    expect(pcap.slice(rec2 + 16, rec2 + 21)).toEqual(p2);
+  });
+
+  it('produces a valid 24-byte global header when given zero packets', () => {
+    const empty = buildMultiPcap([]);
+    expect(empty.length).toBe(PCAP_GLOBAL_HEADER_LENGTH);
+    expect(new DataView(empty.buffer).getUint32(0, true)).toBe(PCAP_MAGIC_MICROSECONDS);
+  });
+});
+
