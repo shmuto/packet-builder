@@ -19,7 +19,8 @@ function collectAllSourceFiles(dir) {
     } else if (
       entry.isFile() &&
       !entry.name.endsWith('.test.ts') &&
-      !entry.name.endsWith('.test.tsx')
+      !entry.name.endsWith('.test.tsx') &&
+      !entry.name.endsWith('.d.ts')
     ) {
       out.push(full);
     }
@@ -38,6 +39,10 @@ function resolveImport(fromFile, specifier) {
     join(base, 'index.ts'),
     join(base, 'index.tsx'),
   ];
+  if (specifier.endsWith('.js')) {
+    const withoutJs = base.slice(0, -3);
+    candidates.push(`${withoutJs}.ts`, `${withoutJs}.tsx`);
+  }
   for (const c of candidates) {
     if (existsSync(c) && statSync(c).isFile()) {
       return c;
@@ -58,6 +63,13 @@ function collectSpecifiers(filePath) {
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
       specs.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length >= 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      specs.push(node.arguments[0].text);
     }
     ts.forEachChild(node, visit);
   };

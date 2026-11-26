@@ -90,4 +90,39 @@ describe('encodeIPv4', () => {
       'totalLength',
     ]);
   });
+
+  it('warns on manual IHL differing from 5 and stays silent on manual IHL 5', () => {
+    const exact = encodeIPv4(makeBaseIPv4({ ihl: manualValue(5) }), {
+      layerIndex: 0,
+      upperLayerType: 'tcp',
+      upperBytesLength: 20,
+    });
+    expect(exact.ok).toBe(true);
+    if (exact.ok) {
+      expect(exact.warnings).toHaveLength(0);
+    }
+
+    const larger = encodeIPv4(makeBaseIPv4({ ihl: manualValue(6) }), {
+      layerIndex: 0,
+      upperLayerType: 'tcp',
+      upperBytesLength: 20,
+    });
+    expect(larger.ok).toBe(true);
+    if (larger.ok) {
+      expect(larger.bytes[0]).toBe(0x46);
+      expect(larger.warnings.map((w) => w.fieldId)).toEqual(['ihl']);
+      expect(larger.warnings[0].message).toContain('Using manual IHL 6');
+    }
+
+    const smaller = encodeIPv4(makeBaseIPv4({ ihl: manualValue(4) }), {
+      layerIndex: 0,
+      upperLayerType: 'tcp',
+      upperBytesLength: 20,
+    });
+    expect(smaller.ok).toBe(true);
+    if (smaller.ok) {
+      expect(smaller.warnings.map((w) => w.fieldId)).toEqual(['ihl']);
+      expect(smaller.warnings[0].message).toContain('smaller than the minimum of 5');
+    }
+  });
 });

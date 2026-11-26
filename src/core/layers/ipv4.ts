@@ -113,6 +113,12 @@ export function encodeIPv4(layer: IPv4Layer, ctx: EncodeIPv4Context): LayerEncod
           fieldId: 'ihl',
           message: `Manual IHL (${ihlValue}) is smaller than the minimum of 5 (RFC 791).`,
         });
+      } else if (ihlValue !== IPV4_DEFAULT_IHL) {
+        warnings.push({
+          layerIndex: ctx.layerIndex,
+          fieldId: 'ihl',
+          message: `Using manual IHL ${ihlValue} (computed value is ${IPV4_DEFAULT_IHL} for 20-byte header).`,
+        });
       }
     }
   }
