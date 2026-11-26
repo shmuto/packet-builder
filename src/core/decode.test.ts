@@ -586,7 +586,71 @@ describe('decodePacket', () => {
       }
     }
 
-    // 4) Pathological nesting (> 16 nested IP-in-IP headers) stops cleanly with a note and round-trips losslessly
+    // 4) Inner IPv4 Total Length < outer IPv4 payload length keeps inner + trailing bytes in Payload for exact round-trip
+    const innerUdpBuilt = buildPacket(
+      [createDefaultIPv4(), createDefaultUDP()],
+      new Uint8Array([0xaa, 0xbb]),
+    );
+    expect(innerUdpBuilt.ok).toBe(true);
+    if (innerUdpBuilt.ok) {
+      const outerPayloadWithTrailer = new Uint8Array(innerUdpBuilt.bytes.length + 4);
+      outerPayloadWithTrailer.set(innerUdpBuilt.bytes, 0);
+      outerPayloadWithTrailer.set([0xde, 0xad, 0xbe, 0xef], innerUdpBuilt.bytes.length);
+      const outerBuilt = buildPacket(
+        [{ ...createDefaultIPv4(), protocol: manualValue(4) }],
+        outerPayloadWithTrailer,
+      );
+      expect(outerBuilt.ok).toBe(true);
+      if (outerBuilt.ok) {
+        const dec = decodePacket(outerBuilt.bytes, 'ipv4');
+        expect(dec.ok).toBe(true);
+        if (dec.ok) {
+          expect(dec.value.layers.map((l) => l.type)).toEqual(['ipv4']);
+          expect(dec.value.layers[0].type === 'ipv4' && dec.value.layers[0].protocol).toEqual(
+            manualValue(4),
+          );
+          expect(dec.value.payload).toEqual(outerPayloadWithTrailer);
+          expect(
+            dec.value.notes.some((n) => n.includes('Inner IPv4 Total Length')),
+          ).toBe(true);
+          const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+          expect(rebuilt.ok && rebuilt.bytes).toEqual(outerBuilt.bytes);
+        }
+      }
+    }
+
+    // 5) Ethernet -> Outer IPv4 -> Inner IPv4 -> TCP(179) -> BGP OPEN round-trips byte-for-byte
+    const ipipBgpBuilt = buildPacket(
+      [
+        createDefaultEthernet(),
+        { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+        createDefaultIPv4(),
+        { ...createDefaultTCP(), dstPort: 179 },
+        createDefaultBGP(),
+      ],
+      new Uint8Array(0),
+    );
+    expect(ipipBgpBuilt.ok).toBe(true);
+    if (ipipBgpBuilt.ok) {
+      const dec = decodePacket(ipipBgpBuilt.bytes, 'ethernet');
+      expect(dec.ok).toBe(true);
+      if (dec.ok) {
+        expect(dec.value.notes).toEqual([]);
+        expect(dec.value.layers.map((l) => l.type)).toEqual([
+          'ethernet',
+          'ipv4',
+          'ipv4',
+          'tcp',
+          'bgp',
+        ]);
+        const tcpLayer = dec.value.layers[3];
+        expect(tcpLayer.type === 'tcp' && tcpLayer.checksum).toEqual(autoValue());
+        const rebuilt = buildPacket(dec.value.layers, dec.value.payload);
+        expect(rebuilt.ok && rebuilt.bytes).toEqual(ipipBgpBuilt.bytes);
+      }
+    }
+
+    // 6) Pathological nesting (> 16 total IPv4 layers) stops cleanly with a note and round-trips losslessly
     const deepLayers: Layer[] = Array.from({ length: 18 }, () => createDefaultIPv4());
     const deepBuilt = buildPacket(deepLayers, new Uint8Array(0));
     expect(deepBuilt.ok).toBe(true);
@@ -594,9 +658,9 @@ describe('decodePacket', () => {
       const dec = decodePacket(deepBuilt.bytes, 'ipv4');
       expect(dec.ok).toBe(true);
       if (dec.ok) {
-        expect(dec.value.layers).toHaveLength(17); // depth 0..16 decoded; 18th kept in Payload
-        expect(dec.value.payload).toHaveLength(20);
-        expect(dec.value.notes.some((n) => n.includes('nesting depth exceeded'))).toBe(true);
+        expect(dec.value.layers).toHaveLength(16); // MAX_IPV4_LAYERS = 16 decoded; remaining 2 in Payload
+        expect(dec.value.payload).toHaveLength(40);
+        expect(dec.value.notes.some((n) => n.includes('IP-in-IP layer limit'))).toBe(true);
         const r = buildPacket(dec.value.layers, dec.value.payload);
         expect(r.ok && r.bytes).toEqual(deepBuilt.bytes);
       }
