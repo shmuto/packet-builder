@@ -1,0 +1,28 @@
+name: Scenario request
+description: Suggest a BGP behavior or failure scenario to teach in tsumiki
+title: "[Scenario]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: BGP behavior to learn
+      description: Which BGP message exchange, capability, path attribute, or failure mode would you like to see?
+      placeholder: "e.g., Route Reflector ORIGINATOR_ID and CLUSTER_LIST loop prevention"
+    validations:
+      required: true
+  - type: input
+    id: rfc
+    attributes:
+      label: RFC reference (if known)
+      placeholder: "e.g., RFC 4456 §8"
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Where did you encounter this?
+      description: Was this in a Wireshark capture, a certification exam, a lab, or a production incident?
+      placeholder: "e.g., Investigating unexpected route withdrawal in a pcap during a maintenance window"
+    validations:
+      required: true

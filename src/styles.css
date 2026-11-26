@@ -1099,3 +1099,31 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.bgp-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.bgp-footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bgp-footer-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.bgp-footer-links a:hover {
+  text-decoration: underline;
+}

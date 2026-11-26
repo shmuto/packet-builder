@@ -1,0 +1,35 @@
+name: Bug report
+description: Report incorrect BGP bytes, dissection explanations, or UI issues
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: Describe the scenario, config toggles, or raw BGP hex you used.
+      placeholder: "1. Opened ebgp-ipv4-basic\n2. Changed Router A ASN to 65551\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs. actual
+      description: What did you expect the BGP message, explanation, or Wireshark dissection to show, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & OS
+      placeholder: "e.g., Chrome 131 on macOS 15"
+    validations:
+      required: true
+  - type: input
+    id: permalink
+    attributes:
+      label: Copy Link URL (optional)
+      description: Paste a link created with "Copy Link" (#s1=...) so we can reproduce the exact session.
+      placeholder: "https://shmuto.github.io/packet-builder/#s1=..."
+    validations:
+      required: false
