@@ -282,7 +282,13 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
       case 'sack': {
         const blockCount = opt.blocks.length;
         const sackLen = 2 + blockCount * 8;
-        if (blockCount > 4) {
+        if (blockCount === 0) {
+          warnings.push({
+            layerIndex: ctx.layerIndex,
+            fieldId: `${optPrefix}.sack.length`,
+            message: 'TCP SACK option requires at least 1 block (RFC 2018 §3).',
+          });
+        } else if (blockCount > 4) {
           warnings.push({
             layerIndex: ctx.layerIndex,
             fieldId: `${optPrefix}.sack.length`,

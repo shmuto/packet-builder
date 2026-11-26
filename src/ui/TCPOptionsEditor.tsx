@@ -553,20 +553,31 @@ export function TCPOptionsEditor({
                           </div>
                         </div>
                       ) : (
-                        <AutoManualField
-                          id={`${htmlPrefix}-raw-length`}
-                          label="Length"
-                          hint="2 + data bytes"
-                          doc={fieldDoc(`${prefix}.raw.length`)}
-                          value={opt.length}
-                          resolvedAutoValue={resolvedAutoValues?.[`${prefix}.raw.length`]}
-                          error={fieldError(`${prefix}.raw.length`)}
-                          warning={fieldWarning(`${prefix}.raw.length`)}
-                          isHighlighted={isHighlighted(`${prefix}.raw.length`)}
-                          onHoverStart={hoverStart(`${prefix}.raw.length`)}
-                          onHoverEnd={hoverEnd}
-                          onChange={(length) => handleUpdate(i, { ...opt, length })}
-                        />
+                        <div className="option-item-body">
+                          <AutoManualField
+                            id={`${htmlPrefix}-raw-length`}
+                            label="Length"
+                            hint="2 + data bytes"
+                            doc={fieldDoc(`${prefix}.raw.length`)}
+                            value={opt.length}
+                            resolvedAutoValue={resolvedAutoValues?.[`${prefix}.raw.length`]}
+                            error={fieldError(`${prefix}.raw.length`)}
+                            warning={fieldWarning(`${prefix}.raw.length`)}
+                            isHighlighted={isHighlighted(`${prefix}.raw.length`)}
+                            onHoverStart={hoverStart(`${prefix}.raw.length`)}
+                            onHoverEnd={hoverEnd}
+                            onChange={(length) => handleUpdate(i, { ...opt, length })}
+                          />
+                          <button
+                            type="button"
+                            className="mode-btn"
+                            onClick={() =>
+                              handleUpdate(i, { ...opt, length: { mode: 'none' } })
+                            }
+                          >
+                            Omit Length (Raw bytes)
+                          </button>
+                        </div>
                       )}
                       <div className="field-span-full">
                         <TextField

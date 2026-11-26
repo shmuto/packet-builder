@@ -283,21 +283,39 @@ describe('encodeTCP', () => {
       fin: false,
     };
 
-    // MSS / Window Scale / SACK-Permitted without SYN
-    for (const opt of [
-      { kind: 'mss' as const, mss: 1460 },
-      { kind: 'windowScale' as const, shiftCount: 7 },
-      { kind: 'sackPermitted' as const },
-    ]) {
-      const res = encodeTCP(makeBaseTCP({ flags: ackFlags, options: [opt] }), {
+    // MSS / Window Scale / SACK-Permitted without SYN -> exact fieldId warning; with SYN -> no warning
+    const synOnlyCases = [
+      { opt: { kind: 'mss' as const, mss: 1460 }, expectedFieldId: 'options[0].mss.mss' },
+      {
+        opt: { kind: 'windowScale' as const, shiftCount: 7 },
+        expectedFieldId: 'options[0].windowScale.shiftCount',
+      },
+      {
+        opt: { kind: 'sackPermitted' as const },
+        expectedFieldId: 'options[0].sackPermitted.kind',
+      },
+    ];
+    for (const c of synOnlyCases) {
+      const withoutSyn = encodeTCP(makeBaseTCP({ flags: ackFlags, options: [c.opt] }), {
         layerIndex: 0,
         upperBytes: new Uint8Array(0),
         ip: validIPv4,
       });
-      expect(res.ok).toBe(true);
-      if (res.ok) {
-        expect(res.warnings.some((w) => w.message.includes('SYN'))).toBe(true);
+      expect(withoutSyn.ok).toBe(true);
+      if (withoutSyn.ok) {
+        expect(
+          withoutSyn.warnings.some(
+            (w) => w.fieldId === c.expectedFieldId && w.message.includes('SYN'),
+          ),
+        ).toBe(true);
       }
+
+      const withSyn = encodeTCP(makeBaseTCP({ options: [c.opt] }), {
+        layerIndex: 0,
+        upperBytes: new Uint8Array(0),
+        ip: validIPv4,
+      });
+      expect(withSyn.ok && withSyn.warnings.length === 0).toBe(true);
     }
 
     // Window Scale shift 14 (no warning) vs 15 (warning)
@@ -318,9 +336,28 @@ describe('encodeTCP', () => {
       expect(ws15.warnings.some((w) => w.fieldId === 'options[0].windowScale.shiftCount')).toBe(true);
     }
 
-    // SACK 4 blocks (fits, no warning) vs 5 blocks (warning + >40B error)
+    // SACK 0 blocks (warning) vs 1 block (no warning) vs 4 blocks (fits, no warning) vs 5 blocks (warning + >40B error)
     const makeBlocks = (n: number) =>
       Array.from({ length: n }, (_, idx) => ({ left: idx * 1000, right: idx * 1000 + 500 }));
+
+    const sack0 = encodeTCP(
+      makeBaseTCP({ flags: ackFlags, options: [{ kind: 'sack', blocks: [] }] }),
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
+    );
+    expect(sack0.ok).toBe(true);
+    if (sack0.ok) {
+      expect(
+        sack0.warnings.some(
+          (w) => w.fieldId === 'options[0].sack.length' && w.message.includes('at least 1 block'),
+        ),
+      ).toBe(true);
+    }
+
+    const sack1 = encodeTCP(
+      makeBaseTCP({ flags: ackFlags, options: [{ kind: 'sack', blocks: makeBlocks(1) }] }),
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
+    );
+    expect(sack1.ok && sack1.warnings.length === 0).toBe(true);
 
     const sack4 = encodeTCP(
       makeBaseTCP({ flags: ackFlags, options: [{ kind: 'sack', blocks: makeBlocks(4) }] }),
