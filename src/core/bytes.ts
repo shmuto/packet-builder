@@ -71,6 +71,97 @@ export function parseIPv4(text: string): Result<Uint8Array> {
   return ok(bytes);
 }
 
+const IPV6_GROUP_PATTERN = /^[0-9a-fA-F]{1,4}$/;
+
+function parseIPv6Half(half: string, allowEmbeddedIPv4: boolean): Result<number[]> {
+  if (half.length === 0) {
+    return ok([]);
+  }
+  const parts = half.split(':');
+  const groups: number[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.length === 0) {
+      return err('Invalid IPv6 address: unexpected empty group or stray ":".');
+    }
+    if (part.includes('.')) {
+      if (!allowEmbeddedIPv4 || i !== parts.length - 1) {
+        return err('Embedded IPv4 address is only allowed as the final segment of an IPv6 address.');
+      }
+      const embedded = parseIPv4(part);
+      if (!embedded.ok) {
+        return err(`Invalid embedded IPv4 address in IPv6 ("${part}"): ${embedded.error}`);
+      }
+      groups.push((embedded.value[0] << 8) | embedded.value[1]);
+      groups.push((embedded.value[2] << 8) | embedded.value[3]);
+    } else {
+      if (!IPV6_GROUP_PATTERN.test(part)) {
+        return err(
+          `Invalid IPv6 group ("${part}"). Expected 1 to 4 hexadecimal digits (0-ffff).`,
+        );
+      }
+      groups.push(Number.parseInt(part, 16));
+    }
+  }
+
+  return ok(groups);
+}
+
+/**
+ * Parses an IPv6 address string (RFC 4291 §2.2: full form, `::` zero compression,
+ * and trailing embedded dotted-quad IPv4 such as `::ffff:192.0.2.1`) into a 16-byte Uint8Array.
+ * Rejects zone IDs (`%eth0`), multiple `::`, groups longer than 4 hex digits, and wrong group counts.
+ */
+export function parseIPv6(text: string): Result<Uint8Array> {
+  if (text.length === 0) {
+    return err('IPv6 address is empty. Use a format such as 2001:db8::1.');
+  }
+  if (text.includes('%')) {
+    return err('IPv6 zone IDs (e.g., %eth0) are not allowed in packet headers.');
+  }
+  if (/\s/.test(text)) {
+    return err('IPv6 address must not contain whitespace.');
+  }
+
+  const halves = text.split('::');
+  if (halves.length > 2) {
+    return err('IPv6 address can contain at most one "::" zero compression.');
+  }
+
+  let groups: number[];
+  if (halves.length === 1) {
+    const parsed = parseIPv6Half(halves[0], true);
+    if (!parsed.ok) return parsed;
+    if (parsed.value.length !== 8) {
+      return err(
+        `IPv6 address without "::" must have 8 16-bit groups (got ${parsed.value.length}).`,
+      );
+    }
+    groups = parsed.value;
+  } else {
+    const left = parseIPv6Half(halves[0], false);
+    if (!left.ok) return left;
+    const right = parseIPv6Half(halves[1], true);
+    if (!right.ok) return right;
+
+    const missing = 8 - (left.value.length + right.value.length);
+    if (missing < 1) {
+      return err(
+        `IPv6 address with "::" has too many groups (${left.value.length + right.value.length} explicit groups; "::" must replace at least 1 zero group).`,
+      );
+    }
+    groups = [...left.value, ...new Array<number>(missing).fill(0), ...right.value];
+  }
+
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    bytes[i * 2] = (groups[i] >>> 8) & 0xff;
+    bytes[i * 2 + 1] = groups[i] & 0xff;
+  }
+  return ok(bytes);
+}
+
 /**
  * Parses a hexadecimal string (whitespace allowed as separators) into a byte array.
  * Empty or whitespace-only input returns an empty Uint8Array.
@@ -264,6 +355,69 @@ export function formatIPv4(bytes: Uint8Array): string {
     throw new RangeError(`IPv4 address must be 4 bytes (got ${bytes.length}).`);
   }
   return `${bytes[0]}.${bytes[1]}.${bytes[2]}.${bytes[3]}`;
+}
+
+/**
+ * Formats a 16-byte Uint8Array in RFC 5952 §4 canonical IPv6 form:
+ * lowercase hex without leading zeros, compressing the longest run of >= 2 zero groups
+ * (first run on a tie), never compressing a single zero group, and rendering IPv4-mapped
+ * addresses (`::ffff:0:0/96`) in dotted-quad form per RFC 5952 §5.
+ */
+export function formatIPv6(bytes: Uint8Array): string {
+  if (bytes.length !== 16) {
+    throw new RangeError(`IPv6 address must be 16 bytes (got ${bytes.length}).`);
+  }
+
+  const groups: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    groups.push((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+  }
+
+  // RFC 5952 §5: IPv4-mapped IPv6 address (::ffff:a.b.c.d)
+  if (
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0xffff
+  ) {
+    return `::ffff:${bytes[12]}.${bytes[13]}.${bytes[14]}.${bytes[15]}`;
+  }
+
+  // RFC 5952 §4.2: find longest consecutive run of zero groups of length >= 2 (first wins ties)
+  let bestStart = -1;
+  let bestLen = 0;
+  let runStart = -1;
+
+  for (let i = 0; i <= 8; i++) {
+    if (i < 8 && groups[i] === 0) {
+      if (runStart === -1) {
+        runStart = i;
+      }
+    } else if (runStart !== -1) {
+      const runLen = i - runStart;
+      if (runLen >= 2 && runLen > bestLen) {
+        bestStart = runStart;
+        bestLen = runLen;
+      }
+      runStart = -1;
+    }
+  }
+
+  if (bestStart === -1) {
+    return groups.map((g) => g.toString(16)).join(':');
+  }
+
+  const left = groups
+    .slice(0, bestStart)
+    .map((g) => g.toString(16))
+    .join(':');
+  const right = groups
+    .slice(bestStart + bestLen)
+    .map((g) => g.toString(16))
+    .join(':');
+  return `${left}::${right}`;
 }
 
 /** Formats bytes as a continuous lowercase hexadecimal string without spaces. */

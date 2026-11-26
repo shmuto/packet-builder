@@ -10,6 +10,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
 } from '../core/presets';
@@ -21,6 +22,7 @@ describe('LayerCard per-field info controls', () => {
       createDefaultEthernet(),
       createDefaultARP(),
       createDefaultIPv4(),
+      createDefaultIPv6(),
       createDefaultICMP(),
       createDefaultUDP(),
       createDefaultTCP(),

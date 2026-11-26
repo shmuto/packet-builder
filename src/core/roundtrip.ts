@@ -47,7 +47,7 @@ export function analyzeBuiltBytesRoundTrip(
   }
 
   const outerLayerType = layers[0].type;
-  if (outerLayerType !== 'ethernet' && outerLayerType !== 'ipv4') {
+  if (outerLayerType !== 'ethernet' && outerLayerType !== 'ipv4' && outerLayerType !== 'ipv6') {
     return { kind: 'unsupported-start', outerLayerType };
   }
 

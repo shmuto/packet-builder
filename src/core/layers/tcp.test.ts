@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { parseIPv6 } from '../bytes';
 import { encodeTCP } from './tcp';
 import { autoValue, manualValue, type TCPLayer } from './types';
+
+function mustIPv6(addr: string): Uint8Array {
+  const res = parseIPv6(addr);
+  if (!res.ok) throw new Error(res.error);
+  return res.value;
+}
 
 function makeBaseTCP(overrides: Partial<TCPLayer> = {}): TCPLayer {
   return {
@@ -30,15 +37,23 @@ function makeBaseTCP(overrides: Partial<TCPLayer> = {}): TCPLayer {
 describe('encodeTCP', () => {
   const validIPv4 = {
     status: 'valid' as const,
+    version: 4 as const,
     srcIp: new Uint8Array([192, 168, 0, 1]),
     dstIp: new Uint8Array([192, 168, 0, 2]),
   };
 
-  it('TCP SYN ヘッダ（20 バイト）と擬似ヘッダチェックサムを正しく組み立てる', () => {
+  const validIPv6 = {
+    status: 'valid' as const,
+    version: 6 as const,
+    srcIp: mustIPv6('2001:db8::1'),
+    dstIp: mustIPv6('2001:db8::2'),
+  };
+
+  it('TCP SYN ヘッダ（20 バイト）と IPv4 擬似ヘッダチェックサムを正しく組み立てる', () => {
     const result = encodeTCP(makeBaseTCP(), {
       layerIndex: 0,
       upperBytes: new Uint8Array(0),
-      ipv4: validIPv4,
+      ip: validIPv4,
     });
 
     expect(result.ok).toBe(true);
@@ -56,40 +71,72 @@ describe('encodeTCP', () => {
     expect(result.resolvedAutoValues).toEqual({ dataOffset: 5, checksum: 0x54ba });
   });
 
-  it('チェックサム計算結果が 0x0000 になる場合、RFC 9293 に従い 0x0000 のまま格納する', () => {
-    const result = encodeTCP(
-      makeBaseTCP({
-        srcPort: 0xafe5,
-        dstPort: 0,
-        seqNumber: 0,
-        ackNumber: 0,
-        flags: {
-          cwr: false,
-          ece: false,
-          urg: false,
-          ack: false,
-          psh: false,
-          rst: false,
-          syn: false,
-          fin: false,
-        },
-        windowSize: 0,
-      }),
-      {
-        layerIndex: 0,
-        upperBytes: new Uint8Array(0),
-        ipv4: {
-          status: 'valid',
-          srcIp: new Uint8Array([0, 0, 0, 0]),
-          dstIp: new Uint8Array([0, 0, 0, 0]),
-        },
-      },
-    );
+  it('IPv6 擬似ヘッダ込みの TCP SYN チェックサムを正しく組み立てる（RFC 8200 §8.1）', () => {
+    // Hand verification:
+    // src=2001:db8::1 (0x2dba) + dst=2001:db8::2 (0x2dbb) + len=0x0014 + nh=0x0006 = 0x5b8f
+    // TCP: 0xd431 + 0x01bb + 0x03e8 + 0x5002 + 0xffff = 0x229d5
+    // total = 0x28564 -> fold: 0x8564 + 2 = 0x8566 -> ~0x8566 = 0x7a99
+    const result = encodeTCP(makeBaseTCP(), {
+      layerIndex: 0,
+      upperBytes: new Uint8Array(0),
+      ip: validIPv6,
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.bytes.slice(16, 18)).toEqual(new Uint8Array([0x00, 0x00]));
-    expect(result.resolvedAutoValues.checksum).toBe(0x0000);
+    expect(result.bytes.slice(16, 18)).toEqual(new Uint8Array([0x7a, 0x99]));
+    expect(result.warnings).toHaveLength(0);
+    expect(result.resolvedAutoValues).toEqual({ dataOffset: 5, checksum: 0x7a99 });
+  });
+
+  it('チェックサム計算結果が 0x0000 になる場合、IPv4/IPv6 ともに 0x0000 のまま格納する', () => {
+    const zeroTcp = makeBaseTCP({
+      srcPort: 0xafe5,
+      dstPort: 0,
+      seqNumber: 0,
+      ackNumber: 0,
+      flags: {
+        cwr: false,
+        ece: false,
+        urg: false,
+        ack: false,
+        psh: false,
+        rst: false,
+        syn: false,
+        fin: false,
+      },
+      windowSize: 0,
+    });
+
+    const ipv4Zero = encodeTCP(zeroTcp, {
+      layerIndex: 0,
+      upperBytes: new Uint8Array(0),
+      ip: {
+        status: 'valid',
+        version: 4,
+        srcIp: new Uint8Array([0, 0, 0, 0]),
+        dstIp: new Uint8Array([0, 0, 0, 0]),
+      },
+    });
+    expect(ipv4Zero.ok).toBe(true);
+    if (!ipv4Zero.ok) return;
+    expect(ipv4Zero.bytes.slice(16, 18)).toEqual(new Uint8Array([0x00, 0x00]));
+    expect(ipv4Zero.resolvedAutoValues.checksum).toBe(0x0000);
+
+    const ipv6Zero = encodeTCP(zeroTcp, {
+      layerIndex: 0,
+      upperBytes: new Uint8Array(0),
+      ip: {
+        status: 'valid',
+        version: 6,
+        srcIp: new Uint8Array(16),
+        dstIp: new Uint8Array(16),
+      },
+    });
+    expect(ipv6Zero.ok).toBe(true);
+    if (!ipv6Zero.ok) return;
+    expect(ipv6Zero.bytes.slice(16, 18)).toEqual(new Uint8Array([0x00, 0x00]));
+    expect(ipv6Zero.resolvedAutoValues.checksum).toBe(0x0000);
   });
 
   it('すべての Control Bits（8 ビット、RFC 9293）を正しいビット位置へ配置する', () => {
@@ -106,7 +153,7 @@ describe('encodeTCP', () => {
           fin: true,
         },
       }),
-      { layerIndex: 0, upperBytes: new Uint8Array(0), ipv4: validIPv4 },
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
     );
     expect(allOn.ok && allOn.bytes[13]).toBe(0xff);
 
@@ -123,7 +170,7 @@ describe('encodeTCP', () => {
           fin: false,
         },
       }),
-      { layerIndex: 0, upperBytes: new Uint8Array(0), ipv4: validIPv4 },
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
     );
     expect(ackPsh.ok && ackPsh.bytes[13]).toBe(0x18);
   });
@@ -134,7 +181,7 @@ describe('encodeTCP', () => {
         dataOffset: manualValue(4),
         checksum: manualValue(0xdead),
       }),
-      { layerIndex: 0, upperBytes: new Uint8Array(0), ipv4: validIPv4 },
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
     );
 
     expect(result.ok).toBe(true);
@@ -156,7 +203,7 @@ describe('encodeTCP', () => {
         checksum: manualValue(-1),
         urgentPointer: 70000,
       }),
-      { layerIndex: 0, upperBytes: new Uint8Array(0), ipv4: validIPv4 },
+      { layerIndex: 0, upperBytes: new Uint8Array(0), ip: validIPv4 },
     );
 
     expect(result.ok).toBe(false);
@@ -177,14 +224,14 @@ describe('encodeTCP', () => {
     const okMax = encodeTCP(makeBaseTCP(), {
       layerIndex: 0,
       upperBytes: new Uint8Array(65515), // 20 + 65515 = 65535
-      ipv4: validIPv4,
+      ip: validIPv4,
     });
     expect(okMax.ok).toBe(true);
 
     const overflow = encodeTCP(makeBaseTCP(), {
       layerIndex: 0,
       upperBytes: new Uint8Array(65516), // 20 + 65516 = 65536
-      ipv4: { status: 'absent' },
+      ip: { status: 'absent' },
     });
     expect(overflow.ok).toBe(false);
     if (!overflow.ok) {

@@ -8,6 +8,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
   createPresets,
@@ -48,6 +49,7 @@ describe('FIELD_DOCS coverage and quality', () => {
 
     // 2) All layer types and variants:
     //    - IPv4 with all flag bits toggled
+    //    - IPv6 fixed header
     //    - TCP with all 8 control bits toggled
     //    - BGP OPEN (1), UPDATE (2), NOTIFICATION (3), and KEEPALIVE (4)
     collectSpans([
@@ -57,6 +59,7 @@ describe('FIELD_DOCS coverage and quality', () => {
         ...createDefaultIPv4(),
         flags: { reserved: true, df: true, mf: true },
       },
+      createDefaultIPv6(),
       createDefaultICMP(),
       createDefaultUDP(),
       {

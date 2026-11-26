@@ -206,7 +206,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-etherType`}
                 label="EtherType"
-                hint="0x0800=IPv4 / 0x0806=ARP"
+                hint="0x0800=IPv4 / 0x86dd=IPv6 / 0x0806=ARP"
                 doc={fieldDoc('etherType')}
                 allowHex
                 hexDigits={4}
@@ -585,7 +585,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-protocol`}
                 label="Protocol"
-                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP"
+                hint="1=ICMP / 4=IP-in-IP / 6=TCP / 17=UDP / 41=IPv6"
                 doc={fieldDoc('protocol')}
                 value={layer.protocol}
                 resolvedAutoValue={resolvedAutoValues?.protocol}
@@ -611,6 +611,123 @@ export function LayerCard({
                 onHoverStart={hoverStart('headerChecksum')}
                 onHoverEnd={hoverEnd}
                 onChange={(headerChecksum) => onChange({ ...layer, headerChecksum })}
+              />
+            </div>
+          )}
+
+          {layer.type === 'ipv6' && (
+            <div className="field-grid">
+              <div className="fixed-field-row field-span-full">
+                <FixedFieldChip
+                  id={`${id}-version`}
+                  label="Version"
+                  value="6"
+                  bits="4b"
+                  doc={fieldDoc('version')}
+                  isHighlighted={isHighlighted('version')}
+                  onHoverStart={hoverStart('version')}
+                  onHoverEnd={hoverEnd}
+                />
+              </div>
+
+              <TextField
+                id={`${id}-srcIp`}
+                label="Source IPv6"
+                hint="128 bit"
+                doc={fieldDoc('srcIp')}
+                placeholder="2001:db8::1"
+                value={layer.srcIp}
+                error={fieldError('srcIp')}
+                warning={fieldWarning('srcIp')}
+                isHighlighted={isHighlighted('srcIp')}
+                onHoverStart={hoverStart('srcIp')}
+                onHoverEnd={hoverEnd}
+                onChange={(srcIp) => onChange({ ...layer, srcIp })}
+              />
+              <TextField
+                id={`${id}-dstIp`}
+                label="Destination IPv6"
+                hint="128 bit"
+                doc={fieldDoc('dstIp')}
+                placeholder="2001:db8::2"
+                value={layer.dstIp}
+                error={fieldError('dstIp')}
+                warning={fieldWarning('dstIp')}
+                isHighlighted={isHighlighted('dstIp')}
+                onHoverStart={hoverStart('dstIp')}
+                onHoverEnd={hoverEnd}
+                onChange={(dstIp) => onChange({ ...layer, dstIp })}
+              />
+              <NumberField
+                id={`${id}-hopLimit`}
+                label="Hop Limit"
+                hint="0-255"
+                doc={fieldDoc('hopLimit')}
+                value={layer.hopLimit}
+                error={fieldError('hopLimit')}
+                warning={fieldWarning('hopLimit')}
+                isHighlighted={isHighlighted('hopLimit')}
+                onHoverStart={hoverStart('hopLimit')}
+                onHoverEnd={hoverEnd}
+                onChange={(hopLimit) => onChange({ ...layer, hopLimit })}
+              />
+              <NumberField
+                id={`${id}-trafficClass`}
+                label="Traffic Class (DSCP/ECN)"
+                hint="8 bit"
+                doc={fieldDoc('trafficClass')}
+                allowHex
+                hexDigits={2}
+                value={layer.trafficClass}
+                error={fieldError('trafficClass')}
+                warning={fieldWarning('trafficClass')}
+                isHighlighted={isHighlighted('trafficClass')}
+                onHoverStart={hoverStart('trafficClass')}
+                onHoverEnd={hoverEnd}
+                onChange={(trafficClass) => onChange({ ...layer, trafficClass })}
+              />
+              <NumberField
+                id={`${id}-flowLabel`}
+                label="Flow Label"
+                hint="0x00000-0xfffff (20 bit)"
+                doc={fieldDoc('flowLabel')}
+                allowHex
+                hexDigits={5}
+                value={layer.flowLabel}
+                error={fieldError('flowLabel')}
+                warning={fieldWarning('flowLabel')}
+                isHighlighted={isHighlighted('flowLabel')}
+                onHoverStart={hoverStart('flowLabel')}
+                onHoverEnd={hoverEnd}
+                onChange={(flowLabel) => onChange({ ...layer, flowLabel })}
+              />
+              <AutoManualField
+                id={`${id}-payloadLength`}
+                label="Payload Length"
+                hint="bytes"
+                doc={fieldDoc('payloadLength')}
+                value={layer.payloadLength}
+                resolvedAutoValue={resolvedAutoValues?.payloadLength}
+                error={fieldError('payloadLength')}
+                warning={fieldWarning('payloadLength')}
+                isHighlighted={isHighlighted('payloadLength')}
+                onHoverStart={hoverStart('payloadLength')}
+                onHoverEnd={hoverEnd}
+                onChange={(payloadLength) => onChange({ ...layer, payloadLength })}
+              />
+              <AutoManualField
+                id={`${id}-nextHeader`}
+                label="Next Header"
+                hint="6=TCP / 17=UDP / 4=IPv4 / 41=IPv6"
+                doc={fieldDoc('nextHeader')}
+                value={layer.nextHeader}
+                resolvedAutoValue={resolvedAutoValues?.nextHeader}
+                error={fieldError('nextHeader')}
+                warning={fieldWarning('nextHeader')}
+                isHighlighted={isHighlighted('nextHeader')}
+                onHoverStart={hoverStart('nextHeader')}
+                onHoverEnd={hoverEnd}
+                onChange={(nextHeader) => onChange({ ...layer, nextHeader })}
               />
             </div>
           )}
@@ -733,7 +850,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-checksum`}
                 label="Checksum"
-                hint="IPv4 pseudo-header"
+                hint="IPv4/IPv6 pseudo-header"
                 doc={fieldDoc('checksum')}
                 allowHex
                 hexDigits={4}
@@ -901,7 +1018,7 @@ export function LayerCard({
               <AutoManualField
                 id={`${id}-checksum`}
                 label="Checksum"
-                hint="IPv4 pseudo-header"
+                hint="IPv4/IPv6 pseudo-header"
                 doc={fieldDoc('checksum')}
                 allowHex
                 hexDigits={4}

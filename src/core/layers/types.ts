@@ -16,7 +16,7 @@ export function manualValue<T>(value: T): AutoOrManual<T> {
   return { mode: 'manual', value };
 }
 
-export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'icmp' | 'udp' | 'tcp' | 'bgp';
+export type LayerType = 'ethernet' | 'arp' | 'ipv4' | 'ipv6' | 'icmp' | 'udp' | 'tcp' | 'bgp';
 
 export interface EthernetLayer {
   readonly type: 'ethernet';
@@ -83,6 +83,24 @@ export interface IPv4Layer {
   readonly dstIp: string;
 }
 
+export interface IPv6Layer {
+  readonly type: 'ipv6';
+  /** Traffic Class (8-bit: 6-bit DSCP + 2-bit ECN, 0-255, RFC 8200 §3) */
+  readonly trafficClass: number;
+  /** Flow Label (20-bit, 0-1048575 / 0x00000-0xfffff, RFC 8200 §3) */
+  readonly flowLabel: number;
+  /** Payload Length (16-bit, auto = upper-layer byte length, max 65535, RFC 8200 §3) */
+  readonly payloadLength: AutoOrManual<number>;
+  /** Next Header (8-bit IANA protocol number, auto = TCP 6 / UDP 17 / IPv4 4 / IPv6 41) */
+  readonly nextHeader: AutoOrManual<number>;
+  /** Hop Limit (8-bit, 0-255, RFC 8200 §3) */
+  readonly hopLimit: number;
+  /** Source IPv6 address (128-bit, RFC 4291 / RFC 5952) */
+  readonly srcIp: string;
+  /** Destination IPv6 address (128-bit, RFC 4291 / RFC 5952) */
+  readonly dstIp: string;
+}
+
 export interface ICMPLayer {
   readonly type: 'icmp';
   /** Type（8 ビット、例: Echo Request=8, Echo Reply=0） */
@@ -105,7 +123,7 @@ export interface UDPLayer {
   readonly dstPort: number;
   /** Length（16 ビット、自動時は 8 + 上位バイト長） */
   readonly length: AutoOrManual<number>;
-  /** Checksum（16 ビット、自動時は IPv4 擬似ヘッダ含む RFC 768 チェックサム） */
+  /** Checksum（16 ビット、自動時は IPv4/IPv6 擬似ヘッダ含むチェックサム） */
   readonly checksum: AutoOrManual<number>;
 }
 
@@ -144,7 +162,7 @@ export interface TCPLayer {
   readonly flags: TCPFlags;
   /** Window Size（16 ビット、0〜65535） */
   readonly windowSize: number;
-  /** Checksum（16 ビット、自動時は IPv4 擬似ヘッダ含む RFC 9293 チェックサム） */
+  /** Checksum（16 ビット、自動時は IPv4/IPv6 擬似ヘッダ含む RFC 9293 チェックサム） */
   readonly checksum: AutoOrManual<number>;
   /** Urgent Pointer（16 ビット、0〜65535） */
   readonly urgentPointer: number;
@@ -188,6 +206,7 @@ export type Layer =
   | EthernetLayer
   | ARPLayer
   | IPv4Layer
+  | IPv6Layer
   | ICMPLayer
   | UDPLayer
   | TCPLayer

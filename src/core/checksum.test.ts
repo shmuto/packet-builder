@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { internetChecksum, ipv4PseudoHeaderChecksum } from './checksum';
+import {
+  internetChecksum,
+  ipv4PseudoHeaderChecksum,
+  ipv6PseudoHeaderChecksum,
+} from './checksum';
 
 describe('internetChecksum', () => {
   it('RFC 1071 Section 3 の例と一致する', () => {
@@ -136,6 +140,86 @@ describe('ipv4PseudoHeaderChecksum', () => {
         dstIp: validIp,
         protocol: 17,
         segment: new Uint8Array(65536),
+      }).ok,
+    ).toBe(false);
+  });
+});
+
+describe('ipv6PseudoHeaderChecksum', () => {
+  it('computes RFC 8200 §8.1 pseudo-header checksum for odd-length UDP segment and verifies to 0', () => {
+    const srcIp = new Uint8Array([
+      0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+    ]);
+    const dstIp = new Uint8Array([
+      0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+    ]);
+    // UDP: srcPort=12345(0x3039), dstPort=80(0x0050), len=13(0x000d), csum=0, payload="Hello"
+    // Hand verification:
+    // pseudo: (0x2001+0x0db8+1) + (0x2001+0x0db8+2) + 0x000d + 0x0011 = 0x5b93
+    // segment: 0x3039 + 0x0050 + 0x000d + 0x4865 + 0x6c6c + 0x6f00 = 0x15467
+    // total = 0x1affa -> fold: 0xaffa + 1 = 0xaffb -> ~0xaffb = 0x5004
+    const segment = new Uint8Array([
+      0x30, 0x39, 0x00, 0x50, 0x00, 0x0d, 0x00, 0x00,
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    const result = ipv6PseudoHeaderChecksum({ srcIp, dstIp, nextHeader: 17, segment });
+    expect(result).toEqual({ ok: true, value: 0x5004 });
+
+    const withChecksum = new Uint8Array(segment);
+    withChecksum[6] = 0x50;
+    withChecksum[7] = 0x04;
+    expect(
+      ipv6PseudoHeaderChecksum({ srcIp, dstIp, nextHeader: 17, segment: withChecksum }),
+    ).toEqual({ ok: true, value: 0x0000 });
+  });
+
+  it('rejects wrong IPv6 address lengths and invalid Next Header values', () => {
+    const validIp = new Uint8Array(16);
+    const validSeg = new Uint8Array(8);
+
+    expect(
+      ipv6PseudoHeaderChecksum({
+        srcIp: new Uint8Array(4),
+        dstIp: validIp,
+        nextHeader: 17,
+        segment: validSeg,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      ipv6PseudoHeaderChecksum({
+        srcIp: validIp,
+        dstIp: new Uint8Array(17),
+        nextHeader: 17,
+        segment: validSeg,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      ipv6PseudoHeaderChecksum({
+        srcIp: validIp,
+        dstIp: validIp,
+        nextHeader: -1,
+        segment: validSeg,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      ipv6PseudoHeaderChecksum({
+        srcIp: validIp,
+        dstIp: validIp,
+        nextHeader: 256,
+        segment: validSeg,
+      }).ok,
+    ).toBe(false);
+
+    expect(
+      ipv6PseudoHeaderChecksum({
+        srcIp: validIp,
+        dstIp: validIp,
+        nextHeader: 17.5,
+        segment: validSeg,
       }).ok,
     ).toBe(false);
   });

@@ -69,6 +69,14 @@ export function ImportHexPanel({ onImport, onClose }: ImportHexPanelProps) {
           >
             Raw IPv4 Packet
           </button>
+          <button
+            type="button"
+            className={`mode-btn${startLayer === 'ipv6' ? ' is-active' : ''}`}
+            aria-pressed={startLayer === 'ipv6'}
+            onClick={() => setStartLayer('ipv6')}
+          >
+            Raw IPv6 Packet
+          </button>
         </div>
       </div>
 

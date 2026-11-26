@@ -4,10 +4,12 @@ import {
   decodeUtf8Strict,
   encodeUtf8,
   formatIPv4,
+  formatIPv6,
   formatMac,
   parseHexBytes,
   parseHexOrDump,
   parseIPv4,
+  parseIPv6,
   parseMac,
   readUint16BE,
   readUint32BE,
@@ -310,5 +312,109 @@ describe('parseHexOrDump / readUintBE / formatMac / formatIPv4', () => {
 
     expect(() => formatMac(new Uint8Array(5))).toThrow(RangeError);
     expect(() => formatIPv4(new Uint8Array(3))).toThrow(RangeError);
+  });
+});
+
+describe('parseIPv6 / formatIPv6', () => {
+  it('accepts full form, :: compression, and embedded dotted-quad IPv4 (RFC 4291 §2.2)', () => {
+    expect(parseIPv6('2001:0db8:0000:0000:0000:0000:0000:0001')).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      ]),
+    });
+    expect(parseIPv6('2001:DB8::1')).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      ]),
+    });
+    expect(parseIPv6('::')).toEqual({
+      ok: true,
+      value: new Uint8Array(16),
+    });
+    expect(parseIPv6('::1')).toEqual({
+      ok: true,
+      value: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+    });
+    expect(parseIPv6('fe80::')).toEqual({
+      ok: true,
+      value: new Uint8Array([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    });
+    expect(parseIPv6('::ffff:192.0.2.1')).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0xff, 0xff, 192, 0, 2, 1,
+      ]),
+    });
+    expect(parseIPv6('0:0:0:0:0:ffff:192.0.2.128')).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0xff, 0xff, 192, 0, 2, 128,
+      ]),
+    });
+    expect(parseIPv6('64:ff9b::192.0.2.33')).toEqual({
+      ok: true,
+      value: new Uint8Array([
+        0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0,
+        0, 0, 0, 0, 192, 0, 2, 33,
+      ]),
+    });
+  });
+
+  it.each([
+    ['empty string', ''],
+    ['zone ID', 'fe80::1%eth0'],
+    ['multiple ::', '2001::db8::1'],
+    ['group > 4 hex digits', '2001:0db80::1'],
+    ['non-hex char', '2001:db8::zzzz'],
+    ['too few groups without ::', '2001:db8:0:0:0:0:1'],
+    ['too many groups without ::', '2001:db8:0:0:0:0:0:0:1'],
+    ['too many groups with ::', '1:2:3:4::5:6:7:8'],
+    ['leading single colon', ':2001:db8::1'],
+    ['trailing single colon', '2001:db8::1:'],
+    ['triple colon', '2001:::1'],
+    ['embedded IPv4 not at end', '::192.0.2.1:1'],
+    ['embedded IPv4 before ::', '192.0.2.1::1'],
+    ['invalid embedded IPv4', '::ffff:999.0.2.1'],
+    ['whitespace', ' 2001:db8::1'],
+  ])('rejects invalid IPv6 input (%s: %s)', (_label, input) => {
+    const res = parseIPv6(input);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('formats IPv6 addresses in RFC 5952 §4 canonical form', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['2001:0db8:0000:0000:0000:0000:0000:0001', '2001:db8::1'],
+      // Single zero group MUST NOT be compressed (RFC 5952 §4.2.2)
+      ['2001:db8:0:1:1:1:1:1', '2001:db8:0:1:1:1:1:1'],
+      // Longest run of zeros compressed (RFC 5952 §4.2.1)
+      ['2001:0:0:1:0:0:0:1', '2001:0:0:1::1'],
+      // First run wins on a tie (RFC 5952 §4.2.3)
+      ['2001:db8:0:0:1:0:0:1', '2001:db8::1:0:0:1'],
+      ['0:0:0:0:0:0:0:0', '::'],
+      ['0:0:0:0:0:0:0:1', '::1'],
+      ['fe80:0:0:0:0:0:0:0', 'fe80::'],
+      // IPv4-mapped IPv6 address (RFC 5952 §5)
+      ['0:0:0:0:0:ffff:c000:0201', '::ffff:192.0.2.1'],
+    ];
+
+    for (const [input, expected] of cases) {
+      const parsed = parseIPv6(input);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(formatIPv6(parsed.value)).toBe(expected);
+      }
+    }
+
+    expect(() => formatIPv6(new Uint8Array(15))).toThrow(RangeError);
+    expect(() => formatIPv6(new Uint8Array(17))).toThrow(RangeError);
   });
 });

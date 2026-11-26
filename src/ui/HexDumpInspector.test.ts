@@ -148,7 +148,7 @@ describe('HexDumpInspector', () => {
     );
     expect(unsupportedHtml).toContain('export-status-info');
     expect(unsupportedHtml).toContain(
-      'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this stack starts with UDP. Use Copy Link to keep the exact stack.',
+      'Import Hex supports Ethernet II, Raw IPv4, or Raw IPv6 as the outermost header; this stack starts with UDP. Use Copy Link to keep the exact stack.',
     );
 
     const noHeadersHtml = renderToStaticMarkup(
@@ -164,7 +164,7 @@ describe('HexDumpInspector', () => {
       }),
     );
     expect(noHeadersHtml).toContain(
-      'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.',
+      'Import Hex supports Ethernet II, Raw IPv4, or Raw IPv6 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.',
     );
 
     const emptyDecodedHtml = renderToStaticMarkup(

@@ -25,6 +25,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
 } from './presets';
@@ -683,5 +684,100 @@ describe('buildUnifiedBitDiagramRows & layer range highlighting', () => {
     );
     expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 33 })).toBe(1);
     expect(resolveHighlightedLayerIndex(draft.spans, { kind: 'byte', byteIndex: 34 })).toBe(2);
+  });
+
+  it('covers IPv6 40-byte header in per-layer and unified 32-bit bit diagrams including 4b/8b/20b first word split', () => {
+    const draft = evaluatePacketDraft(
+      [createDefaultEthernet(), createDefaultIPv6(), createDefaultUDP()],
+      ok(encodeUtf8('Hello')),
+    );
+    expect(draft.ok).toBe(true);
+
+    // Segments: Ethernet (14B) + IPv6 (40B) + UDP (8B) + Payload (5B)
+    expect(draft.segments).toEqual([
+      { layerIndex: 0, layerType: 'ethernet', byteOffset: 0, byteLength: 14 },
+      { layerIndex: 1, layerType: 'ipv6', byteOffset: 14, byteLength: 40 },
+      { layerIndex: 2, layerType: 'udp', byteOffset: 54, byteLength: 8 },
+      { layerIndex: 3, layerType: 'payload', byteOffset: 62, byteLength: 5 },
+    ]);
+
+    // Per-layer IPv6 diagram (320 bits = 10 rows of 32 bits, RFC 8200 §3)
+    const ipv6Rows = buildBitDiagramRows(draft.spans, 1);
+    expect(ipv6Rows).toHaveLength(10);
+    expectContiguousBitDiagram(ipv6Rows, 320);
+    expect(ipv6Rows[0].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['version', 0, 4],
+      ['trafficClass', 4, 8],
+      ['flowLabel', 12, 20],
+    ]);
+    expect(ipv6Rows[1].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan])).toEqual([
+      ['payloadLength', 0, 16],
+      ['nextHeader', 16, 8],
+      ['hopLimit', 24, 8],
+    ]);
+    // Source IPv6 spans rows 2..5 (4 x 32 bits = 128 bits), Destination IPv6 spans rows 6..9
+    expect(ipv6Rows[2].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 32,
+      isContinuation: false,
+    });
+    expect(ipv6Rows[5].cells[0].span.fieldId).toBe('srcIp');
+    expect(ipv6Rows[6].cells[0]).toMatchObject({
+      colStart: 0,
+      colSpan: 32,
+      isContinuation: false,
+    });
+    expect(ipv6Rows[9].cells[0].span.fieldId).toBe('dstIp');
+
+    // Unified bit diagram: Ethernet (112b) + IPv6 (320b) + UDP (64b) = 496 bits (16 rows: 15x32 + 16)
+    const unified = buildUnifiedBitDiagramRows(draft.spans);
+    expect(unified).toHaveLength(16);
+    let unifiedTotalBits = 0;
+    for (let r = 0; r < unified.length; r++) {
+      const row = unified[r];
+      expect(row.bitOffset).toBe(r * 32);
+      let colCursor = 0;
+      for (const cell of row.cells) {
+        expect(cell.colStart).toBe(colCursor);
+        colCursor += cell.colSpan;
+      }
+      expect(colCursor).toBe(row.totalBitsInRow);
+      unifiedTotalBits += colCursor;
+    }
+    expect(unifiedTotalBits).toBe(496);
+    // Row 3 starts at bit 96: Ethernet EtherType (16b) followed by IPv6 Version (4b) + Traffic Class (8b) + Flow Label first 4b
+    expect(
+      unified[3].cells.map((c) => [
+        c.span.layerType,
+        c.span.fieldId,
+        c.colSpan,
+        c.isLayerStart,
+        c.isLayerEnd,
+      ]),
+    ).toEqual([
+      ['ethernet', 'etherType', 16, false, true],
+      ['ipv6', 'version', 4, true, false],
+      ['ipv6', 'trafficClass', 8, false, false],
+      ['ipv6', 'flowLabel', 4, false, false],
+    ]);
+    // Row 4 continues Flow Label (remaining 16b) + Payload Length (16b)
+    expect(
+      unified[4].cells.map((c) => [c.span.fieldId, c.colStart, c.colSpan, c.isContinuation]),
+    ).toEqual([
+      ['flowLabel', 0, 16, true],
+      ['payloadLength', 16, 16, false],
+    ]);
+
+    // Sub-byte hover mapping on IPv6 byte 0 (packet byte 14): Version (4b) + upper 4b of Traffic Class
+    const pktByte14 = { kind: 'byte' as const, byteIndex: 14 };
+    expect(isFieldHighlighted(1, 'version', draft.spans, pktByte14)).toBe(true);
+    expect(isFieldHighlighted(1, 'trafficClass', draft.spans, pktByte14)).toBe(true);
+    expect(isFieldHighlighted(1, 'flowLabel', draft.spans, pktByte14)).toBe(false);
+
+    // IPv6 byte 1 (packet byte 15): lower 4b of Traffic Class + upper 4b of Flow Label
+    const pktByte15 = { kind: 'byte' as const, byteIndex: 15 };
+    expect(isFieldHighlighted(1, 'version', draft.spans, pktByte15)).toBe(false);
+    expect(isFieldHighlighted(1, 'trafficClass', draft.spans, pktByte15)).toBe(true);
+    expect(isFieldHighlighted(1, 'flowLabel', draft.spans, pktByte15)).toBe(true);
   });
 });

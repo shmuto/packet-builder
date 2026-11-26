@@ -8,6 +8,7 @@ import {
   createDefaultEthernet,
   createDefaultICMP,
   createDefaultIPv4,
+  createDefaultIPv6,
   createDefaultTCP,
   createDefaultUDP,
 } from './presets';
@@ -576,5 +577,213 @@ describe('buildPacket', () => {
     expect(result.warnings.some((w) => w.message.includes('No underlying IPv4 layer'))).toBe(
       false,
     );
+  });
+
+  it('matches known Ethernet II + IPv6 + UDP + "Hello" packet byte-for-byte (RFC 8200)', () => {
+    // Hand-verified UDP/IPv6 checksum (RFC 8200 §8.1):
+    //   src = 2001:db8::1 -> 0x2001 + 0x0db8 + 0x0001 = 0x2dba
+    //   dst = 2001:db8::2 -> 0x2001 + 0x0db8 + 0x0002 = 0x2dbb
+    //   upper-layer length = 13 (0x000d), next header = 17 (0x0011)
+    //   pseudo-header sum = 0x2dba + 0x2dbb + 0x000d + 0x0011 = 0x5b93
+    //   UDP header (12345->80, len=13, csum=0): 0x3039 + 0x0050 + 0x000d = 0x3096
+    //   payload "Hello" padded: 0x4865 + 0x6c6c + 0x6f00 = 0x123d1
+    //   total = 0x1affa -> fold: 0xaffa + 1 = 0xaffb -> ~0xaffb = 0x5004
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): EtherType = 0x86dd (IPv6)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x86, 0xdd,
+      // IPv6 (40B): Ver=6, TC=0, Flow=0, PayloadLen=13(0x000d), NH=17(0x11), HopLimit=64(0x40)
+      0x60, 0x00, 0x00, 0x00,
+      0x00, 0x0d, 0x11, 0x40,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      // UDP (8B): 12345 -> 80, Len=13(0x000d), Checksum=0x5004
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x50, 0x04,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known Ethernet II + IPv6 + TCP SYN packet byte-for-byte (RFC 8200 / RFC 9293)', () => {
+    // Hand-verified TCP/IPv6 checksum (RFC 8200 §8.1):
+    //   pseudo: 0x2dba + 0x2dbb + 0x0014 (20B) + 0x0006 (TCP) = 0x5b8f
+    //   TCP SYN (54321->443, seq=1000, ack=0, off=5, SYN, win=65535):
+    //   0xd431 + 0x01bb + 0x03e8 + 0x5002 + 0xffff = 0x229d5
+    //   total = 0x28564 -> fold: 0x8564 + 2 = 0x8566 -> ~0x8566 = 0x7a99
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      createDefaultTCP(),
+    ];
+
+    const result = buildPacket(layers, new Uint8Array(0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x86, 0xdd,
+      // IPv6 (40B): PayloadLen=20(0x0014), NH=6(0x06), HopLimit=64
+      0x60, 0x00, 0x00, 0x00,
+      0x00, 0x14, 0x06, 0x40,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      // TCP (20B): 54321 -> 443, Seq=1000, Ack=0, DataOffset=5, SYN, Win=65535, Checksum=0x7a99
+      0xd4, 0x31, 0x01, 0xbb,
+      0x00, 0x00, 0x03, 0xe8,
+      0x00, 0x00, 0x00, 0x00,
+      0x50, 0x02, 0xff, 0xff,
+      0x7a, 0x99, 0x00, 0x00,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known 6in4 tunnel (Ethernet + IPv4 Proto 41 + IPv6 + UDP + "Hello") and uses inner IPv6 pseudo-header', () => {
+    // Outer IPv4 (10.0.0.1 -> 10.0.0.2, TotalLen=73=0x0049, ID=0x1234, DF=0x4000, TTL=64, Proto=41=0x29):
+    //   sum = 0x4500 + 0x0049 + 0x1234 + 0x4000 + 0x4029 + 0x0a00 + 0x0001 + 0x0a00 + 0x0002 = 0xeba9
+    //   ~0xeba9 = 0x1456
+    // UDP checksum MUST use inner IPv6 (2001:db8::1 -> 2001:db8::2) = 0x5004 (not outer IPv4).
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      { ...createDefaultIPv4(), srcIp: '10.0.0.1', dstIp: '10.0.0.2' },
+      createDefaultIPv6(),
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): EtherType = 0x0800 (IPv4)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x08, 0x00,
+      // Outer IPv4 (20B): TotalLen=73(0x0049), Proto=41(0x29), Checksum=0x1456
+      0x45, 0x00, 0x00, 0x49,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x29, 0x14, 0x56,
+      0x0a, 0x00, 0x00, 0x01,
+      0x0a, 0x00, 0x00, 0x02,
+      // Inner IPv6 (40B): PayloadLen=13(0x000d), NH=17(0x11), HopLimit=64
+      0x60, 0x00, 0x00, 0x00,
+      0x00, 0x0d, 0x11, 0x40,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      // UDP (8B): checksum 0x5004 from inner IPv6
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x50, 0x04,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('matches known 4in6 tunnel (Ethernet + IPv6 NH 4 + IPv4 + UDP + "Hello") and uses inner IPv4 pseudo-header', () => {
+    // Outer IPv6 (2001:db8::1 -> 2001:db8::2, PayloadLen=33=0x0021, NH=4=IPv4, HopLimit=64)
+    // Inner IPv4 (192.168.0.1 -> 192.168.0.2, TotalLen=33=0x0021, Proto=17, Checksum=0xa744)
+    // UDP checksum MUST use inner IPv4 (192.168.0.1 -> 192.168.0.2) = 0x2a25 (not outer IPv6).
+    const layers: Layer[] = [
+      createDefaultEthernet(),
+      createDefaultIPv6(),
+      createDefaultIPv4(),
+      {
+        type: 'udp',
+        srcPort: 12345,
+        dstPort: 80,
+        length: autoValue(),
+        checksum: autoValue(),
+      },
+    ];
+
+    const result = buildPacket(layers, encodeUtf8('Hello'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expected = new Uint8Array([
+      // Ethernet II (14B): EtherType = 0x86dd (IPv6)
+      0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+      0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+      0x86, 0xdd,
+      // Outer IPv6 (40B): PayloadLen=33(0x0021), NH=4(0x04), HopLimit=64
+      0x60, 0x00, 0x00, 0x00,
+      0x00, 0x21, 0x04, 0x40,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+      // Inner IPv4 (20B): TotalLen=33(0x0021), Proto=17(0x11), Checksum=0xa744
+      0x45, 0x00, 0x00, 0x21,
+      0x12, 0x34, 0x40, 0x00,
+      0x40, 0x11, 0xa7, 0x44,
+      0xc0, 0xa8, 0x00, 0x01,
+      0xc0, 0xa8, 0x00, 0x02,
+      // UDP (8B): checksum 0x2a25 from inner IPv4
+      0x30, 0x39, 0x00, 0x50,
+      0x00, 0x0d, 0x2a, 0x25,
+      // Payload ("Hello")
+      0x48, 0x65, 0x6c, 0x6c, 0x6f,
+    ]);
+
+    expect(result.bytes).toEqual(expected);
+    expect(result.warnings).toHaveLength(0);
+    expectExactBitCoverage(result.spans, expected.length);
+  });
+
+  it('validates IPv6 Payload Length boundary (65535B succeeds; 65536B fails)', () => {
+    const layers: Layer[] = [createDefaultIPv6()];
+
+    const maxOk = buildPacket(layers, new Uint8Array(65535));
+    expect(maxOk.ok).toBe(true);
+
+    const overflow = buildPacket(layers, new Uint8Array(65536));
+    expect(overflow.ok).toBe(false);
+    if (!overflow.ok) {
+      expect(
+        overflow.errors.some((e) => e.layerIndex === 0 && e.fieldId === 'payloadLength'),
+      ).toBe(true);
+    }
   });
 });

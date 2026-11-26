@@ -48,7 +48,7 @@ describe('encodeIPv4', () => {
     });
   });
 
-  it('上位レイヤー種別に応じて Protocol 番号を自動設定する（ICMP=1, IP-in-IP=4, TCP=6, UDP=17）', () => {
+  it('上位レイヤー種別に応じて Protocol 番号を自動設定する（ICMP=1, IP-in-IP=4, TCP=6, UDP=17, IPv6=41）', () => {
     const icmp = encodeIPv4(makeBaseIPv4(), {
       layerIndex: 0,
       upperLayerType: 'icmp',
@@ -69,12 +69,19 @@ describe('encodeIPv4', () => {
       upperLayerType: 'udp',
       upperBytesLength: 8,
     });
+    const ipv6 = encodeIPv4(makeBaseIPv4(), {
+      layerIndex: 0,
+      upperLayerType: 'ipv6',
+      upperBytesLength: 40,
+    });
 
     expect(icmp.ok && icmp.bytes[9]).toBe(1);
     expect(ipip.ok && ipip.bytes[9]).toBe(4);
     expect(ipip.ok && ipip.warnings).toEqual([]);
     expect(tcp.ok && tcp.bytes[9]).toBe(6);
     expect(udp.ok && udp.bytes[9]).toBe(17);
+    expect(ipv6.ok && ipv6.bytes[9]).toBe(41);
+    expect(ipv6.ok && ipv6.warnings).toEqual([]);
   });
 
   it('Flags(3bit) と Fragment Offset(13bit) の境界ビットを正しく配置する', () => {

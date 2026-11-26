@@ -91,9 +91,9 @@ function formatRoundTripNotice(report: RoundTripReport | undefined): string | nu
   }
   if (report.kind === 'unsupported-start') {
     if (report.outerLayerType === null) {
-      return 'Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.';
+      return 'Import Hex supports Ethernet II, Raw IPv4, or Raw IPv6 as the outermost header; this packet has no header layers. Use Copy Link to keep the exact stack.';
     }
-    return `Import Hex supports Ethernet II or Raw IPv4 as the outermost header; this stack starts with ${LAYER_META[report.outerLayerType].shortName}. Use Copy Link to keep the exact stack.`;
+    return `Import Hex supports Ethernet II, Raw IPv4, or Raw IPv6 as the outermost header; this stack starts with ${LAYER_META[report.outerLayerType].shortName}. Use Copy Link to keep the exact stack.`;
   }
   if (report.decodedLayerTypes.length === 0) {
     return 'Import Hex cannot decode these bytes back into the same layer stack. Use Copy Link to keep the exact stack.';

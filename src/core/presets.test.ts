@@ -73,4 +73,24 @@ describe('presets', () => {
     // BGP Length = 29 (0x001d), Type = 1 (OPEN), Version = 4
     expect(result.bytes.slice(70, 74)).toEqual(new Uint8Array([0x00, 0x1d, 0x01, 0x04]));
   });
+
+  it('IPv6 UDP preset builds a 67-byte RFC 8200 frame with EtherType 0x86dd and zero warnings', () => {
+    const ipv6Preset = createPresets().find((p) => p.id === 'udp-ipv6');
+    expect(ipv6Preset).toBeDefined();
+    if (!ipv6Preset) return;
+
+    const result = buildPacket(ipv6Preset.layers, ipv6Preset.payloadBytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 14(Ethernet) + 40(IPv6) + 8(UDP) + 5("Hello") = 67 bytes
+    expect(result.bytes.length).toBe(67);
+    expect(result.warnings).toHaveLength(0);
+    // EtherType = 0x86dd (IPv6)
+    expect(result.bytes.slice(12, 14)).toEqual(new Uint8Array([0x86, 0xdd]));
+    // IPv6 Version=6, Payload Length=13 (0x000d), Next Header=17 (UDP), Hop Limit=64
+    expect(result.bytes.slice(14, 22)).toEqual(
+      new Uint8Array([0x60, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x11, 0x40]),
+    );
+  });
 });

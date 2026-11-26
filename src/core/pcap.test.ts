@@ -9,7 +9,12 @@ import {
   PCAP_PACKET_HEADER_LENGTH,
   selectPcapLinkType,
 } from './pcap';
-import { createDefaultEthernet, createDefaultIPv4, createDefaultUDP } from './presets';
+import {
+  createDefaultEthernet,
+  createDefaultIPv4,
+  createDefaultIPv6,
+  createDefaultUDP,
+} from './presets';
 
 describe('selectPcapLinkType', () => {
   it('selects link type based on the outermost layer', () => {
@@ -17,6 +22,7 @@ describe('selectPcapLinkType', () => {
       LINKTYPE_ETHERNET,
     );
     expect(selectPcapLinkType([createDefaultIPv4(), createDefaultUDP()])).toBe(LINKTYPE_RAW);
+    expect(selectPcapLinkType([createDefaultIPv6(), createDefaultUDP()])).toBe(LINKTYPE_RAW);
     expect(selectPcapLinkType([createDefaultUDP()])).toBe(LINKTYPE_USER0);
     expect(selectPcapLinkType([])).toBe(LINKTYPE_USER0);
   });

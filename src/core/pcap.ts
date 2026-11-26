@@ -25,7 +25,7 @@ export interface BuildPcapOptions {
 /**
  * Selects the most appropriate libpcap link-layer header type from the outermost layer.
  * - Ethernet II -> LINKTYPE_ETHERNET (1)
- * - IPv4        -> LINKTYPE_RAW (101)
+ * - IPv4 / IPv6 -> LINKTYPE_RAW (101)
  * - Other/Empty -> LINKTYPE_USER0 (147)
  */
 export function selectPcapLinkType(layers: readonly Layer[]): number {
@@ -36,7 +36,7 @@ export function selectPcapLinkType(layers: readonly Layer[]): number {
   if (first.type === 'ethernet') {
     return LINKTYPE_ETHERNET;
   }
-  if (first.type === 'ipv4') {
+  if (first.type === 'ipv4' || first.type === 'ipv6') {
     return LINKTYPE_RAW;
   }
   return LINKTYPE_USER0;

@@ -1,7 +1,7 @@
 import { concatBytes, writeUint16BE, writeUint32BE } from '../bytes';
-import { ipv4PseudoHeaderChecksum } from '../checksum';
+import { ipv4PseudoHeaderChecksum, ipv6PseudoHeaderChecksum } from '../checksum';
 import { IP_PROTOCOL_TCP } from './ipv4';
-import type { IPv4PseudoContext } from './udp';
+import type { IPPseudoContext } from './udp';
 import type {
   LayerEncodeResult,
   PacketError,
@@ -31,12 +31,12 @@ export const TCP_FIELD_SPANS: readonly RelativeFieldSpan[] = [
 export interface EncodeTCPContext {
   readonly layerIndex: number;
   readonly upperBytes: Uint8Array;
-  /** Underlying IPv4 layer state used for pseudo-header checksum calculation */
-  readonly ipv4: IPv4PseudoContext;
+  /** Immediately preceding IPv4 or IPv6 layer state used for pseudo-header checksum calculation */
+  readonly ip: IPPseudoContext;
 }
 
 /**
- * Encodes a 20-byte base TCP header (RFC 9293 Section 3.1).
+ * Encodes a 20-byte base TCP header (RFC 9293 Section 3.1 / RFC 8200 §8.1).
  * Keeps a computed checksum of 0x0000 as 0x0000 per RFC 9293.
  */
 export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeResult {
@@ -137,24 +137,32 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
   writeUint16BE(header, 18, layer.urgentPointer);
 
   let autoChecksum = 0;
-  if (ctx.ipv4.status === 'valid') {
+  if (ctx.ip.status === 'valid') {
     const segment = concatBytes(header, ctx.upperBytes);
-    const csumResult = ipv4PseudoHeaderChecksum({
-      srcIp: ctx.ipv4.srcIp,
-      dstIp: ctx.ipv4.dstIp,
-      protocol: IP_PROTOCOL_TCP,
-      segment,
-    });
+    const csumResult =
+      ctx.ip.version === 4
+        ? ipv4PseudoHeaderChecksum({
+            srcIp: ctx.ip.srcIp,
+            dstIp: ctx.ip.dstIp,
+            protocol: IP_PROTOCOL_TCP,
+            segment,
+          })
+        : ipv6PseudoHeaderChecksum({
+            srcIp: ctx.ip.srcIp,
+            dstIp: ctx.ip.dstIp,
+            nextHeader: IP_PROTOCOL_TCP,
+            segment,
+          });
     if (!csumResult.ok) {
       errors.push({ layerIndex: ctx.layerIndex, fieldId: 'checksum', message: csumResult.error });
       return { ok: false, errors, warnings };
     }
     autoChecksum = csumResult.value;
-  } else if (ctx.ipv4.status === 'absent' && layer.checksum.mode === 'auto') {
+  } else if (ctx.ip.status === 'absent' && layer.checksum.mode === 'auto') {
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'checksum',
-      message: 'No underlying IPv4 layer for pseudo-header; setting TCP Checksum to 0x0000.',
+      message: 'No underlying IPv4 or IPv6 layer for pseudo-header; setting TCP Checksum to 0x0000.',
     });
   }
 
@@ -163,7 +171,7 @@ export function encodeTCP(layer: TCPLayer, ctx: EncodeTCPContext): LayerEncodeRe
 
   if (
     layer.checksum.mode === 'manual' &&
-    ctx.ipv4.status === 'valid' &&
+    ctx.ip.status === 'valid' &&
     checksumValue !== autoChecksum
   ) {
     warnings.push({

@@ -17,6 +17,8 @@ export const ETHERNET_MIN_FRAME_LENGTH = 60;
 export const ETHERTYPE_IPV4 = 0x0800;
 /** EtherType for ARP (RFC 826) */
 export const ETHERTYPE_ARP = 0x0806;
+/** EtherType for IPv6 (RFC 2464) */
+export const ETHERTYPE_IPV6 = 0x86dd;
 
 export const ETHERNET_FIELD_SPANS: readonly RelativeFieldSpan[] = [
   { fieldId: 'dstMac', label: 'Destination MAC', bitOffset: 0, bitLength: 48 },
@@ -32,8 +34,15 @@ export interface EncodeEthernetContext {
 
 function etherTypeForUpperLayer(upperLayerType: LayerType | null): number | null {
   if (upperLayerType === 'ipv4') return ETHERTYPE_IPV4;
+  if (upperLayerType === 'ipv6') return ETHERTYPE_IPV6;
   if (upperLayerType === 'arp') return ETHERTYPE_ARP;
   return null;
+}
+
+function upperLayerNameForEtherType(upperLayerType: LayerType | null): string {
+  if (upperLayerType === 'arp') return 'ARP';
+  if (upperLayerType === 'ipv6') return 'IPv6';
+  return 'IPv4';
 }
 
 /**
@@ -68,7 +77,7 @@ export function encodeEthernet(
       etherTypeValue = layer.etherType.value;
       if (inferredEtherType !== null && etherTypeValue !== inferredEtherType) {
         const expectedHex = `0x${inferredEtherType.toString(16).padStart(4, '0')}`;
-        const upperName = ctx.upperLayerType === 'arp' ? 'ARP' : 'IPv4';
+        const upperName = upperLayerNameForEtherType(ctx.upperLayerType);
         warnings.push({
           layerIndex: ctx.layerIndex,
           fieldId: 'etherType',
@@ -80,7 +89,7 @@ export function encodeEthernet(
     warnings.push({
       layerIndex: ctx.layerIndex,
       fieldId: 'etherType',
-      message: 'Upper layer is not IPv4 or ARP; defaulting EtherType to 0x0800.',
+      message: 'Upper layer is not IPv4, IPv6, or ARP; defaulting EtherType to 0x0800.',
     });
   }
 

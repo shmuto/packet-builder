@@ -75,6 +75,24 @@ describe('encodeEthernet', () => {
     expect(manualWrong.warnings.some((w) => w.fieldId === 'etherType' && w.message.includes('0x0806'))).toBe(true);
   });
 
+  it('直上が IPv6 のとき EtherType を自動で 0x86dd に設定する（RFC 8200）', () => {
+    const autoIPv6 = encodeEthernet(
+      {
+        type: 'ethernet',
+        dstMac: '00:11:22:33:44:55',
+        srcMac: '66:77:88:99:aa:bb',
+        etherType: autoValue(),
+      },
+      { layerIndex: 0, upperLayerType: 'ipv6', upperBytesLength: 53 },
+    );
+
+    expect(autoIPv6.ok).toBe(true);
+    if (!autoIPv6.ok) return;
+    expect(autoIPv6.bytes.slice(12, 14)).toEqual(new Uint8Array([0x86, 0xdd]));
+    expect(autoIPv6.resolvedAutoValues).toEqual({ etherType: 0x86dd });
+    expect(autoIPv6.warnings).toHaveLength(0);
+  });
+
   it('フレーム長 59 バイトでは警告が出て、ちょうど 60 バイトでは警告が出ない（IEEE 802.3）', () => {
     const shortFrame = encodeEthernet(
       {

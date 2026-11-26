@@ -1,11 +1,16 @@
 import {
   decodeUtf8Strict,
   formatIPv4,
+  formatIPv6,
   formatMac,
   readUint16BE,
   readUint32BE,
 } from './bytes';
-import { internetChecksum, ipv4PseudoHeaderChecksum } from './checksum';
+import {
+  internetChecksum,
+  ipv4PseudoHeaderChecksum,
+  ipv6PseudoHeaderChecksum,
+} from './checksum';
 import {
   ARP_HEADER_LENGTH,
   ARP_HLEN_ETHERNET,
@@ -28,17 +33,20 @@ import {
   ETHERNET_HEADER_LENGTH,
   ETHERTYPE_ARP,
   ETHERTYPE_IPV4,
+  ETHERTYPE_IPV6,
 } from './layers/ethernet';
 import { ICMP_HEADER_LENGTH } from './layers/icmp';
 import {
   IP_PROTOCOL_ICMP,
   IP_PROTOCOL_IPIP,
+  IP_PROTOCOL_IPV6,
   IP_PROTOCOL_TCP,
   IP_PROTOCOL_UDP,
   IPV4_HEADER_LENGTH,
   IPV4_IHL,
   IPV4_VERSION,
 } from './layers/ipv4';
+import { IPV6_HEADER_LENGTH, IPV6_VERSION } from './layers/ipv6';
 import { TCP_DEFAULT_DATA_OFFSET, TCP_HEADER_LENGTH } from './layers/tcp';
 import {
   autoValue,
@@ -49,6 +57,7 @@ import {
   type EthernetLayer,
   type ICMPLayer,
   type IPv4Layer,
+  type IPv6Layer,
   type Layer,
   type TCPLayer,
   type UDPLayer,
@@ -56,13 +65,19 @@ import {
 import { UDP_HEADER_LENGTH } from './layers/udp';
 import { err, ok, type Result } from './result';
 
-export type DecodeStartLayer = 'ethernet' | 'ipv4';
+export type DecodeStartLayer = 'ethernet' | 'ipv4' | 'ipv6';
 
 export interface DecodedPacket {
   readonly layers: readonly Layer[];
   readonly payload: Uint8Array;
   /** Informational notes about unsupported/truncated or non-base header fields */
   readonly notes: readonly string[];
+}
+
+interface PseudoIPInfo {
+  readonly version: 4 | 6;
+  readonly srcIp: Uint8Array;
+  readonly dstIp: Uint8Array;
 }
 
 function decodeARPAt(bytes: Uint8Array, offset: number): ARPLayer {
@@ -111,11 +126,30 @@ function decodeICMPAt(bytes: Uint8Array, offset: number): { layer: ICMPLayer; pa
   };
 }
 
+function computePseudoChecksum(
+  ip: PseudoIPInfo,
+  protocol: number,
+  segment: Uint8Array,
+): Result<number> {
+  return ip.version === 4
+    ? ipv4PseudoHeaderChecksum({
+        srcIp: ip.srcIp,
+        dstIp: ip.dstIp,
+        protocol,
+        segment,
+      })
+    : ipv6PseudoHeaderChecksum({
+        srcIp: ip.srcIp,
+        dstIp: ip.dstIp,
+        nextHeader: protocol,
+        segment,
+      });
+}
+
 function decodeUDPAt(
   bytes: Uint8Array,
   offset: number,
-  srcIpBytes: Uint8Array,
-  dstIpBytes: Uint8Array,
+  ip: PseudoIPInfo,
 ): { layer: UDPLayer; payload: Uint8Array } {
   const srcPort = readUint16BE(bytes, offset);
   const dstPort = readUint16BE(bytes, offset + 2);
@@ -127,12 +161,7 @@ function decodeUDPAt(
   segmentCopy[6] = 0;
   segmentCopy[7] = 0;
 
-  const csumRes = ipv4PseudoHeaderChecksum({
-    srcIp: srcIpBytes,
-    dstIp: dstIpBytes,
-    protocol: IP_PROTOCOL_UDP,
-    segment: segmentCopy,
-  });
+  const csumRes = computePseudoChecksum(ip, IP_PROTOCOL_UDP, segmentCopy);
   const expectedChecksum = csumRes.ok ? (csumRes.value === 0 ? 0xffff : csumRes.value) : null;
 
   return {
@@ -153,8 +182,7 @@ function decodeUDPAt(
 function decodeTCPAt(
   bytes: Uint8Array,
   offset: number,
-  srcIpBytes: Uint8Array,
-  dstIpBytes: Uint8Array,
+  ip: PseudoIPInfo,
   notes: string[],
 ): { layer: TCPLayer; payload: Uint8Array } {
   const srcPort = readUint16BE(bytes, offset);
@@ -183,12 +211,7 @@ function decodeTCPAt(
   const segmentCopy = new Uint8Array(bytes.subarray(offset));
   segmentCopy[16] = 0;
   segmentCopy[17] = 0;
-  const csumRes = ipv4PseudoHeaderChecksum({
-    srcIp: srcIpBytes,
-    dstIp: dstIpBytes,
-    protocol: IP_PROTOCOL_TCP,
-    segment: segmentCopy,
-  });
+  const csumRes = computePseudoChecksum(ip, IP_PROTOCOL_TCP, segmentCopy);
   const expectedChecksum = csumRes.ok ? csumRes.value : null;
 
   return {
@@ -371,8 +394,117 @@ function isAllZero(bytes: Uint8Array): boolean {
   return true;
 }
 
-/** Maximum total IPv4 layers decoded (outer + nested IP-in-IP) to guard against pathological inputs */
-const MAX_IPV4_LAYERS = 16;
+/** Maximum total IP layers decoded (outer + nested IPv4/IPv6 tunnels) to guard against pathological inputs */
+const MAX_IP_LAYERS = 16;
+
+const IPV6_EXTENSION_HEADER_NAMES: Readonly<Record<number, string>> = {
+  0: 'Hop-by-Hop Options',
+  43: 'Routing',
+  44: 'Fragment',
+  50: 'ESP',
+  51: 'AH',
+  60: 'Destination Options',
+};
+
+function decodeTCPAndBGPAt(
+  scopedBytes: Uint8Array,
+  upperOffset: number,
+  ip: PseudoIPInfo,
+  decodedUpperLayers: Layer[],
+  notes: string[],
+): Uint8Array {
+  const res = decodeTCPAt(scopedBytes, upperOffset, ip, notes);
+  decodedUpperLayers.push(res.layer);
+  const isBgpPort = res.layer.srcPort === BGP_PORT || res.layer.dstPort === BGP_PORT;
+  if (isBgpPort && res.payload.length > 0) {
+    if (res.layer.dataOffset.mode === 'auto') {
+      const bgpRes = decodeBGPAt(res.payload, notes);
+      if (bgpRes !== null) {
+        decodedUpperLayers.push(bgpRes.layer);
+        return bgpRes.payload;
+      }
+      return res.payload;
+    }
+    const tcpOptionsBytes = Math.max(
+      0,
+      (res.layer.dataOffset.value - TCP_DEFAULT_DATA_OFFSET) * 4,
+    );
+    if (res.layer.dataOffset.value < TCP_DEFAULT_DATA_OFFSET) {
+      notes.push(
+        `TCP segment on port 179 has invalid Data Offset (${res.layer.dataOffset.value}); BGP-4 decoding skipped.`,
+      );
+    } else if (res.payload.length > tcpOptionsBytes) {
+      notes.push(
+        `TCP options present on port 179 (Data Offset = ${res.layer.dataOffset.value}); BGP-4 decoding skipped so TCP options and application bytes remain preserved in Payload.`,
+      );
+    }
+  }
+  return res.payload;
+}
+
+function tryDecodeInnerIPv4(
+  scopedBytes: Uint8Array,
+  upperOffset: number,
+  upperRemaining: number,
+  decodedUpperLayers: Layer[],
+  notes: string[],
+  depth: number,
+): Uint8Array | null {
+  if (depth + 1 >= MAX_IP_LAYERS) {
+    notes.push(
+      `IP tunnel layer limit (${MAX_IP_LAYERS} IP layers) exceeded; remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+  const innerVersion = scopedBytes[upperOffset] >>> 4;
+  const innerIhl = scopedBytes[upperOffset] & 0x0f;
+  const innerTotalLength = readUint16BE(scopedBytes, upperOffset + 2);
+  if (innerVersion !== IPV4_VERSION || innerIhl !== IPV4_IHL) {
+    notes.push(
+      `Inner IPv4 header (Protocol ${IP_PROTOCOL_IPIP}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+  if (innerTotalLength >= IPV4_HEADER_LENGTH && innerTotalLength < upperRemaining) {
+    notes.push(
+      `Inner IPv4 Total Length (${innerTotalLength}) is smaller than the enclosing IP payload (${upperRemaining} bytes); inner packet and trailing bytes kept in Payload to preserve exact round-trip bytes.`,
+    );
+    return null;
+  }
+  return decodeIPv4Chain(scopedBytes, upperOffset, decodedUpperLayers, notes, depth + 1);
+}
+
+function tryDecodeInnerIPv6(
+  scopedBytes: Uint8Array,
+  upperOffset: number,
+  upperRemaining: number,
+  decodedUpperLayers: Layer[],
+  notes: string[],
+  depth: number,
+): Uint8Array | null {
+  if (depth + 1 >= MAX_IP_LAYERS) {
+    notes.push(
+      `IP tunnel layer limit (${MAX_IP_LAYERS} IP layers) exceeded; remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+  const innerVersion = scopedBytes[upperOffset] >>> 4;
+  const innerPayloadLength = readUint16BE(scopedBytes, upperOffset + 4);
+  if (innerVersion !== IPV6_VERSION) {
+    notes.push(
+      `Inner IPv6 header (Protocol ${IP_PROTOCOL_IPV6}) has Version=${innerVersion} (expected Version=6); remaining bytes kept as Payload.`,
+    );
+    return null;
+  }
+  const innerAvailablePayload = upperRemaining - IPV6_HEADER_LENGTH;
+  if (innerPayloadLength < innerAvailablePayload) {
+    notes.push(
+      `Inner IPv6 Payload Length (${innerPayloadLength}) is smaller than the enclosing IP payload (${innerAvailablePayload} bytes after 40-byte header); inner packet and trailing bytes kept in Payload to preserve exact round-trip bytes.`,
+    );
+    return null;
+  }
+  return decodeIPv6Chain(scopedBytes, upperOffset, decodedUpperLayers, notes, depth + 1);
+}
 
 function decodeIPv4Chain(
   bytes: Uint8Array,
@@ -391,6 +523,7 @@ function decodeIPv4Chain(
   const headerChecksum = readUint16BE(bytes, offset + 10);
   const srcIpBytes = bytes.subarray(offset + 12, offset + 16);
   const dstIpBytes = bytes.subarray(offset + 16, offset + 20);
+  const ipInfo: PseudoIPInfo = { version: 4, srcIp: srcIpBytes, dstIp: dstIpBytes };
 
   const actualTotalLength = bytes.length - offset;
   let scopedBytes = bytes;
@@ -430,68 +563,42 @@ function decodeIPv4Chain(
       `Non-initial IPv4 fragment (Fragment Offset = ${fragmentOffset}); upper-layer header is not decoded per RFC 791 and remaining bytes are kept as Payload.`,
     );
   } else if (protocol === IP_PROTOCOL_IPIP && upperRemaining >= IPV4_HEADER_LENGTH) {
-    if (depth + 1 >= MAX_IPV4_LAYERS) {
-      notes.push(
-        `IP-in-IP layer limit (${MAX_IPV4_LAYERS} IPv4 layers) exceeded; remaining bytes kept as Payload.`,
-      );
-    } else {
-      const innerVersion = scopedBytes[upperOffset] >>> 4;
-      const innerIhl = scopedBytes[upperOffset] & 0x0f;
-      const innerTotalLength = readUint16BE(scopedBytes, upperOffset + 2);
-      if (innerVersion !== IPV4_VERSION || innerIhl !== IPV4_IHL) {
-        notes.push(
-          `Inner IPv4 header (Protocol ${IP_PROTOCOL_IPIP}) has Version=${innerVersion}, IHL=${innerIhl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
-        );
-      } else if (innerTotalLength >= IPV4_HEADER_LENGTH && innerTotalLength < upperRemaining) {
-        notes.push(
-          `Inner IPv4 Total Length (${innerTotalLength}) is smaller than the enclosing IPv4 payload (${upperRemaining} bytes); inner packet and trailing bytes kept in Payload to preserve exact round-trip bytes.`,
-        );
-      } else {
-        payload = decodeIPv4Chain(scopedBytes, upperOffset, decodedUpperLayers, notes, depth + 1);
-      }
+    const innerPayload = tryDecodeInnerIPv4(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
+    }
+  } else if (protocol === IP_PROTOCOL_IPV6 && upperRemaining >= IPV6_HEADER_LENGTH) {
+    const innerPayload = tryDecodeInnerIPv6(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
     }
   } else if (protocol === IP_PROTOCOL_ICMP && upperRemaining >= ICMP_HEADER_LENGTH) {
     const res = decodeICMPAt(scopedBytes, upperOffset);
     decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
-    const res = decodeUDPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes);
+    const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
     decodedUpperLayers.push(res.layer);
     payload = res.payload;
   } else if (protocol === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
-    const res = decodeTCPAt(scopedBytes, upperOffset, srcIpBytes, dstIpBytes, notes);
-    decodedUpperLayers.push(res.layer);
-    const isBgpPort = res.layer.srcPort === BGP_PORT || res.layer.dstPort === BGP_PORT;
-    if (isBgpPort && res.payload.length > 0) {
-      if (res.layer.dataOffset.mode === 'auto') {
-        const bgpRes = decodeBGPAt(res.payload, notes);
-        if (bgpRes !== null) {
-          decodedUpperLayers.push(bgpRes.layer);
-          payload = bgpRes.payload;
-        } else {
-          payload = res.payload;
-        }
-      } else {
-        const tcpOptionsBytes = Math.max(
-          0,
-          (res.layer.dataOffset.value - TCP_DEFAULT_DATA_OFFSET) * 4,
-        );
-        if (res.layer.dataOffset.value < TCP_DEFAULT_DATA_OFFSET) {
-          notes.push(
-            `TCP segment on port 179 has invalid Data Offset (${res.layer.dataOffset.value}); BGP-4 decoding skipped.`,
-          );
-        } else if (res.payload.length > tcpOptionsBytes) {
-          notes.push(
-            `TCP options present on port 179 (Data Offset = ${res.layer.dataOffset.value}); BGP-4 decoding skipped so TCP options and application bytes remain preserved in Payload.`,
-          );
-        }
-        payload = res.payload;
-      }
-    } else {
-      payload = res.payload;
-    }
+    payload = decodeTCPAndBGPAt(scopedBytes, upperOffset, ipInfo, decodedUpperLayers, notes);
   } else if (
     protocol === IP_PROTOCOL_IPIP ||
+    protocol === IP_PROTOCOL_IPV6 ||
     protocol === IP_PROTOCOL_ICMP ||
     protocol === IP_PROTOCOL_UDP ||
     protocol === IP_PROTOCOL_TCP
@@ -525,6 +632,128 @@ function decodeIPv4Chain(
   };
 
   layers.push(ipv4Layer, ...decodedUpperLayers);
+  return payload;
+}
+
+function decodeIPv6Chain(
+  bytes: Uint8Array,
+  offset: number,
+  layers: Layer[],
+  notes: string[],
+  depth = 0,
+): Uint8Array {
+  const firstWord = readUint32BE(bytes, offset);
+  const trafficClass = (firstWord >>> 20) & 0xff;
+  const flowLabel = firstWord & 0xfffff;
+  const payloadLength = readUint16BE(bytes, offset + 4);
+  const nextHeader = bytes[offset + 6];
+  const hopLimit = bytes[offset + 7];
+  const srcIpBytes = bytes.subarray(offset + 8, offset + 24);
+  const dstIpBytes = bytes.subarray(offset + 24, offset + 40);
+  const ipInfo: PseudoIPInfo = { version: 6, srcIp: srcIpBytes, dstIp: dstIpBytes };
+
+  const upperOffset = offset + IPV6_HEADER_LENGTH;
+  const actualPayloadLength = bytes.length - upperOffset;
+  let scopedBytes = bytes;
+  let effectivePayloadLength = actualPayloadLength;
+  const isJumbogramShape =
+    payloadLength === 0 && nextHeader === 0 && actualPayloadLength > 0;
+
+  if (depth === 0 && isJumbogramShape) {
+    notes.push(
+      'IPv6 Payload Length is 0 with Next Header 0 (Hop-by-Hop Options); Jumbogram (RFC 2675 §2) is not supported, so remaining bytes are kept as Payload.',
+    );
+  } else if (depth === 0 && payloadLength < actualPayloadLength) {
+    const trailing = bytes.subarray(upperOffset + payloadLength);
+    // Per RFC 8200 §3 / §8.1, upper-layer segments and checksums are bounded by IPv6 Payload Length.
+    scopedBytes = bytes.subarray(0, upperOffset + payloadLength);
+    effectivePayloadLength = payloadLength;
+    const isInsideEthernet = offset > 0;
+    if (isInsideEthernet) {
+      if (isAllZero(trailing)) {
+        notes.push(
+          `Stripped ${trailing.length} trailing zero byte(s) of Ethernet padding beyond IPv6 Payload Length (${payloadLength}).`,
+        );
+      } else {
+        notes.push(
+          `Stripped ${trailing.length} trailing non-zero byte(s) of Ethernet padding/trailer beyond IPv6 Payload Length (${payloadLength}) per RFC 8200 §3; re-encoded bytes will omit these trailing bytes.`,
+        );
+      }
+    } else {
+      notes.push(
+        `Stripped ${trailing.length} trailing byte(s) beyond IPv6 Payload Length (${payloadLength}) per RFC 8200 §3; re-encoded bytes will omit these trailing bytes.`,
+      );
+    }
+  }
+
+  const upperRemaining = scopedBytes.length - upperOffset;
+  const decodedUpperLayers: Layer[] = [];
+  let payload: Uint8Array = scopedBytes.slice(upperOffset);
+
+  if (depth === 0 && isJumbogramShape) {
+    // Already noted as an unsupported RFC 2675 §2 Jumbogram; keep remaining bytes in Payload.
+  } else if (Object.prototype.hasOwnProperty.call(IPV6_EXTENSION_HEADER_NAMES, nextHeader)) {
+    notes.push(
+      `IPv6 extension header Next Header ${nextHeader} (${IPV6_EXTENSION_HEADER_NAMES[nextHeader]}) is not decoded into a layer; remaining bytes kept as Payload.`,
+    );
+  } else if (nextHeader === IP_PROTOCOL_IPIP && upperRemaining >= IPV4_HEADER_LENGTH) {
+    const innerPayload = tryDecodeInnerIPv4(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
+    }
+  } else if (nextHeader === IP_PROTOCOL_IPV6 && upperRemaining >= IPV6_HEADER_LENGTH) {
+    const innerPayload = tryDecodeInnerIPv6(
+      scopedBytes,
+      upperOffset,
+      upperRemaining,
+      decodedUpperLayers,
+      notes,
+      depth,
+    );
+    if (innerPayload !== null) {
+      payload = innerPayload;
+    }
+  } else if (nextHeader === IP_PROTOCOL_UDP && upperRemaining >= UDP_HEADER_LENGTH) {
+    const res = decodeUDPAt(scopedBytes, upperOffset, ipInfo);
+    decodedUpperLayers.push(res.layer);
+    payload = res.payload;
+  } else if (nextHeader === IP_PROTOCOL_TCP && upperRemaining >= TCP_HEADER_LENGTH) {
+    payload = decodeTCPAndBGPAt(scopedBytes, upperOffset, ipInfo, decodedUpperLayers, notes);
+  } else if (
+    nextHeader === IP_PROTOCOL_IPIP ||
+    nextHeader === IP_PROTOCOL_IPV6 ||
+    nextHeader === IP_PROTOCOL_UDP ||
+    nextHeader === IP_PROTOCOL_TCP
+  ) {
+    notes.push(
+      `Upper-layer header for IPv6 Next Header ${nextHeader} is truncated (${upperRemaining} bytes); remaining bytes kept as Payload.`,
+    );
+  } else {
+    notes.push(
+      `IPv6 Next Header ${nextHeader} is not decoded into a layer; remaining bytes kept as Payload.`,
+    );
+  }
+
+  const ipv6Layer: IPv6Layer = {
+    type: 'ipv6',
+    trafficClass,
+    flowLabel,
+    payloadLength:
+      payloadLength === effectivePayloadLength ? autoValue() : manualValue(payloadLength),
+    nextHeader: decodedUpperLayers.length > 0 ? autoValue() : manualValue(nextHeader),
+    hopLimit,
+    srcIp: formatIPv6(srcIpBytes),
+    dstIp: formatIPv6(dstIpBytes),
+  };
+
+  layers.push(ipv6Layer, ...decodedUpperLayers);
   return payload;
 }
 
@@ -566,6 +795,21 @@ export function decodePacket(
     return ok({ layers, payload, notes });
   }
 
+  if (startLayer === 'ipv6') {
+    if (bytes.length < IPV6_HEADER_LENGTH) {
+      return err(
+        `Packet is too short for an IPv6 header (need at least ${IPV6_HEADER_LENGTH} bytes, got ${bytes.length}).`,
+      );
+    }
+    const version = bytes[0] >>> 4;
+    if (version !== IPV6_VERSION) {
+      return err(`Expected IPv6 (Version=6), but got Version=${version}.`);
+    }
+
+    const payload = decodeIPv6Chain(bytes, 0, layers, notes);
+    return ok({ layers, payload, notes });
+  }
+
   // Ethernet II start layer
   if (bytes.length < ETHERNET_HEADER_LENGTH) {
     return err(
@@ -580,6 +824,7 @@ export function decodePacket(
   const remaining = bytes.length - afterEth;
 
   let canDecodeIPv4 = false;
+  let canDecodeIPv6 = false;
   let canDecodeARP = false;
 
   if (etherType === ETHERTYPE_IPV4) {
@@ -595,6 +840,21 @@ export function decodePacket(
       } else {
         notes.push(
           `IPv4 header has Version=${version}, IHL=${ihl} (only Version=4, IHL=5 supported); remaining bytes kept as Payload.`,
+        );
+      }
+    }
+  } else if (etherType === ETHERTYPE_IPV6) {
+    if (remaining < IPV6_HEADER_LENGTH) {
+      notes.push(
+        `IPv6 header after Ethernet II is truncated (${remaining} bytes); remaining bytes kept as Payload.`,
+      );
+    } else {
+      const version = bytes[afterEth] >>> 4;
+      if (version === IPV6_VERSION) {
+        canDecodeIPv6 = true;
+      } else {
+        notes.push(
+          `IPv6 header has Version=${version} (expected Version=6); remaining bytes kept as Payload.`,
         );
       }
     }
@@ -616,12 +876,18 @@ export function decodePacket(
     type: 'ethernet',
     dstMac,
     srcMac,
-    etherType: canDecodeIPv4 || canDecodeARP ? autoValue() : manualValue(etherType),
+    etherType:
+      canDecodeIPv4 || canDecodeIPv6 || canDecodeARP ? autoValue() : manualValue(etherType),
   };
   layers.push(ethLayer);
 
   if (canDecodeIPv4) {
     const payload = decodeIPv4Chain(bytes, afterEth, layers, notes);
+    return ok({ layers, payload, notes });
+  }
+
+  if (canDecodeIPv6) {
+    const payload = decodeIPv6Chain(bytes, afterEth, layers, notes);
     return ok({ layers, payload, notes });
   }
 
